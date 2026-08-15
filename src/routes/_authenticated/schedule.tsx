@@ -323,7 +323,9 @@ function SchedulePage() {
             await staffComplete.mutateAsync({
               jobId: completing.id,
               hours,
-              description: description || completing.notes || undefined,
+              ...(description || completing.notes
+                ? { description: description || completing.notes || "" }
+                : {}),
             });
             setCompleting(null);
             toast.success("Job completed");
