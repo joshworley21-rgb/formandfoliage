@@ -10,6 +10,7 @@ import {
   Users,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { InstallAppBanner } from "@/components/InstallAppBanner";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { useIsStaff } from "@/hooks/use-workspace";
