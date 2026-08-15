@@ -9,6 +9,7 @@ import {
   ChevronUp,
   Clock,
   Download,
+  Eye,
   FilePlus2,
   History,
   Mail,
