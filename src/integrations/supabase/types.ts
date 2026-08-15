@@ -62,6 +62,47 @@ export type Database = {
         }
         Relationships: []
       }
+      invoice_email_events: {
+        Row: {
+          created_at: string
+          detail: string | null
+          id: string
+          invoice_id: string
+          provider_message_id: string | null
+          recipient: string | null
+          status: Database["public"]["Enums"]["email_event_status"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          detail?: string | null
+          id?: string
+          invoice_id: string
+          provider_message_id?: string | null
+          recipient?: string | null
+          status: Database["public"]["Enums"]["email_event_status"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          detail?: string | null
+          id?: string
+          invoice_id?: string
+          provider_message_id?: string | null
+          recipient?: string | null
+          status?: Database["public"]["Enums"]["email_event_status"]
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_email_events_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoice_items: {
         Row: {
           amount: number
@@ -480,6 +521,7 @@ export type Database = {
     }
     Enums: {
       billing_mode: "hourly" | "fixed"
+      email_event_status: "sent" | "failed" | "skipped"
       invoice_status: "draft" | "sent" | "paid"
       job_status: "scheduled" | "done" | "missed" | "cancelled"
       repeat_frequency:
@@ -616,6 +658,7 @@ export const Constants = {
   public: {
     Enums: {
       billing_mode: ["hourly", "fixed"],
+      email_event_status: ["sent", "failed", "skipped"],
       invoice_status: ["draft", "sent", "paid"],
       job_status: ["scheduled", "done", "missed", "cancelled"],
       repeat_frequency: [
