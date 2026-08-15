@@ -392,6 +392,7 @@ function NewInvoiceDialog({
     retainerAmount: number;
     retainerDescription: string | null;
     notes: string | null;
+    dueDate: string | null;
   }) => Promise<void>;
 }) {
   const { data: clients = [] } = useClients();
@@ -400,6 +401,10 @@ function NewInvoiceDialog({
   const [retainer, setRetainer] = useState("0");
   const [retainerDescription, setRetainerDescription] = useState("");
   const [notes, setNotes] = useState("");
+  const [dueDate, setDueDate] = useState(() =>
+    new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+  );
+
 
   const clientVisits = useMemo(
     () => unbilledVisits.filter((v) => v.client_id === clientId),
@@ -419,6 +424,8 @@ function NewInvoiceDialog({
         retainerAmount: Number(retainer) || 0,
         retainerDescription: retainerDescription || null,
         notes: notes || null,
+        dueDate: dueDate || null,
+
       }),
     onError: (error) =>
       toast.error(error instanceof Error ? error.message : "Could not create the invoice"),
@@ -512,6 +519,20 @@ function NewInvoiceDialog({
               />
             </div>
           </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="duedate">Due date</Label>
+            <Input
+              id="duedate"
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Shown on the invoice PDF. Leave blank for “on receipt”.
+            </p>
+          </div>
+
 
           <div className="space-y-1.5">
             <Label htmlFor="inotes">Invoice notes</Label>

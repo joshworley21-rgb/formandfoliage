@@ -8,12 +8,15 @@ type CreateInvoiceInput = {
   retainerAmount?: number;
   notes?: string | null;
   dueInDays?: number;
+  dueDate?: string | null;
 };
 
 export const createInvoice = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: CreateInvoiceInput) => {
     if (!input?.clientId) throw new Error("A client is required");
+    const dueDate = input.dueDate?.trim() ? input.dueDate.trim() : null;
+    if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) throw new Error("Due date is invalid");
     return {
       clientId: input.clientId,
       visitIds: Array.isArray(input.visitIds) ? input.visitIds : [],
@@ -21,8 +24,10 @@ export const createInvoice = createServerFn({ method: "POST" })
       retainerAmount: Number(input.retainerAmount ?? 0) || 0,
       notes: input.notes ?? null,
       dueInDays: Number(input.dueInDays ?? 14) || 14,
+      dueDate,
     };
   })
+
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
 
@@ -76,7 +81,9 @@ export const createInvoice = createServerFn({ method: "POST" })
 
     const dates = visits.map((v) => v.visit_date).sort();
     const issueDate = new Date();
-    const dueDate = new Date(issueDate.getTime() + data.dueInDays * 86400000);
+    const dueDate =
+      data.dueDate ??
+      new Date(issueDate.getTime() + data.dueInDays * 86400000).toISOString().slice(0, 10);
 
     const { data: invoice, error: invoiceError } = await supabase
       .from("invoices")
@@ -85,7 +92,8 @@ export const createInvoice = createServerFn({ method: "POST" })
         client_id: data.clientId,
         number: number as string,
         issue_date: issueDate.toISOString().slice(0, 10),
-        due_date: dueDate.toISOString().slice(0, 10),
+        due_date: dueDate,
+
         period_start: dates[0] ?? null,
         period_end: dates[dates.length - 1] ?? null,
         subtotal,

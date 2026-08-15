@@ -12,6 +12,14 @@ function gbp(n: number | string | null | undefined) {
   return `£${Number(n ?? 0).toFixed(2)}`;
 }
 
+function prettyDate(value: string | null | undefined) {
+  if (!value) return "";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+
 async function loadLogo(): Promise<{ dataUrl: string; width: number; height: number } | null> {
   try {
     const response = await fetch(LOGO_URL);
@@ -106,14 +114,21 @@ export async function buildInvoicePdf({
   doc.setFontSize(10);
   y += 16;
   doc.text(client.name, left, y);
-  doc.text(`Issued: ${invoice.issue_date}`, right - 180, y);
+  doc.text(`Issued: ${prettyDate(invoice.issue_date)}`, right - 180, y);
   y += 14;
   if (client.address) {
     const addressLines = doc.splitTextToSize(client.address, 220) as string[];
     doc.text(addressLines, left, y);
     y += addressLines.length > 1 ? (addressLines.length - 1) * 13 : 0;
   }
-  doc.text(`Due: ${invoice.due_date ?? "on receipt"}`, right - 180, y);
+  doc.setFont("helvetica", "bold");
+  doc.text(
+    `Due: ${invoice.due_date ? prettyDate(invoice.due_date) : "on receipt"}`,
+    right - 180,
+    y,
+  );
+  doc.setFont("helvetica", "normal");
+
   if (invoice.period_start && invoice.period_end) {
     y += 14;
     doc.text(`Period: ${invoice.period_start} – ${invoice.period_end}`, right - 180, y);
