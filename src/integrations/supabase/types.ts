@@ -14,16 +14,480 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      clients: {
+        Row: {
+          active: boolean
+          address: string | null
+          billing_mode: Database["public"]["Enums"]["billing_mode"]
+          created_at: string
+          email: string | null
+          fixed_price: number
+          hourly_rate: number
+          id: string
+          name: string
+          notes: string | null
+          phone: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          active?: boolean
+          address?: string | null
+          billing_mode?: Database["public"]["Enums"]["billing_mode"]
+          created_at?: string
+          email?: string | null
+          fixed_price?: number
+          hourly_rate?: number
+          id?: string
+          name: string
+          notes?: string | null
+          phone?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          active?: boolean
+          address?: string | null
+          billing_mode?: Database["public"]["Enums"]["billing_mode"]
+          created_at?: string
+          email?: string | null
+          fixed_price?: number
+          hourly_rate?: number
+          id?: string
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      invoice_items: {
+        Row: {
+          amount: number
+          created_at: string
+          description: string
+          id: string
+          invoice_id: string
+          item_date: string | null
+          quantity: number
+          unit_price: number
+          user_id: string
+          visit_id: string | null
+        }
+        Insert: {
+          amount?: number
+          created_at?: string
+          description: string
+          id?: string
+          invoice_id: string
+          item_date?: string | null
+          quantity?: number
+          unit_price?: number
+          user_id: string
+          visit_id?: string | null
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          description?: string
+          id?: string
+          invoice_id?: string
+          item_date?: string | null
+          quantity?: number
+          unit_price?: number
+          user_id?: string
+          visit_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_items_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_items_visit_id_fkey"
+            columns: ["visit_id"]
+            isOneToOne: false
+            referencedRelation: "visits"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoices: {
+        Row: {
+          client_id: string
+          created_at: string
+          due_date: string | null
+          id: string
+          issue_date: string
+          notes: string | null
+          number: string
+          paid_at: string | null
+          pdf_path: string | null
+          period_end: string | null
+          period_start: string | null
+          sent_at: string | null
+          status: Database["public"]["Enums"]["invoice_status"]
+          subtotal: number
+          total: number
+          updated_at: string
+          user_id: string
+          vat_amount: number
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          due_date?: string | null
+          id?: string
+          issue_date?: string
+          notes?: string | null
+          number: string
+          paid_at?: string | null
+          pdf_path?: string | null
+          period_end?: string | null
+          period_start?: string | null
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["invoice_status"]
+          subtotal?: number
+          total?: number
+          updated_at?: string
+          user_id: string
+          vat_amount?: number
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          due_date?: string | null
+          id?: string
+          issue_date?: string
+          notes?: string | null
+          number?: string
+          paid_at?: string | null
+          pdf_path?: string | null
+          period_end?: string | null
+          period_start?: string | null
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["invoice_status"]
+          subtotal?: number
+          total?: number
+          updated_at?: string
+          user_id?: string
+          vat_amount?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoices_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      job_series: {
+        Row: {
+          active: boolean
+          client_id: string
+          created_at: string
+          duration_minutes: number
+          end_date: string | null
+          frequency: Database["public"]["Enums"]["repeat_frequency"]
+          id: string
+          notes: string | null
+          start_date: string
+          start_time: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          active?: boolean
+          client_id: string
+          created_at?: string
+          duration_minutes?: number
+          end_date?: string | null
+          frequency?: Database["public"]["Enums"]["repeat_frequency"]
+          id?: string
+          notes?: string | null
+          start_date: string
+          start_time?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          active?: boolean
+          client_id?: string
+          created_at?: string
+          duration_minutes?: number
+          end_date?: string | null
+          frequency?: Database["public"]["Enums"]["repeat_frequency"]
+          id?: string
+          notes?: string | null
+          start_date?: string
+          start_time?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_series_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      recurring_schedules: {
+        Row: {
+          active: boolean
+          auto_send: boolean
+          client_id: string
+          created_at: string
+          end_date: string | null
+          frequency: Database["public"]["Enums"]["repeat_frequency"]
+          id: string
+          last_run_at: string | null
+          next_run_date: string
+          retainer_amount: number
+          start_date: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          active?: boolean
+          auto_send?: boolean
+          client_id: string
+          created_at?: string
+          end_date?: string | null
+          frequency?: Database["public"]["Enums"]["repeat_frequency"]
+          id?: string
+          last_run_at?: string | null
+          next_run_date?: string
+          retainer_amount?: number
+          start_date?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          active?: boolean
+          auto_send?: boolean
+          client_id?: string
+          created_at?: string
+          end_date?: string | null
+          frequency?: Database["public"]["Enums"]["repeat_frequency"]
+          id?: string
+          last_run_at?: string | null
+          next_run_date?: string
+          retainer_amount?: number
+          start_date?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recurring_schedules_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scheduled_jobs: {
+        Row: {
+          client_id: string
+          created_at: string
+          duration_minutes: number
+          id: string
+          notes: string | null
+          series_id: string | null
+          starts_at: string
+          status: Database["public"]["Enums"]["job_status"]
+          updated_at: string
+          user_id: string
+          visit_id: string | null
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          duration_minutes?: number
+          id?: string
+          notes?: string | null
+          series_id?: string | null
+          starts_at: string
+          status?: Database["public"]["Enums"]["job_status"]
+          updated_at?: string
+          user_id: string
+          visit_id?: string | null
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          duration_minutes?: number
+          id?: string
+          notes?: string | null
+          series_id?: string | null
+          starts_at?: string
+          status?: Database["public"]["Enums"]["job_status"]
+          updated_at?: string
+          user_id?: string
+          visit_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scheduled_jobs_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_jobs_series_id_fkey"
+            columns: ["series_id"]
+            isOneToOne: false
+            referencedRelation: "job_series"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_jobs_visit_id_fkey"
+            columns: ["visit_id"]
+            isOneToOne: false
+            referencedRelation: "visits"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      settings: {
+        Row: {
+          address: string | null
+          bank_details: string | null
+          business_name: string
+          created_at: string
+          email: string | null
+          invoice_counter: number
+          invoice_prefix: string
+          payment_terms: string | null
+          phone: string | null
+          updated_at: string
+          user_id: string
+          vat_number: string | null
+          vat_rate: number
+          vat_registered: boolean
+        }
+        Insert: {
+          address?: string | null
+          bank_details?: string | null
+          business_name?: string
+          created_at?: string
+          email?: string | null
+          invoice_counter?: number
+          invoice_prefix?: string
+          payment_terms?: string | null
+          phone?: string | null
+          updated_at?: string
+          user_id: string
+          vat_number?: string | null
+          vat_rate?: number
+          vat_registered?: boolean
+        }
+        Update: {
+          address?: string | null
+          bank_details?: string | null
+          business_name?: string
+          created_at?: string
+          email?: string | null
+          invoice_counter?: number
+          invoice_prefix?: string
+          payment_terms?: string | null
+          phone?: string | null
+          updated_at?: string
+          user_id?: string
+          vat_number?: string | null
+          vat_rate?: number
+          vat_registered?: boolean
+        }
+        Relationships: []
+      }
+      visits: {
+        Row: {
+          amount: number
+          billed: boolean
+          client_id: string
+          created_at: string
+          description: string | null
+          hours: number
+          id: string
+          invoice_id: string | null
+          materials_cost: number
+          updated_at: string
+          user_id: string
+          visit_date: string
+        }
+        Insert: {
+          amount?: number
+          billed?: boolean
+          client_id: string
+          created_at?: string
+          description?: string | null
+          hours?: number
+          id?: string
+          invoice_id?: string | null
+          materials_cost?: number
+          updated_at?: string
+          user_id: string
+          visit_date?: string
+        }
+        Update: {
+          amount?: number
+          billed?: boolean
+          client_id?: string
+          created_at?: string
+          description?: string | null
+          hours?: number
+          id?: string
+          invoice_id?: string | null
+          materials_cost?: number
+          updated_at?: string
+          user_id?: string
+          visit_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "visits_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "visits_invoice_fk"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      next_invoice_number: { Args: { _user_id: string }; Returns: string }
     }
     Enums: {
-      [_ in never]: never
+      billing_mode: "hourly" | "fixed"
+      invoice_status: "draft" | "sent" | "paid"
+      job_status: "scheduled" | "done" | "missed" | "cancelled"
+      repeat_frequency:
+        | "weekly"
+        | "fortnightly"
+        | "four_weekly"
+        | "monthly"
+        | "quarterly"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +614,17 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      billing_mode: ["hourly", "fixed"],
+      invoice_status: ["draft", "sent", "paid"],
+      job_status: ["scheduled", "done", "missed", "cancelled"],
+      repeat_frequency: [
+        "weekly",
+        "fortnightly",
+        "four_weekly",
+        "monthly",
+        "quarterly",
+      ],
+    },
   },
 } as const
