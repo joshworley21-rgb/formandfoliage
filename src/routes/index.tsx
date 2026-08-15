@@ -33,45 +33,46 @@ const FEATURES = [
 
 function Landing() {
   return (
-    <main className="min-h-screen bg-background">
-      <header className="mx-auto flex max-w-5xl items-center justify-between px-5 py-6">
+    <main className="flex min-h-screen flex-col items-center bg-background px-4 py-10 sm:py-16">
+      <header className="flex w-full max-w-5xl items-center justify-between">
         <Logo />
-        <Button asChild size="sm">
+        <Button asChild size="sm" className="rounded-full px-5">
           <Link to="/auth">Sign in</Link>
         </Button>
       </header>
 
-      <section className="mx-auto max-w-5xl px-5 pb-16 pt-8">
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-primary">
-          Garden round management
-        </p>
-        <h1 className="mt-3 max-w-2xl font-display text-4xl font-semibold leading-tight sm:text-5xl">
-          Every job, every hour, every invoice — in one tidy place.
+      <section className="mt-16 max-w-3xl text-center sm:mt-24">
+        <h1 className="font-display text-5xl leading-[1.05] text-foreground sm:text-6xl md:text-7xl">
+          Every job, every hour, every invoice —{" "}
+          <span className="italic text-primary">in one tidy place.</span>
         </h1>
-        <p className="mt-4 max-w-xl text-lg text-muted-foreground">
+        <p className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
           JW Garden Services CRM keeps your schedule, client rates and billing together, so an
           afternoon's work becomes a sent invoice before you've unloaded the van.
         </p>
-        <div className="mt-7 flex flex-wrap gap-3">
-          <Button asChild size="lg">
+        <div className="mt-8 flex flex-col justify-center gap-4 sm:flex-row">
+          <Button asChild size="lg" className="rounded-xl px-8 shadow-lg shadow-primary/20">
             <Link to="/auth">Get started</Link>
           </Button>
-          <Button asChild size="lg" variant="outline">
+          <Button asChild size="lg" variant="outline" className="rounded-xl px-8">
             <Link to="/dashboard">Open dashboard</Link>
           </Button>
         </div>
+      </section>
 
-        <div className="mt-14 grid gap-4 sm:grid-cols-2">
-          {FEATURES.map((f) => (
-            <div key={f.title} className="rounded-2xl border border-border bg-card p-5">
-              <span className="flex size-10 items-center justify-center rounded-xl bg-primary/12 text-primary">
-                <f.icon className="size-5" />
-              </span>
-              <h2 className="mt-3 font-display text-lg font-semibold">{f.title}</h2>
-              <p className="mt-1 text-sm text-muted-foreground">{f.body}</p>
-            </div>
-          ))}
-        </div>
+      <section className="mt-16 grid w-full max-w-5xl gap-5 sm:mt-24 md:grid-cols-2">
+        {FEATURES.map((f) => (
+          <div
+            key={f.title}
+            className="rounded-3xl border border-border bg-card p-6 shadow-sm transition-all hover:border-primary/30 hover:shadow-md sm:p-8"
+          >
+            <span className="flex size-12 items-center justify-center rounded-2xl bg-muted text-primary">
+              <f.icon className="size-6" />
+            </span>
+            <h2 className="mt-5 text-xl font-semibold text-card-foreground">{f.title}</h2>
+            <p className="mt-2 leading-relaxed text-muted-foreground">{f.body}</p>
+          </div>
+        ))}
       </section>
     </main>
   );
