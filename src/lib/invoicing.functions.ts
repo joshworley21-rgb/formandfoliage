@@ -189,15 +189,16 @@ export const sendInvoiceEmail = createServerFn({ method: "POST" })
     });
 
     const lovableKey = process.env["LOVABLE_API_KEY"];
-    const outlookKey = process.env["MICROSOFT_OUTLOOK_API_KEY"];
-    if (!lovableKey || !outlookKey) {
+    const resendKey = process.env["RESEND_API_KEY"];
+    if (!lovableKey || !resendKey) {
       return {
         sent: false,
         reason:
-          "Email is not connected yet — connect your Outlook account in Settings to send invoices by email.",
+          "Email is not connected yet — connect Resend in Settings to send invoices by email.",
       };
     }
 
+    const fromEmail = settings?.email || "onboarding@resend.dev";
     const htmlBody = `<div style="font-family:Arial,sans-serif;font-size:15px;color:#243">
       <p>Hi ${client.name},</p>
       <p>${data.message ?? `Please find attached invoice <strong>${invoice.number}</strong> for recent garden work.`}</p>
@@ -208,34 +209,32 @@ export const sendInvoiceEmail = createServerFn({ method: "POST" })
       <p>Many thanks,<br/>${businessName}</p>
     </div>`;
 
-    const response = await fetch("https://connector-gateway.lovable.dev/microsoft_outlook/me/sendMail", {
+    const response = await fetch("https://connector-gateway.lovable.dev/resend/emails", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${lovableKey}`,
-        "X-Connection-Api-Key": outlookKey,
+        "X-Connection-Api-Key": resendKey,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        message: {
-          subject: `Invoice ${invoice.number} from ${businessName}`,
-          body: { contentType: "HTML", content: htmlBody },
-          toRecipients: [{ emailAddress: { address: client.email, name: client.name } }],
-          attachments: [
-            {
-              "@odata.type": "#microsoft.graph.fileAttachment",
-              name: `${invoice.number}.pdf`,
-              contentType: "application/pdf",
-              contentBytes: data.pdfBase64,
-            },
-          ],
-        },
+        from: `${businessName} <${fromEmail}>`,
+        to: client.email,
+        subject: `Invoice ${invoice.number} from ${businessName}`,
+        html: htmlBody,
+        attachments: [
+          {
+            filename: `${invoice.number}.pdf`,
+            content: data.pdfBase64,
+            contentType: "application/pdf",
+          },
+        ],
       }),
     });
 
     if (!response.ok) {
       const detail = await response.text();
-      console.error("Outlook send error", response.status, detail);
-      throw new Error(`Outlook could not send the email. ${response.status}: ${detail}`);
+      console.error("Resend send error", response.status, detail);
+      throw new Error(`Resend could not send the email. ${response.status}: ${detail}`);
     }
 
     await supabase
@@ -246,33 +245,29 @@ export const sendInvoiceEmail = createServerFn({ method: "POST" })
     return { sent: true, to: client.email };
   });
 
-export const getOutlookSender = createServerFn({ method: "GET" })
+export const getResendStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async () => {
     const lovableKey = process.env["LOVABLE_API_KEY"];
-    const outlookKey = process.env["MICROSOFT_OUTLOOK_API_KEY"];
-    if (!lovableKey || !outlookKey) return { connected: false as const };
+    const resendKey = process.env["RESEND_API_KEY"];
+    if (!lovableKey || !resendKey) return { connected: false as const };
 
-    const response = await fetch("https://connector-gateway.lovable.dev/microsoft_outlook/me", {
+    const response = await fetch("https://connector-gateway.lovable.dev/api/v1/verify_credentials", {
+      method: "POST",
       headers: {
         Authorization: `Bearer ${lovableKey}`,
-        "X-Connection-Api-Key": outlookKey,
+        "X-Connection-Api-Key": resendKey,
       },
     });
     if (!response.ok) {
       const detail = await response.text();
-      console.error("Outlook profile error", response.status, detail);
+      console.error("Resend verify error", response.status, detail);
       return { connected: false as const };
     }
 
-    const profile = (await response.json()) as {
-      displayName?: string;
-      mail?: string;
-      userPrincipalName?: string;
-    };
-    return {
-      connected: true as const,
-      name: profile.displayName ?? "",
-      email: profile.mail || profile.userPrincipalName || "",
-    };
+    const result = (await response.json()) as { outcome?: string };
+    if (result.outcome === "failed") {
+      return { connected: false as const };
+    }
+    return { connected: true as const };
   });
