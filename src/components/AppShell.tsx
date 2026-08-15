@@ -93,6 +93,7 @@ export function AppShell({
 
         <main className="flex-1 px-4 pb-28 pt-6 lg:px-8 lg:pb-12">
           <div className="mx-auto w-full max-w-5xl">
+            <InstallAppBanner />
             <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
               <div>
                 <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
