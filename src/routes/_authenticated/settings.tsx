@@ -40,7 +40,7 @@ function SettingsPage() {
 
   const [form, setForm] = useState({
     business_name: "JW Garden Services",
-    address: "",
+    address: "24 Portland Close\nBierton\nHP22 7DG",
     phone: "",
     email: "",
     vat_registered: false,
