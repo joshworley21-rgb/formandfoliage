@@ -443,16 +443,30 @@ function BookingDialog({
               <Input id="jtime" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="jdur">Minutes</Label>
+              <Label htmlFor="jend">Finish</Label>
               <Input
-                id="jdur"
-                type="number"
-                min="15"
-                step="15"
-                value={duration}
-                onChange={(e) => setDuration(e.target.value)}
+                id="jend"
+                type="time"
+                value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
               />
             </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => applyPreset(480)}>
+              Full day (8h)
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => applyPreset(240)}>
+              Half day (4h)
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => applyPreset(120)}>
+              2h
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              {duration > 0
+                ? `${Math.floor(duration / 60)}h${duration % 60 ? ` ${duration % 60}m` : ""}`
+                : "Finish must be after start"}
+            </span>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="jnotes">Notes</Label>
