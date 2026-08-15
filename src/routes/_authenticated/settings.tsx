@@ -44,6 +44,9 @@ function SettingsPage() {
     invoice_prefix: "JW-",
     payment_terms: "Payment due within 14 days.",
     bank_details: "",
+    email_subject_template: "Invoice {{invoice_number}} from {{business_name}}",
+    email_body_template:
+      "Hi {{client_name}},\n\nPlease find attached invoice {{invoice_number}} for recent garden work.\n\nTotal due: {{total}}{{due_clause}}.\n\nMany thanks,\n{{business_name}}",
   });
 
   useEffect(() => {
@@ -59,6 +62,9 @@ function SettingsPage() {
       invoice_prefix: settings.invoice_prefix ?? "JW-",
       payment_terms: settings.payment_terms ?? "",
       bank_details: settings.bank_details ?? "",
+      email_subject_template:
+        settings.email_subject_template ?? "Invoice {{invoice_number}} from {{business_name}}",
+      email_body_template: settings.email_body_template ?? "",
     });
   }, [settings]);
 
@@ -82,6 +88,9 @@ function SettingsPage() {
             invoice_prefix: form.invoice_prefix || "JW-",
             payment_terms: form.payment_terms || null,
             bank_details: form.bank_details || null,
+            email_subject_template:
+              form.email_subject_template || "Invoice {{invoice_number}} from {{business_name}}",
+            email_body_template: form.email_body_template,
           });
           toast.success("Settings saved");
         }}

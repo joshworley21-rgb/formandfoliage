@@ -266,7 +266,7 @@ export const sendInvoiceEmail = createServerFn({ method: "POST" })
       body: JSON.stringify({
         from: `${businessName} <${fromEmail}>`,
         to: client.email,
-        subject: `Invoice ${invoice.number} from ${businessName}`,
+        subject,
         html: htmlBody,
         attachments: [
           {
