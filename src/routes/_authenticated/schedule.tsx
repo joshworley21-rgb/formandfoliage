@@ -339,12 +339,26 @@ function BookingDialog({
   const [clientId, setClientId] = useState("");
   const [date, setDate] = useState(format(defaultDate, "yyyy-MM-dd"));
   const [time, setTime] = useState("09:00");
-  const [duration, setDuration] = useState("60");
+  const [endTime, setEndTime] = useState("10:00");
   const [notes, setNotes] = useState("");
   const [repeats, setRepeats] = useState(false);
   const [frequency, setFrequency] = useState<Frequency>("fortnightly");
   const [occurrences, setOccurrences] = useState("12");
   const [busy, setBusy] = useState(false);
+
+  const toMinutes = (t: string) => {
+    const [h, m] = t.split(":").map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
+  const fromMinutes = (mins: number) => {
+    const c = Math.max(0, Math.min(mins, 23 * 60 + 59));
+    return `${String(Math.floor(c / 60)).padStart(2, "0")}:${String(c % 60).padStart(2, "0")}`;
+  };
+  const duration = Math.max(0, toMinutes(endTime) - toMinutes(time));
+
+  function applyPreset(mins: number) {
+    setEndTime(fromMinutes(toMinutes(time) + mins));
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
