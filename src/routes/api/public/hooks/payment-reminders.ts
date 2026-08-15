@@ -14,9 +14,11 @@ export const Route = createFileRoute("/api/public/hooks/payment-reminders")({
         const apiKey =
           request.headers.get("apikey") ??
           request.headers.get("authorization")?.replace("Bearer ", "");
-        const expected =
-          process.env["SUPABASE_ANON_KEY"] ?? process.env["SUPABASE_PUBLISHABLE_KEY"];
-        if (!apiKey || !expected || apiKey !== expected) {
+        const allowed = [
+          process.env["SUPABASE_PUBLISHABLE_KEY"],
+          process.env["SUPABASE_ANON_KEY"],
+        ].filter(Boolean) as string[];
+        if (!apiKey || allowed.length === 0 || !allowed.includes(apiKey)) {
           return Response.json({ error: "Unauthorized" }, { status: 401 });
         }
 
