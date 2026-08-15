@@ -203,14 +203,14 @@ function InvoicesPage() {
                     variant="outline"
                     size="sm"
                     disabled={busyId === invoice.id}
-                    onClick={() => download(invoice)}
+                    onClick={() => openPreview(invoice, "download")}
                   >
-                    <Download className="size-4" /> PDF
+                    <Eye className="size-4" /> Preview
                   </Button>
                   <Button
                     size="sm"
                     disabled={busyId === invoice.id}
-                    onClick={() => sendOneClick(invoice)}
+                    onClick={() => openPreview(invoice, "send")}
                   >
                     <Mail className="size-4" /> {invoice.status === "draft" ? "Send" : "Resend"}
                   </Button>
