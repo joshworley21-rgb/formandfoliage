@@ -20,18 +20,48 @@ async function currentUserId(): Promise<string> {
   return data.user.id;
 }
 
+/** Owner of the workspace the signed-in user belongs to (themselves, or their employer). */
+async function workspaceOwnerId(): Promise<string> {
+  const { data } = await supabase.rpc("my_workspace");
+  const row = Array.isArray(data) ? data[0] : data;
+  return (row?.owner_id as string) ?? (await currentUserId());
+}
+
 /* ---------------- clients ---------------- */
 
 export function useClients() {
   return useQuery({
     queryKey: ["clients"],
     queryFn: async (): Promise<Client[]> => {
+      const { data: ws } = await supabase.rpc("my_workspace");
+      const wsRow = Array.isArray(ws) ? ws[0] : ws;
+      if (wsRow?.role === "staff") {
+        // Staff only ever see name / address / notes — never contact details or rates.
+        const { data, error } = await supabase.rpc("staff_clients");
+        if (error) throw error;
+        return (data ?? []).map((row) => ({
+          id: row.id,
+          user_id: (wsRow.owner_id as string) ?? "",
+          name: row.name,
+          address: row.address,
+          notes: row.notes,
+          phone: null,
+          email: null,
+          billing_mode: "hourly",
+          hourly_rate: 0,
+          fixed_price: 0,
+          active: true,
+          created_at: "",
+          updated_at: "",
+        })) as Client[];
+      }
       const { data, error } = await supabase.from("clients").select("*").order("name");
       if (error) throw error;
       return data ?? [];
     },
   });
 }
+
 
 export function useSaveClient() {
   const qc = useQueryClient();
