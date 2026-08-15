@@ -96,7 +96,7 @@ function InvoicesPage() {
       .eq("invoice_id", invoice.id)
       .order("item_date");
     if (error) throw error;
-    return buildInvoicePdf({ invoice, items: items ?? [], client, settings: settings ?? null });
+    return await buildInvoicePdf({ invoice, items: items ?? [], client, settings: settings ?? null });
   }
 
   async function download(invoice: Invoice) {
