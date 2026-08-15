@@ -12,6 +12,7 @@ import {
 import type { ReactNode } from "react";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
+import { useIsStaff } from "@/hooks/use-workspace";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +26,8 @@ const NAV = [
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ] as const;
 
+const STAFF_NAV_PATHS = ["/schedule", "/clients"];
+
 export function AppShell({
   title,
   description,
@@ -37,6 +40,8 @@ export function AppShell({
   children: ReactNode;
 }) {
   const navigate = useNavigate();
+  const isStaff = useIsStaff();
+  const nav = isStaff ? NAV.filter((item) => STAFF_NAV_PATHS.includes(item.to)) : NAV;
 
   async function signOut() {
     await supabase.auth.signOut();
@@ -49,7 +54,7 @@ export function AppShell({
         <div>
           <Logo className="px-2 text-sidebar-foreground" invert />
           <nav className="mt-8 space-y-1">
-            {NAV.map((item) => (
+            {nav.map((item) => (
               <Link
                 key={item.to}
                 to={item.to}
@@ -104,8 +109,8 @@ export function AppShell({
         </main>
 
         <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur lg:hidden">
-          <div className="grid grid-cols-5">
-            {NAV.slice(0, 5).map((item) => (
+          <div className={cn("grid", nav.length >= 5 ? "grid-cols-5" : "grid-cols-" + nav.length)}>
+            {nav.slice(0, 5).map((item) => (
               <Link
                 key={item.to}
                 to={item.to}
