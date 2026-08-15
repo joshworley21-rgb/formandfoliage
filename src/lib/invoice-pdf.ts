@@ -12,6 +12,14 @@ function gbp(n: number | string | null | undefined) {
   return `£${Number(n ?? 0).toFixed(2)}`;
 }
 
+function prettyDate(value: string | null | undefined) {
+  if (!value) return "";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+
 async function loadLogo(): Promise<{ dataUrl: string; width: number; height: number } | null> {
   try {
     const response = await fetch(LOGO_URL);
