@@ -367,6 +367,10 @@ function BookingDialog({
       toast.error("Pick a client");
       return;
     }
+    if (duration <= 0) {
+      toast.error("Finish time must be after the start time");
+      return;
+    }
     setBusy(true);
     try {
       const first = new Date(`${date}T${time}`);
@@ -382,7 +386,7 @@ function BookingDialog({
             frequency,
             start_date: date,
             start_time: time,
-            duration_minutes: Number(duration) || 60,
+            duration_minutes: duration,
             notes: notes || null,
           })
           .select("id")
@@ -397,7 +401,7 @@ function BookingDialog({
         await saveJob({
           client_id: client.id,
           starts_at: when.toISOString(),
-          duration_minutes: Number(duration) || 60,
+          duration_minutes: duration,
           notes: notes || null,
           series_id: seriesId,
         });
