@@ -53,13 +53,15 @@ export function AppShell({
               <Link
                 key={item.to}
                 to={item.to}
-                className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                className="group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                 activeProps={{
                   className:
-                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-semibold bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary",
+                    "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary",
                 }}
               >
-                <item.icon className="size-4" />
+                <span className="flex size-7 items-center justify-center rounded-lg bg-sidebar-accent/50 transition-colors group-hover:bg-sidebar-accent group-[.active]:bg-sidebar-primary-foreground/20">
+                  <item.icon className="size-4" />
+                </span>
                 {item.label}
               </Link>
             ))}
@@ -68,13 +70,13 @@ export function AppShell({
         <Button
           variant="ghost"
           onClick={signOut}
-          className="justify-start text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          className="justify-start text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         >
           <LogOut className="size-4" /> Sign out
         </Button>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="relative flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur lg:hidden">
           <div className="flex items-center justify-between px-4 py-3">
             <Logo />
