@@ -245,3 +245,34 @@ export const sendInvoiceEmail = createServerFn({ method: "POST" })
 
     return { sent: true, to: client.email };
   });
+
+export const getOutlookSender = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async () => {
+    const lovableKey = process.env["LOVABLE_API_KEY"];
+    const outlookKey = process.env["MICROSOFT_OUTLOOK_API_KEY"];
+    if (!lovableKey || !outlookKey) return { connected: false as const };
+
+    const response = await fetch("https://connector-gateway.lovable.dev/microsoft_outlook/me", {
+      headers: {
+        Authorization: `Bearer ${lovableKey}`,
+        "X-Connection-Api-Key": outlookKey,
+      },
+    });
+    if (!response.ok) {
+      const detail = await response.text();
+      console.error("Outlook profile error", response.status, detail);
+      return { connected: false as const };
+    }
+
+    const profile = (await response.json()) as {
+      displayName?: string;
+      mail?: string;
+      userPrincipalName?: string;
+    };
+    return {
+      connected: true as const,
+      name: profile.displayName ?? "",
+      email: profile.mail || profile.userPrincipalName || "",
+    };
+  });
