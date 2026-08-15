@@ -454,7 +454,7 @@ export function useStaffCompleteJob() {
       const { error } = await supabase.rpc("staff_complete_job", {
         _job_id: jobId,
         _hours: hours,
-        _description: description ?? undefined,
+        ...(description ? { _description: description } : {}),
       });
       if (error) throw error;
     },
