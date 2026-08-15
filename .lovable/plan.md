@@ -52,8 +52,10 @@ A Recurring tab shows every schedule, its next due date, and lets you pause, edi
 
 ## Technical notes
 
-- TanStack Start routes: `/auth` (public), `/_authenticated/` for dashboard, clients, visits, invoices, recurring.
+- TanStack Start routes: `/auth` (public), `/_authenticated/` for dashboard, schedule, clients, visits, invoices, recurring.
+- Calendar UI built with react-big-calendar (month/week/day) plus a custom mobile agenda list; date maths with date-fns.
 - PDF generated in a server function and stored in a private Cloud storage bucket; emailed via Resend from the same server function.
-- Cloud tables: `clients`, `visits`, `invoices`, `invoice_items`, `recurring_schedules`, `settings` — all RLS-scoped to your user id, with explicit grants.
+- Cloud tables: `clients`, `visits`, `scheduled_jobs`, `job_series`, `invoices`, `invoice_items`, `recurring_schedules`, `settings` — all RLS-scoped to your user id, with explicit grants.
+- A scheduled job stores `starts_at`, `duration_minutes`, `status`, optional `series_id`; completing one creates the linked `visits` row with actual hours. Repeat series materialise upcoming occurrences ahead of time so they can be edited individually.
 - Visit pricing derived server-side from the client's `billing_mode` (`hourly` | `fixed` | both), stored as a snapshot on the invoice item so later rate changes don't rewrite history.
 - Recurring runs handled by a scheduled job (pg_cron) hitting a `/api/public/run-recurring-invoices` route protected by a shared secret; it computes due schedules, builds invoices idempotently per period, and auto-sends or queues based on the schedule's setting.
