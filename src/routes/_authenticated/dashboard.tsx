@@ -69,6 +69,11 @@ function DashboardPage() {
     .filter((i) => i.status !== "paid")
     .reduce((s, i) => s + Number(i.total), 0);
 
+  const recentInvoices = [...invoices]
+    .sort((a, b) => b.issue_date.localeCompare(a.issue_date))
+    .slice(0, 6);
+
+
   const stats = [
     { label: "Hours this month", value: hoursLabel(monthHours), icon: Clock },
     { label: "Value logged", value: money(monthValue), icon: ClipboardList },
