@@ -211,10 +211,11 @@ function InvoicesPage() {
                   <Button
                     size="sm"
                     disabled={busyId === invoice.id}
-                    onClick={() => openPreview(invoice, "send")}
+                    onClick={() => sendOneClick(invoice)}
                   >
                     <Mail className="size-4" /> {invoice.status === "draft" ? "Send" : "Resend"}
                   </Button>
+
                   {invoice.status !== "paid" ? (
                     <Button
                       variant="ghost"
