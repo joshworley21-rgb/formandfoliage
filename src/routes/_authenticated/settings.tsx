@@ -28,6 +28,11 @@ export const Route = createFileRoute("/_authenticated/settings")({
 function SettingsPage() {
   const { data: settings } = useSettings();
   const saveSettings = useSaveSettings();
+  const senderFn = useServerFn(getOutlookSender);
+  const { data: sender } = useQuery({
+    queryKey: ["outlook-sender"],
+    queryFn: () => senderFn(),
+  });
   const [form, setForm] = useState({
     business_name: "JW Garden Services",
     address: "",
