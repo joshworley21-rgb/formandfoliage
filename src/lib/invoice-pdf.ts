@@ -67,7 +67,9 @@ export async function buildInvoicePdf({
   doc.setTextColor(...MUTED);
   headerY += 14;
   if (settings?.address) {
-    const addressLines = doc.splitTextToSize(settings.address, 220) as string[];
+    const addressLines = settings.address
+      .split("\n")
+      .flatMap((line) => doc.splitTextToSize(line.trim(), 220) as string[]);
     doc.text(addressLines, textLeft, headerY);
     headerY += addressLines.length * 11;
   }
