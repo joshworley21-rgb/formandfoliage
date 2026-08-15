@@ -226,6 +226,21 @@ export function useInvoiceEmailEvents(invoiceId?: string) {
   });
 }
 
+export function useAllInvoiceEmailEvents() {
+  return useQuery({
+    queryKey: ["invoice_email_events", "all"],
+    queryFn: async (): Promise<InvoiceEmailEvent[]> => {
+      const { data, error } = await supabase
+        .from("invoice_email_events")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+}
+
 export function useInvoiceItems(invoiceId?: string) {
   return useQuery({
     enabled: Boolean(invoiceId),
