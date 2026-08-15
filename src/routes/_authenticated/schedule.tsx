@@ -1,0 +1,588 @@
+import { createFileRoute } from "@tanstack/react-router";
+import {
+  addDays,
+  addMonths,
+  addWeeks,
+  endOfMonth,
+  endOfWeek,
+  format,
+  isSameDay,
+  isSameMonth,
+  isToday,
+  parseISO,
+  startOfDay,
+  startOfMonth,
+  startOfWeek,
+} from "date-fns";
+import { CalendarCheck, ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { toast } from "sonner";
+import { AppShell } from "@/components/AppShell";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  useClients,
+  useDeleteJob,
+  useJobs,
+  useSaveJob,
+  useSaveVisit,
+} from "@/hooks/use-crm";
+import { supabase } from "@/integrations/supabase/client";
+import {
+  FREQUENCY_LABELS,
+  priceVisit,
+  type Frequency,
+  type ScheduledJob,
+} from "@/lib/crm";
+
+export const Route = createFileRoute("/_authenticated/schedule")({
+  head: () => ({
+    meta: [
+      { title: "Schedule — JW Garden Services CRM" },
+      { name: "description", content: "Plan and track upcoming garden jobs in month, week and day views." },
+      { property: "og:title", content: "Schedule — JW Garden Services CRM" },
+      { property: "og:description", content: "Plan and track upcoming garden jobs in month, week and day views." },
+    ],
+  }),
+  component: SchedulePage,
+});
+
+type View = "month" | "week" | "day";
+
+const FREQ_STEP: Record<Frequency, (d: Date, i: number) => Date> = {
+  weekly: (d, i) => addWeeks(d, i),
+  fortnightly: (d, i) => addWeeks(d, i * 2),
+  four_weekly: (d, i) => addWeeks(d, i * 4),
+  monthly: (d, i) => addMonths(d, i),
+  quarterly: (d, i) => addMonths(d, i * 3),
+};
+
+function SchedulePage() {
+  const [view, setView] = useState<View>("month");
+  const [cursor, setCursor] = useState(() => startOfDay(new Date()));
+  const [selectedDay, setSelectedDay] = useState(() => startOfDay(new Date()));
+
+  const range = useMemo(() => {
+    if (view === "day") return { start: startOfDay(cursor), end: addDays(startOfDay(cursor), 1) };
+    if (view === "week")
+      return {
+        start: startOfWeek(cursor, { weekStartsOn: 1 }),
+        end: endOfWeek(cursor, { weekStartsOn: 1 }),
+      };
+    return {
+      start: startOfWeek(startOfMonth(cursor), { weekStartsOn: 1 }),
+      end: endOfWeek(endOfMonth(cursor), { weekStartsOn: 1 }),
+    };
+  }, [cursor, view]);
+
+  const { data: clients = [] } = useClients();
+  const { data: jobs = [] } = useJobs({
+    from: range.start.toISOString(),
+    to: addDays(range.end, 1).toISOString(),
+  });
+  const saveJob = useSaveJob();
+  const deleteJob = useDeleteJob();
+  const saveVisit = useSaveVisit();
+
+  const [bookingOpen, setBookingOpen] = useState(false);
+  const [completing, setCompleting] = useState<ScheduledJob | null>(null);
+
+  const clientName = (id: string) => clients.find((c) => c.id === id)?.name ?? "Client";
+
+  const days = useMemo(() => {
+    const out: Date[] = [];
+    let d = range.start;
+    while (d <= range.end) {
+      out.push(d);
+      d = addDays(d, 1);
+    }
+    return out;
+  }, [range]);
+
+  const jobsOn = (day: Date) =>
+    jobs.filter((j) => isSameDay(parseISO(j.starts_at), day)).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+
+  function shift(dir: 1 | -1) {
+    setCursor((c) =>
+      view === "month" ? addMonths(c, dir) : view === "week" ? addWeeks(c, dir) : addDays(c, dir),
+    );
+  }
+
+  const headingLabel =
+    view === "month"
+      ? format(cursor, "MMMM yyyy")
+      : view === "week"
+        ? `${format(range.start, "d MMM")} – ${format(range.end, "d MMM yyyy")}`
+        : format(cursor, "EEEE d MMMM yyyy");
+
+  return (
+    <AppShell
+      title="Schedule"
+      description="Plan the round and tick jobs off as you go."
+      actions={
+        <Button onClick={() => setBookingOpen(true)} disabled={clients.length === 0}>
+          <Plus className="size-4" /> Book job
+        </Button>
+      }
+    >
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-1">
+          <Button variant="outline" size="icon" onClick={() => shift(-1)} aria-label="Previous">
+            <ChevronLeft className="size-4" />
+          </Button>
+          <Button variant="outline" size="icon" onClick={() => shift(1)} aria-label="Next">
+            <ChevronRight className="size-4" />
+          </Button>
+          <span className="ml-2 font-display text-lg font-semibold">{headingLabel}</span>
+        </div>
+        <Tabs value={view} onValueChange={(v) => setView(v as View)}>
+          <TabsList>
+            <TabsTrigger value="month">Month</TabsTrigger>
+            <TabsTrigger value="week">Week</TabsTrigger>
+            <TabsTrigger value="day">Day</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+
+      {view === "month" ? (
+        <Card className="overflow-hidden py-0">
+          <div className="grid grid-cols-7 border-b border-border bg-secondary text-center text-[0.7rem] font-semibold uppercase tracking-wide text-muted-foreground">
+            {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
+              <div key={d} className="py-2">
+                {d}
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7">
+            {days.map((day) => {
+              const dayJobs = jobsOn(day);
+              const selected = isSameDay(day, selectedDay);
+              return (
+                <button
+                  key={day.toISOString()}
+                  type="button"
+                  onClick={() => setSelectedDay(day)}
+                  className={`min-h-20 border-b border-r border-border p-1.5 text-left align-top transition-colors last:border-r-0 hover:bg-accent/60 ${
+                    isSameMonth(day, cursor) ? "" : "bg-muted/40 text-muted-foreground"
+                  } ${selected ? "ring-2 ring-inset ring-primary" : ""}`}
+                >
+                  <span
+                    className={`inline-flex size-6 items-center justify-center rounded-full text-xs font-semibold ${
+                      isToday(day) ? "bg-primary text-primary-foreground" : ""
+                    }`}
+                  >
+                    {format(day, "d")}
+                  </span>
+                  <div className="mt-1 space-y-0.5">
+                    {dayJobs.slice(0, 2).map((job) => (
+                      <p
+                        key={job.id}
+                        className={`truncate rounded px-1 py-0.5 text-[0.65rem] font-medium ${
+                          job.status === "done"
+                            ? "bg-secondary text-muted-foreground line-through"
+                            : "bg-primary/12 text-primary"
+                        }`}
+                      >
+                        {format(parseISO(job.starts_at), "HH:mm")} {clientName(job.client_id)}
+                      </p>
+                    ))}
+                    {dayJobs.length > 2 ? (
+                      <p className="px-1 text-[0.6rem] text-muted-foreground">
+                        +{dayJobs.length - 2} more
+                      </p>
+                    ) : null}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </Card>
+      ) : null}
+
+      <div className="mt-5 space-y-4">
+        {(view === "month" ? [selectedDay] : days).map((day) => {
+          const dayJobs = jobsOn(day);
+          return (
+            <div key={day.toISOString()}>
+              <h2 className="mb-2 text-sm font-semibold text-foreground">
+                {format(day, "EEEE d MMMM")}
+                {isToday(day) ? <span className="ml-2 text-primary">Today</span> : null}
+              </h2>
+              {dayJobs.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                  Nothing booked.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {dayJobs.map((job) => (
+                    <Card key={job.id}>
+                      <CardContent className="flex items-center justify-between gap-3 py-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-semibold">{clientName(job.client_id)}</p>
+                            <Badge variant={job.status === "done" ? "secondary" : "default"}>
+                              {job.status}
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            {format(parseISO(job.starts_at), "HH:mm")} · {job.duration_minutes} min
+                          </p>
+                          {job.notes ? (
+                            <p className="mt-0.5 line-clamp-2 text-sm text-foreground/80">{job.notes}</p>
+                          ) : null}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          {job.status !== "done" ? (
+                            <Button size="sm" onClick={() => setCompleting(job)}>
+                              <CalendarCheck className="size-4" /> Complete
+                            </Button>
+                          ) : null}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Delete job"
+                            onClick={async () => {
+                              const wholeSeries =
+                                job.series_id && confirm("Delete the whole repeating series?")
+                                  ? job.series_id
+                                  : null;
+                              await deleteJob.mutateAsync({ id: job.id, wholeSeries });
+                              toast.success("Job removed");
+                            }}
+                          >
+                            <Trash2 className="size-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <BookingDialog
+        open={bookingOpen}
+        onOpenChange={setBookingOpen}
+        defaultDate={view === "month" ? selectedDay : cursor}
+        onSaved={() => setBookingOpen(false)}
+        saveJob={saveJob.mutateAsync}
+      />
+
+      <CompleteDialog
+        job={completing}
+        onClose={() => setCompleting(null)}
+        onComplete={async ({ hours, materials, description }) => {
+          if (!completing) return;
+          const client = clients.find((c) => c.id === completing.client_id);
+          if (!client) return;
+          const visit = await saveVisit.mutateAsync({
+            client_id: client.id,
+            visit_date: format(parseISO(completing.starts_at), "yyyy-MM-dd"),
+            hours,
+            materials_cost: materials,
+            description: description || completing.notes,
+            amount: priceVisit(client, hours, materials),
+          });
+          await saveJob.mutateAsync({
+            id: completing.id,
+            client_id: completing.client_id,
+            starts_at: completing.starts_at,
+            status: "done",
+            visit_id: visit?.id ?? null,
+          });
+          setCompleting(null);
+          toast.success("Job completed and visit logged");
+        }}
+        clientName={completing ? clientName(completing.client_id) : ""}
+      />
+    </AppShell>
+  );
+}
+
+function BookingDialog({
+  open,
+  onOpenChange,
+  defaultDate,
+  onSaved,
+  saveJob,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  defaultDate: Date;
+  onSaved: () => void;
+  saveJob: (input: { client_id: string; starts_at: string; duration_minutes?: number; notes?: string | null; series_id?: string | null }) => Promise<unknown>;
+}) {
+  const { data: clients = [] } = useClients();
+  const [clientId, setClientId] = useState("");
+  const [date, setDate] = useState(format(defaultDate, "yyyy-MM-dd"));
+  const [time, setTime] = useState("09:00");
+  const [duration, setDuration] = useState("60");
+  const [notes, setNotes] = useState("");
+  const [repeats, setRepeats] = useState(false);
+  const [frequency, setFrequency] = useState<Frequency>("fortnightly");
+  const [occurrences, setOccurrences] = useState("12");
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const client = clients.find((c) => c.id === clientId);
+    if (!client) {
+      toast.error("Pick a client");
+      return;
+    }
+    setBusy(true);
+    try {
+      const first = new Date(`${date}T${time}`);
+      let seriesId: string | null = null;
+
+      if (repeats) {
+        const { data: userData } = await supabase.auth.getUser();
+        const { data, error } = await supabase
+          .from("job_series")
+          .insert({
+            user_id: userData.user!.id,
+            client_id: client.id,
+            frequency,
+            start_date: date,
+            start_time: time,
+            duration_minutes: Number(duration) || 60,
+            notes: notes || null,
+          })
+          .select("id")
+          .single();
+        if (error) throw error;
+        seriesId = data.id;
+      }
+
+      const count = repeats ? Math.max(1, Math.min(Number(occurrences) || 1, 60)) : 1;
+      for (let i = 0; i < count; i++) {
+        const when = repeats ? FREQ_STEP[frequency](first, i) : first;
+        await saveJob({
+          client_id: client.id,
+          starts_at: when.toISOString(),
+          duration_minutes: Number(duration) || 60,
+          notes: notes || null,
+          series_id: seriesId,
+        });
+      }
+      toast.success(repeats ? `${count} jobs booked` : "Job booked");
+      onSaved();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not book job");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Book a job</DialogTitle>
+        </DialogHeader>
+        <form className="space-y-3" onSubmit={submit}>
+          <div className="space-y-1.5">
+            <Label>Client</Label>
+            <Select value={clientId} onValueChange={setClientId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Choose client" />
+              </SelectTrigger>
+              <SelectContent>
+                {clients.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="jdate">Date</Label>
+              <Input id="jdate" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="jtime">Start</Label>
+              <Input id="jtime" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="jdur">Minutes</Label>
+              <Input
+                id="jdur"
+                type="number"
+                min="15"
+                step="15"
+                value={duration}
+                onChange={(e) => setDuration(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="jnotes">Notes</Label>
+            <Textarea
+              id="jnotes"
+              rows={2}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Mow, edge, hedge front"
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <Checkbox checked={repeats} onCheckedChange={(v) => setRepeats(Boolean(v))} />
+            Repeats
+          </label>
+          {repeats ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Frequency</Label>
+                <Select value={frequency} onValueChange={(v) => setFrequency(v as Frequency)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(FREQUENCY_LABELS).map(([value, label]) => (
+                      <SelectItem key={value} value={value}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="occ">Number of visits</Label>
+                <Input
+                  id="occ"
+                  type="number"
+                  min="1"
+                  max="60"
+                  value={occurrences}
+                  onChange={(e) => setOccurrences(e.target.value)}
+                />
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button type="submit" disabled={busy}>
+              Book
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CompleteDialog({
+  job,
+  clientName,
+  onClose,
+  onComplete,
+}: {
+  job: ScheduledJob | null;
+  clientName: string;
+  onClose: () => void;
+  onComplete: (input: { hours: number; materials: number; description: string }) => Promise<void>;
+}) {
+  const [hours, setHours] = useState("1");
+  const [materials, setMaterials] = useState("0");
+  const [description, setDescription] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <Dialog
+      open={Boolean(job)}
+      onOpenChange={(v) => {
+        if (!v) onClose();
+        if (v && job) {
+          setHours(String((job.duration_minutes / 60).toFixed(2)));
+          setMaterials("0");
+          setDescription(job.notes ?? "");
+        }
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Complete job — {clientName}</DialogTitle>
+        </DialogHeader>
+        <form
+          className="space-y-3"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setBusy(true);
+            try {
+              await onComplete({
+                hours: Number(hours) || 0,
+                materials: Number(materials) || 0,
+                description,
+              });
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="chours">Hours worked</Label>
+              <Input
+                id="chours"
+                type="number"
+                step="0.25"
+                min="0"
+                value={hours}
+                onChange={(e) => setHours(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="cmat">Materials (£)</Label>
+              <Input
+                id="cmat"
+                type="number"
+                step="0.01"
+                min="0"
+                value={materials}
+                onChange={(e) => setMaterials(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="cdesc">Work done</Label>
+            <Textarea
+              id="cdesc"
+              rows={3}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button type="submit" disabled={busy}>
+              Log visit
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
