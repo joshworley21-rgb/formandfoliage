@@ -44,6 +44,9 @@ function SettingsPage() {
     invoice_prefix: "JW-",
     payment_terms: "Payment due within 14 days.",
     bank_details: "",
+    email_subject_template: "Invoice {{invoice_number}} from {{business_name}}",
+    email_body_template:
+      "Hi {{client_name}},\n\nPlease find attached invoice {{invoice_number}} for recent garden work.\n\nTotal due: {{total}}{{due_clause}}.\n\nMany thanks,\n{{business_name}}",
   });
 
   useEffect(() => {
@@ -59,6 +62,9 @@ function SettingsPage() {
       invoice_prefix: settings.invoice_prefix ?? "JW-",
       payment_terms: settings.payment_terms ?? "",
       bank_details: settings.bank_details ?? "",
+      email_subject_template:
+        settings.email_subject_template ?? "Invoice {{invoice_number}} from {{business_name}}",
+      email_body_template: settings.email_body_template ?? "",
     });
   }, [settings]);
 
@@ -82,6 +88,9 @@ function SettingsPage() {
             invoice_prefix: form.invoice_prefix || "JW-",
             payment_terms: form.payment_terms || null,
             bank_details: form.bank_details || null,
+            email_subject_template:
+              form.email_subject_template || "Invoice {{invoice_number}} from {{business_name}}",
+            email_body_template: form.email_body_template,
           });
           toast.success("Settings saved");
         }}
@@ -207,6 +216,37 @@ function SettingsPage() {
             )}
           </CardContent>
         </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Invoice email template</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="subj">Subject</Label>
+              <Input
+                id="subj"
+                value={form.email_subject_template}
+                onChange={(e) => set("email_subject_template", e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="body">Message</Label>
+              <Textarea
+                id="body"
+                rows={8}
+                value={form.email_body_template}
+                onChange={(e) => set("email_body_template", e.target.value)}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Placeholders you can use: {"{{client_name}}"}, {"{{business_name}}"},{" "}
+              {"{{invoice_number}}"}, {"{{total}}"}, {"{{due_date}}"}, {"{{due_clause}}"},{" "}
+              {"{{issue_date}}"}, {"{{payment_terms}}"}, {"{{bank_details}}"}
+            </p>
+          </CardContent>
+        </Card>
+
 
         <div className="lg:col-span-2">
           <Button type="submit" disabled={saveSettings.isPending}>

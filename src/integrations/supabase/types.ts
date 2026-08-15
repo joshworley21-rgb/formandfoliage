@@ -408,6 +408,8 @@ export type Database = {
           business_name: string
           created_at: string
           email: string | null
+          email_body_template: string
+          email_subject_template: string
           invoice_counter: number
           invoice_prefix: string
           payment_terms: string | null
@@ -424,6 +426,8 @@ export type Database = {
           business_name?: string
           created_at?: string
           email?: string | null
+          email_body_template?: string
+          email_subject_template?: string
           invoice_counter?: number
           invoice_prefix?: string
           payment_terms?: string | null
@@ -440,6 +444,8 @@ export type Database = {
           business_name?: string
           created_at?: string
           email?: string | null
+          email_body_template?: string
+          email_subject_template?: string
           invoice_counter?: number
           invoice_prefix?: string
           payment_terms?: string | null

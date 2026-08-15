@@ -219,14 +219,41 @@ export const sendInvoiceEmail = createServerFn({ method: "POST" })
     }
 
     const fromEmail = settings?.email || "onboarding@resend.dev";
+
+    const escapeHtml = (value: string) =>
+      value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+
+    const tokens: Record<string, string> = {
+      client_name: client.name ?? "",
+      business_name: businessName,
+      invoice_number: invoice.number ?? "",
+      total: `£${Number(invoice.total).toFixed(2)}`,
+      due_date: invoice.due_date ?? "",
+      due_clause: invoice.due_date ? ` by ${invoice.due_date}` : "",
+      issue_date: invoice.issue_date ?? "",
+      payment_terms: settings?.payment_terms ?? "",
+      bank_details: settings?.bank_details ?? "",
+    };
+
+    const fill = (template: string) =>
+      template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, key: string) => tokens[key] ?? "");
+
+    const subjectTemplate =
+      settings?.email_subject_template || "Invoice {{invoice_number}} from {{business_name}}";
+    const bodyTemplate =
+      data.message ||
+      settings?.email_body_template ||
+      "Hi {{client_name}},\n\nPlease find attached invoice {{invoice_number}} for recent garden work.\n\nTotal due: {{total}}{{due_clause}}.\n\nMany thanks,\n{{business_name}}";
+
+    const subject = fill(subjectTemplate);
     const htmlBody = `<div style="font-family:Arial,sans-serif;font-size:15px;color:#243">
-      <p>Hi ${client.name},</p>
-      <p>${data.message ?? `Please find attached invoice <strong>${invoice.number}</strong> for recent garden work.`}</p>
-      <p>Total due: <strong>£${Number(invoice.total).toFixed(2)}</strong>${
-        invoice.due_date ? ` by ${invoice.due_date}` : ""
-      }.</p>
-      ${settings?.bank_details ? `<p>Payment details:<br/>${String(settings.bank_details).replace(/\n/g, "<br/>")}</p>` : ""}
-      <p>Many thanks,<br/>${businessName}</p>
+      ${escapeHtml(fill(bodyTemplate))
+        .split(/\n{2,}/)
+        .map((para) => `<p>${para.replace(/\n/g, "<br/>")}</p>`)
+        .join("\n")}
     </div>`;
 
     const response = await fetch("https://connector-gateway.lovable.dev/resend/emails", {
@@ -239,7 +266,7 @@ export const sendInvoiceEmail = createServerFn({ method: "POST" })
       body: JSON.stringify({
         from: `${businessName} <${fromEmail}>`,
         to: client.email,
-        subject: `Invoice ${invoice.number} from ${businessName}`,
+        subject,
         html: htmlBody,
         attachments: [
           {
