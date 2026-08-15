@@ -29,10 +29,14 @@ function SettingsPage() {
   const { data: settings } = useSettings();
   const saveSettings = useSaveSettings();
   const senderFn = useServerFn(getResendStatus);
+  const testEmailFn = useServerFn(sendTestEmail);
+  const [testTo, setTestTo] = useState("");
+  const [sendingTest, setSendingTest] = useState(false);
   const { data: sender } = useQuery({
     queryKey: ["resend-status"],
     queryFn: () => senderFn(),
   });
+
   const [form, setForm] = useState({
     business_name: "JW Garden Services",
     address: "",
