@@ -111,6 +111,30 @@ function InvoicesPage() {
     }
   }
 
+  async function openPreview(invoice: Invoice, intent: "download" | "send") {
+    try {
+      setBusyId(invoice.id);
+      const doc = await buildPdf(invoice);
+      const url = URL.createObjectURL(doc.output("blob"));
+      setPreview((current) => {
+        if (current?.url) URL.revokeObjectURL(current.url);
+        return { invoice, url, intent };
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not build the preview");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  function closePreview() {
+    setPreview((current) => {
+      if (current?.url) URL.revokeObjectURL(current.url);
+      return null;
+    });
+  }
+
+
   async function sendOneClick(invoice: Invoice) {
     try {
       setBusyId(invoice.id);
