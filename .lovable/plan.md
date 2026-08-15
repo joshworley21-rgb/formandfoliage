@@ -24,6 +24,15 @@ Pressing Send: generates a branded PDF (logo, your business details, itemised vi
 
 Invoice numbering is sequential (JW-0001, JW-0002…).
 
+## Recurring invoices
+
+Any client can be put on a repeating schedule: weekly, fortnightly, every 4 weeks, monthly, quarterly, or a custom interval, with a start date and optional end date.
+
+On each due date the app builds the invoice automatically from that period's logged visits (plus any fixed retainer amount for the client) and either sends it straight away or drops it in a "Ready to send" list for you to approve with one tap — your choice per client. If a period has no visits and no fixed charge, it's skipped rather than sending a £0 invoice.
+
+A Recurring tab shows every schedule, its next due date, and lets you pause, edit, or skip the next run.
+
+
 ## What's needed from you
 
 - Lovable Cloud is enabled for the database, your login, and PDF storage.
