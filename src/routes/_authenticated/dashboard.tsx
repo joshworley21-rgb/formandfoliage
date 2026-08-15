@@ -32,6 +32,24 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
   component: DashboardPage,
 });
 
+const STATUS_STYLES = {
+  draft: {
+    label: "Draft",
+    icon: FileText,
+    className: "border-border bg-muted text-muted-foreground",
+  },
+  sent: {
+    label: "Sent",
+    icon: Send,
+    className: "border-primary/30 bg-primary/10 text-primary",
+  },
+  paid: {
+    label: "Paid",
+    icon: CheckCircle2,
+    className: "border-accent/40 bg-accent/15 text-accent-foreground",
+  },
+} as const;
+
 function DashboardPage() {
   const today = startOfDay(new Date());
   const monthStart = startOfMonth(today);
