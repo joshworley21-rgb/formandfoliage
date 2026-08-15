@@ -192,7 +192,8 @@ export function flushQueue(): Promise<number> {
     try {
       // Preserve order: stop at the first item that can't be applied yet.
       while (state.pending.length > 0 && !isOffline()) {
-        const [next, ...rest] = state.pending;
+        const next = state.pending[0]!;
+        const rest = state.pending.slice(1);
         try {
           await runOps(next.ops);
           state = { ...state, pending: rest };
