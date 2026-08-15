@@ -197,14 +197,12 @@ function SettingsPage() {
           <CardContent>
             {sender?.connected ? (
               <p className="text-sm">
-                Invoices are sent from your connected Outlook account:
-                <span className="ml-1 font-medium">{sender.email}</span>
-                {sender.name ? ` (${sender.name})` : ""}
+                Resend is connected. Invoices will be sent as emails with the PDF attached.
               </p>
             ) : (
               <p className="text-sm text-muted-foreground">
-                Outlook is not connected. Use the button below to connect your Outlook account so
-                you can email invoices directly from the CRM.
+                Resend is not connected. Connect your Resend account (and verify a sending domain)
+                so you can email invoices directly from the CRM.
               </p>
             )}
           </CardContent>
