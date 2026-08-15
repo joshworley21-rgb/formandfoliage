@@ -93,7 +93,10 @@ export function OfflineSupport({ queryClient }: { queryClient: QueryClient }) {
           {!offline ? (
             <button
               type="button"
-              onClick={() => void flushQueue()}
+              onClick={async () => {
+                const count = await flushQueue();
+                if (count > 0) void queryClient.invalidateQueries();
+              }}
               className="underline underline-offset-2"
             >
               Sync now
