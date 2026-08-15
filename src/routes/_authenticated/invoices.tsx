@@ -521,6 +521,20 @@ function NewInvoiceDialog({
           </div>
 
           <div className="space-y-1.5">
+            <Label htmlFor="duedate">Due date</Label>
+            <Input
+              id="duedate"
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Shown on the invoice PDF. Leave blank for “on receipt”.
+            </p>
+          </div>
+
+
+          <div className="space-y-1.5">
             <Label htmlFor="inotes">Invoice notes</Label>
             <Textarea id="inotes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </div>
