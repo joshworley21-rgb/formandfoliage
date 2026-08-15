@@ -9,6 +9,7 @@ import {
   ChevronUp,
   Clock,
   Download,
+  Eye,
   FilePlus2,
   History,
   Mail,
@@ -80,6 +81,9 @@ function InvoicesPage() {
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [openHistory, setOpenHistory] = useState<string | null>(null);
+  const [preview, setPreview] = useState<
+    { invoice: Invoice; url: string; intent: "download" | "send" } | null
+  >(null);
   const queryClient = useQueryClient();
 
   const sendFn = useServerFn(sendInvoiceEmail);
@@ -110,6 +114,30 @@ function InvoicesPage() {
       setBusyId(null);
     }
   }
+
+  async function openPreview(invoice: Invoice, intent: "download" | "send") {
+    try {
+      setBusyId(invoice.id);
+      const doc = await buildPdf(invoice);
+      const url = URL.createObjectURL(doc.output("blob"));
+      setPreview((current) => {
+        if (current?.url) URL.revokeObjectURL(current.url);
+        return { invoice, url, intent };
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not build the preview");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  function closePreview() {
+    setPreview((current) => {
+      if (current?.url) URL.revokeObjectURL(current.url);
+      return null;
+    });
+  }
+
 
   async function sendOneClick(invoice: Invoice) {
     try {
@@ -176,14 +204,14 @@ function InvoicesPage() {
                     variant="outline"
                     size="sm"
                     disabled={busyId === invoice.id}
-                    onClick={() => download(invoice)}
+                    onClick={() => openPreview(invoice, "download")}
                   >
-                    <Download className="size-4" /> PDF
+                    <Eye className="size-4" /> Preview
                   </Button>
                   <Button
                     size="sm"
                     disabled={busyId === invoice.id}
-                    onClick={() => sendOneClick(invoice)}
+                    onClick={() => openPreview(invoice, "send")}
                   >
                     <Mail className="size-4" /> {invoice.status === "draft" ? "Send" : "Resend"}
                   </Button>
@@ -236,6 +264,51 @@ function InvoicesPage() {
           setCreating(false);
         }}
       />
+
+      <Dialog open={preview !== null} onOpenChange={(open) => (open ? null : closePreview())}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Preview {preview?.invoice.number}</DialogTitle>
+            <DialogDescription>
+              Check the layout before you {preview?.intent === "send" ? "send" : "download"} it.
+            </DialogDescription>
+          </DialogHeader>
+          {preview ? (
+            <iframe
+              title={`Invoice ${preview.invoice.number} preview`}
+              src={preview.url}
+              className="h-[65vh] w-full rounded-lg border bg-muted"
+            />
+          ) : null}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={closePreview}>
+              Close
+            </Button>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                if (!preview) return;
+                const invoice = preview.invoice;
+                closePreview();
+                await download(invoice);
+              }}
+            >
+              <Download className="size-4" /> Download PDF
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!preview) return;
+                const invoice = preview.invoice;
+                closePreview();
+                await sendOneClick(invoice);
+              }}
+            >
+              <Mail className="size-4" /> {preview?.invoice.status === "draft" ? "Send" : "Resend"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </AppShell>
   );
 }
