@@ -18,6 +18,7 @@ import { CalendarCheck, ChevronLeft, ChevronRight, ClipboardList, Plus, Trash2 }
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import { useIsStaff } from "@/hooks/use-workspace";
 import { JobSheetDialog } from "@/components/JobSheetDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,7 @@ import {
   useJobs,
   useSaveJob,
   useSaveVisit,
+  useStaffCompleteJob,
 } from "@/hooks/use-crm";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -96,6 +98,8 @@ function SchedulePage() {
     };
   }, [cursor, view]);
 
+  const isStaff = useIsStaff();
+  const staffComplete = useStaffCompleteJob();
   const { data: clients = [] } = useClients();
   const { data: jobs = [] } = useJobs({
     from: range.start.toISOString(),
@@ -142,9 +146,11 @@ function SchedulePage() {
       title="Schedule"
       description="Plan the round and tick jobs off as you go."
       actions={
-        <Button onClick={() => setBookingOpen(true)} disabled={clients.length === 0}>
-          <Plus className="size-4" /> Book job
-        </Button>
+        isStaff ? null : (
+          <Button onClick={() => setBookingOpen(true)} disabled={clients.length === 0}>
+            <Plus className="size-4" /> Book job
+          </Button>
+        )
       }
     >
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -266,6 +272,7 @@ function SchedulePage() {
                               <CalendarCheck className="size-4" /> Complete
                             </Button>
                           ) : null}
+                          {isStaff ? null : (
                           <Button
                             variant="ghost"
                             size="icon"
@@ -281,6 +288,7 @@ function SchedulePage() {
                           >
                             <Trash2 className="size-4 text-destructive" />
                           </Button>
+                          )}
                         </div>
                       </CardContent>
                     </Card>
@@ -311,6 +319,16 @@ function SchedulePage() {
         onClose={() => setCompleting(null)}
         onComplete={async ({ hours, materials, description }) => {
           if (!completing) return;
+          if (isStaff) {
+            await staffComplete.mutateAsync({
+              jobId: completing.id,
+              hours,
+              description: description || completing.notes || undefined,
+            });
+            setCompleting(null);
+            toast.success("Job completed");
+            return;
+          }
           const client = clients.find((c) => c.id === completing.client_id);
           if (!client) return;
           const visit = await saveVisit.mutateAsync({
@@ -332,6 +350,7 @@ function SchedulePage() {
           toast.success("Job completed and visit logged");
         }}
         clientName={completing ? clientName(completing.client_id) : ""}
+        hideMaterials={isStaff}
       />
     </AppShell>
   );
@@ -547,9 +566,11 @@ function CompleteDialog({
   clientName,
   onClose,
   onComplete,
+  hideMaterials,
 }: {
   job: ScheduledJob | null;
   clientName: string;
+  hideMaterials?: boolean;
   onClose: () => void;
   onComplete: (input: { hours: number; materials: number; description: string }) => Promise<void>;
 }) {
@@ -602,6 +623,7 @@ function CompleteDialog({
                 onChange={(e) => setHours(e.target.value)}
               />
             </div>
+            {hideMaterials ? null : (
             <div className="space-y-1.5">
               <Label htmlFor="cmat">Materials (£)</Label>
               <Input
@@ -613,6 +635,7 @@ function CompleteDialog({
                 onChange={(e) => setMaterials(e.target.value)}
               />
             </div>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="cdesc">Work done</Label>
