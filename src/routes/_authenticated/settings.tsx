@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useSaveSettings, useSettings } from "@/hooks/use-crm";
-import { getResendStatus } from "@/lib/invoicing.functions";
+import { getResendStatus, sendTestEmail } from "@/lib/invoicing.functions";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({
@@ -29,10 +29,14 @@ function SettingsPage() {
   const { data: settings } = useSettings();
   const saveSettings = useSaveSettings();
   const senderFn = useServerFn(getResendStatus);
+  const testEmailFn = useServerFn(sendTestEmail);
+  const [testTo, setTestTo] = useState("");
+  const [sendingTest, setSendingTest] = useState(false);
   const { data: sender } = useQuery({
     queryKey: ["resend-status"],
     queryFn: () => senderFn(),
   });
+
   const [form, setForm] = useState({
     business_name: "JW Garden Services",
     address: "",
@@ -203,7 +207,7 @@ function SettingsPage() {
           <CardHeader>
             <CardTitle>Email sending</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
             {sender?.connected ? (
               <p className="text-sm">
                 Resend is connected. Invoices will be sent as emails with the PDF attached.
@@ -214,8 +218,51 @@ function SettingsPage() {
                 so you can email invoices directly from the CRM.
               </p>
             )}
+            <div className="space-y-1.5">
+              <Label htmlFor="testTo">Send a test email to</Label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  id="testTo"
+                  type="email"
+                  placeholder="you@example.com"
+                  value={testTo}
+                  onChange={(e) => setTestTo(e.target.value)}
+                  className="sm:max-w-xs"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={sendingTest || !testTo.trim()}
+                  onClick={async () => {
+                    setSendingTest(true);
+                    try {
+                      const result = await testEmailFn({
+                        data: {
+                          to: testTo.trim(),
+                          subjectTemplate: form.email_subject_template,
+                          bodyTemplate: form.email_body_template,
+                        },
+                      });
+                      if (result.sent) toast.success(`Test email sent to ${result.to}`);
+                      else toast.error(result.reason ?? "Test email could not be sent");
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : "Test email failed");
+                    } finally {
+                      setSendingTest(false);
+                    }
+                  }}
+                >
+                  {sendingTest ? "Sending…" : "Send test email"}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Uses the template below with sample invoice details, so you can check how
+                placeholders look before sending a real invoice.
+              </p>
+            </div>
           </CardContent>
         </Card>
+
 
         <Card className="lg:col-span-2">
           <CardHeader>
