@@ -80,12 +80,19 @@ function AuthPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-secondary px-4 py-10">
-      <div className="w-full max-w-md">
-        <Logo className="mb-6 justify-center" />
-        <Card>
-          <CardHeader>
-            <CardTitle className="font-display text-xl">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10">
+      {/* Organic background shapes */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -left-[10%] -top-[15%] h-[50vh] w-[50vh] rounded-full bg-primary/10 blur-3xl" />
+        <div className="absolute bottom-[5%] right-[5%] h-[40vh] w-[40vh] rounded-[40%_60%_70%_30%/40%_50%_60%_50%] bg-leaf/15 blur-3xl" />
+        <div className="absolute left-[30%] top-[40%] h-[25vh] w-[25vh] rounded-[60%_40%_30%_70%/60%_30%_70%_40%] bg-brown/10 blur-2xl" />
+      </div>
+
+      <div className="relative z-10 w-full max-w-md">
+        <Logo className="mb-8 justify-center" />
+        <Card className="border-border/80 bg-card/95 shadow-sm backdrop-blur">
+          <CardHeader className="space-y-1">
+            <CardTitle className="font-display text-2xl">
               {mode === "signin" ? "Sign in" : "Create your account"}
             </CardTitle>
             <CardDescription>Your private garden business workspace.</CardDescription>
