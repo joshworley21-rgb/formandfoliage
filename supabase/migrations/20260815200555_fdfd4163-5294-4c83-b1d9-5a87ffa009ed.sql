@@ -1,0 +1,12 @@
+REVOKE ALL ON FUNCTION public.is_staff(uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.owner_for(uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.my_workspace() FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.claim_staff_invite() FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.staff_clients() FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.staff_complete_job(uuid, numeric, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.is_staff(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.owner_for(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.my_workspace() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_staff_invite() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.staff_clients() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.staff_complete_job(uuid, numeric, text) TO authenticated;
