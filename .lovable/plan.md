@@ -42,6 +42,6 @@ A Recurring tab shows every schedule, its next due date, and lets you pause, edi
 ## Technical notes
 
 - TanStack Start routes: `/auth` (public), `/_authenticated/` for dashboard, clients, visits, invoices.
-- Cloud tables: `clients`, `visits`, `invoices`, `invoice_items`, `settings` — all RLS-scoped to your user id, with explicit grants.
+- Cloud tables: `clients`, `visits`, `invoices`, `invoice_items`, `recurring_schedules`, `settings` — all RLS-scoped to your user id, with explicit grants.
 - Visit pricing derived server-side from the client's `billing_mode` (`hourly` | `fixed` | both), stored as a snapshot on the invoice item so later rate changes don't rewrite history.
-- PDF generated in a server function and stored in a private Cloud storage bucket; emailed via Resend from the same server function.
+- Recurring runs handled by a scheduled job (pg_cron) hitting a `/api/public/run-recurring-invoices` route protected by a shared secret; it computes due schedules, builds invoices idempotently per period, and auto-sends or queues based on the schedule's setting.
