@@ -19,6 +19,7 @@ import { Route as AuthenticatedRecurringRouteImport } from './routes/_authentica
 import { Route as AuthenticatedScheduleRouteImport } from './routes/_authenticated/schedule'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedVisitsRouteImport } from './routes/_authenticated/visits'
+import { Route as ApiPublicHooksPaymentRemindersRouteImport } from './routes/api/public/hooks/payment-reminders'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -69,6 +70,12 @@ const AuthenticatedVisitsRoute = AuthenticatedVisitsRouteImport.update({
   path: '/visits',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const ApiPublicHooksPaymentRemindersRoute =
+  ApiPublicHooksPaymentRemindersRouteImport.update({
+    id: '/api/public/hooks/payment-reminders',
+    path: '/api/public/hooks/payment-reminders',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -80,6 +87,7 @@ export interface FileRoutesByFullPath {
   '/schedule': typeof AuthenticatedScheduleRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/visits': typeof AuthenticatedVisitsRoute
+  '/api/public/hooks/payment-reminders': typeof ApiPublicHooksPaymentRemindersRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -91,6 +99,7 @@ export interface FileRoutesByTo {
   '/schedule': typeof AuthenticatedScheduleRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/visits': typeof AuthenticatedVisitsRoute
+  '/api/public/hooks/payment-reminders': typeof ApiPublicHooksPaymentRemindersRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -104,6 +113,7 @@ export interface FileRoutesById {
   '/_authenticated/schedule': typeof AuthenticatedScheduleRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/visits': typeof AuthenticatedVisitsRoute
+  '/api/public/hooks/payment-reminders': typeof ApiPublicHooksPaymentRemindersRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -117,6 +127,7 @@ export interface FileRouteTypes {
     | '/schedule'
     | '/settings'
     | '/visits'
+    | '/api/public/hooks/payment-reminders'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -128,6 +139,7 @@ export interface FileRouteTypes {
     | '/schedule'
     | '/settings'
     | '/visits'
+    | '/api/public/hooks/payment-reminders'
   id:
     | '__root__'
     | '/'
@@ -140,12 +152,14 @@ export interface FileRouteTypes {
     | '/_authenticated/schedule'
     | '/_authenticated/settings'
     | '/_authenticated/visits'
+    | '/api/public/hooks/payment-reminders'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiPublicHooksPaymentRemindersRoute: typeof ApiPublicHooksPaymentRemindersRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -220,6 +234,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedVisitsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/public/hooks/payment-reminders': {
+      id: '/api/public/hooks/payment-reminders'
+      path: '/api/public/hooks/payment-reminders'
+      fullPath: '/api/public/hooks/payment-reminders'
+      preLoaderRoute: typeof ApiPublicHooksPaymentRemindersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -250,6 +271,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiPublicHooksPaymentRemindersRoute: ApiPublicHooksPaymentRemindersRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
