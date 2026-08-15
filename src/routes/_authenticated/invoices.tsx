@@ -19,6 +19,7 @@ import {
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import { InvoiceReminders } from "@/components/InvoiceReminders";
 import { OwnerOnly } from "@/components/OwnerOnly";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -175,6 +176,10 @@ function InvoicesPage() {
         </Button>
       }
     >
+      <div className="mb-4">
+        <InvoiceReminders compact />
+      </div>
+
       {invoices.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">

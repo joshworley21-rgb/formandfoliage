@@ -20,6 +20,7 @@ import {
   Send,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { InvoiceReminders } from "@/components/InvoiceReminders";
 import { OwnerOnly } from "@/components/OwnerOnly";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -212,6 +213,10 @@ function DashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      <div className="mt-4">
+        <InvoiceReminders />
+      </div>
 
       {/* 3. Hours and billing summary */}
       <div className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-border lg:grid-cols-4">
