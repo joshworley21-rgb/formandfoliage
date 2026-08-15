@@ -190,6 +190,26 @@ function SettingsPage() {
           </CardContent>
         </Card>
 
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Email sending</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {sender?.connected ? (
+              <p className="text-sm">
+                Invoices are sent from your connected Outlook account:
+                <span className="ml-1 font-medium">{sender.email}</span>
+                {sender.name ? ` (${sender.name})` : ""}
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Outlook is not connected. Use the button below to connect your Outlook account so
+                you can email invoices directly from the CRM.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
         <div className="lg:col-span-2">
           <Button type="submit" disabled={saveSettings.isPending}>
             Save settings
