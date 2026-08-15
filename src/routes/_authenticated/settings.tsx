@@ -1,4 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
@@ -9,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useSaveSettings, useSettings } from "@/hooks/use-crm";
+import { getOutlookSender } from "@/lib/invoicing.functions";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({
@@ -25,6 +28,11 @@ export const Route = createFileRoute("/_authenticated/settings")({
 function SettingsPage() {
   const { data: settings } = useSettings();
   const saveSettings = useSaveSettings();
+  const senderFn = useServerFn(getOutlookSender);
+  const { data: sender } = useQuery({
+    queryKey: ["outlook-sender"],
+    queryFn: () => senderFn(),
+  });
   const [form, setForm] = useState({
     business_name: "JW Garden Services",
     address: "",
@@ -179,6 +187,26 @@ function SettingsPage() {
                 placeholder={"Sort code 00-00-00\nAccount 12345678"}
               />
             </div>
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Email sending</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {sender?.connected ? (
+              <p className="text-sm">
+                Invoices are sent from your connected Outlook account:
+                <span className="ml-1 font-medium">{sender.email}</span>
+                {sender.name ? ` (${sender.name})` : ""}
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Outlook is not connected. Use the button below to connect your Outlook account so
+                you can email invoices directly from the CRM.
+              </p>
+            )}
           </CardContent>
         </Card>
 
