@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useSaveSettings, useSettings } from "@/hooks/use-crm";
 import { getResendStatus, sendTestEmail } from "@/lib/invoicing.functions";
+import { EmailTemplatePreview } from "@/components/EmailTemplatePreview";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({
@@ -294,6 +295,16 @@ function SettingsPage() {
           </CardContent>
         </Card>
 
+
+        <EmailTemplatePreview
+          subjectTemplate={form.email_subject_template}
+          bodyTemplate={form.email_body_template}
+          businessName={form.business_name}
+          fromEmail={form.email}
+          paymentTerms={form.payment_terms}
+          bankDetails={form.bank_details}
+          invoicePrefix={form.invoice_prefix}
+        />
 
         <div className="lg:col-span-2">
           <Button type="submit" disabled={saveSettings.isPending}>
