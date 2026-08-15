@@ -120,7 +120,7 @@ export function buildInvoicePdf({
   doc.text(gbp(invoice.subtotal), colAmount, y, { align: "right" });
   if (Number(invoice.vat_amount) > 0) {
     y += 15;
-    doc.text(`VAT (${settings?.vat_rate ?? 20}%)", colRate, y, { align: "right" });
+    doc.text(`VAT (${settings?.vat_rate ?? 20}%)`, colRate, y, { align: "right" });
     doc.text(gbp(invoice.vat_amount), colAmount, y, { align: "right" });
   }
   y += 22;
