@@ -339,18 +339,36 @@ function BookingDialog({
   const [clientId, setClientId] = useState("");
   const [date, setDate] = useState(format(defaultDate, "yyyy-MM-dd"));
   const [time, setTime] = useState("09:00");
-  const [duration, setDuration] = useState("60");
+  const [endTime, setEndTime] = useState("10:00");
   const [notes, setNotes] = useState("");
   const [repeats, setRepeats] = useState(false);
   const [frequency, setFrequency] = useState<Frequency>("fortnightly");
   const [occurrences, setOccurrences] = useState("12");
   const [busy, setBusy] = useState(false);
 
+  const toMinutes = (t: string) => {
+    const [h, m] = t.split(":").map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
+  const fromMinutes = (mins: number) => {
+    const c = Math.max(0, Math.min(mins, 23 * 60 + 59));
+    return `${String(Math.floor(c / 60)).padStart(2, "0")}:${String(c % 60).padStart(2, "0")}`;
+  };
+  const duration = Math.max(0, toMinutes(endTime) - toMinutes(time));
+
+  function applyPreset(mins: number) {
+    setEndTime(fromMinutes(toMinutes(time) + mins));
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     const client = clients.find((c) => c.id === clientId);
     if (!client) {
       toast.error("Pick a client");
+      return;
+    }
+    if (duration <= 0) {
+      toast.error("Finish time must be after the start time");
       return;
     }
     setBusy(true);
@@ -368,7 +386,7 @@ function BookingDialog({
             frequency,
             start_date: date,
             start_time: time,
-            duration_minutes: Number(duration) || 60,
+            duration_minutes: duration,
             notes: notes || null,
           })
           .select("id")
@@ -383,7 +401,7 @@ function BookingDialog({
         await saveJob({
           client_id: client.id,
           starts_at: when.toISOString(),
-          duration_minutes: Number(duration) || 60,
+          duration_minutes: duration,
           notes: notes || null,
           series_id: seriesId,
         });
@@ -429,16 +447,30 @@ function BookingDialog({
               <Input id="jtime" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="jdur">Minutes</Label>
+              <Label htmlFor="jend">Finish</Label>
               <Input
-                id="jdur"
-                type="number"
-                min="15"
-                step="15"
-                value={duration}
-                onChange={(e) => setDuration(e.target.value)}
+                id="jend"
+                type="time"
+                value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
               />
             </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => applyPreset(480)}>
+              Full day (8h)
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => applyPreset(240)}>
+              Half day (4h)
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => applyPreset(120)}>
+              2h
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              {duration > 0
+                ? `${Math.floor(duration / 60)}h${duration % 60 ? ` ${duration % 60}m` : ""}`
+                : "Finish must be after start"}
+            </span>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="jnotes">Notes</Label>
