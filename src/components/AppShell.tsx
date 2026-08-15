@@ -109,7 +109,7 @@ export function AppShell({
         </main>
 
         <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur lg:hidden">
-          <div className={cn("grid", nav.length >= 5 ? "grid-cols-5" : "grid-cols-" + nav.length)}>
+          <div className={cn("grid", nav.length <= 2 ? "grid-cols-2" : nav.length === 3 ? "grid-cols-3" : nav.length === 4 ? "grid-cols-4" : "grid-cols-5")}>
             {nav.slice(0, 5).map((item) => (
               <Link
                 key={item.to}
