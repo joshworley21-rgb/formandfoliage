@@ -5,7 +5,9 @@ import type {
   Invoice,
   InvoiceEmailEvent,
   InvoiceItem,
+  JobPhoto,
   JobSeries,
+  JobTask,
   RecurringSchedule,
   ScheduledJob,
   Settings,
@@ -299,5 +301,107 @@ export function useSaveSettings() {
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+/* ---------------- job sheets ---------------- */
+
+export function useJobTasks(jobId?: string) {
+  return useQuery({
+    enabled: Boolean(jobId),
+    queryKey: ["job_tasks", jobId],
+    queryFn: async (): Promise<JobTask[]> => {
+      const { data, error } = await supabase
+        .from("job_tasks")
+        .select("*")
+        .eq("job_id", jobId!)
+        .order("position")
+        .order("created_at");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+}
+
+export function useSaveJobTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: Partial<JobTask> & { job_id: string; title: string }) => {
+      const user_id = await currentUserId();
+      const payload = { ...input, user_id };
+      const { error } = input.id
+        ? await supabase.from("job_tasks").update(payload).eq("id", input.id)
+        : await supabase.from("job_tasks").insert(payload);
+      if (error) throw error;
+    },
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ["job_tasks", v.job_id] }),
+  });
+}
+
+export function useDeleteJobTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id }: { id: string; jobId: string }) => {
+      const { error } = await supabase.from("job_tasks").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ["job_tasks", v.jobId] }),
+  });
+}
+
+export function useJobPhotos(jobId?: string) {
+  return useQuery({
+    enabled: Boolean(jobId),
+    queryKey: ["job_photos", jobId],
+    queryFn: async (): Promise<(JobPhoto & { url: string | null })[]> => {
+      const { data, error } = await supabase
+        .from("job_photos")
+        .select("*")
+        .eq("job_id", jobId!)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      const rows = data ?? [];
+      const signed = await Promise.all(
+        rows.map(async (row) => {
+          const { data: s } = await supabase.storage
+            .from("job-photos")
+            .createSignedUrl(row.storage_path, 60 * 60);
+          return { ...row, url: s?.signedUrl ?? null };
+        }),
+      );
+      return signed;
+    },
+  });
+}
+
+export function useUploadJobPhoto() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ jobId, file, caption }: { jobId: string; file: File; caption?: string }) => {
+      const user_id = await currentUserId();
+      const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+      const path = `${user_id}/${jobId}/${crypto.randomUUID()}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from("job-photos")
+        .upload(path, file, { contentType: file.type || "image/jpeg" });
+      if (upErr) throw upErr;
+      const { error } = await supabase
+        .from("job_photos")
+        .insert({ user_id, job_id: jobId, storage_path: path, caption: caption ?? null });
+      if (error) throw error;
+    },
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ["job_photos", v.jobId] }),
+  });
+}
+
+export function useDeleteJobPhoto() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, path }: { id: string; path: string; jobId: string }) => {
+      await supabase.storage.from("job-photos").remove([path]);
+      const { error } = await supabase.from("job_photos").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ["job_photos", v.jobId] }),
   });
 }
