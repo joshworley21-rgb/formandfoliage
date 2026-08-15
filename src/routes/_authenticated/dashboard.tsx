@@ -9,7 +9,16 @@ import {
   startOfDay,
   startOfMonth,
 } from "date-fns";
-import { CalendarDays, ClipboardList, Clock, PoundSterling, Plus } from "lucide-react";
+import {
+  CalendarDays,
+  CheckCircle2,
+  ClipboardList,
+  Clock,
+  FileText,
+  PoundSterling,
+  Plus,
+  Send,
+} from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
