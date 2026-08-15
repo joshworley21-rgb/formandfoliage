@@ -357,7 +357,7 @@ export function useSaveJobTask() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: Partial<JobTask> & { job_id: string; title: string }) => {
-      const user_id = await currentUserId();
+      const user_id = await workspaceOwnerId();
       const payload = { ...input, user_id };
       const { error } = input.id
         ? await supabase.from("job_tasks").update(payload).eq("id", input.id)
