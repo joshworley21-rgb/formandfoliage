@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useSaveSettings, useSettings } from "@/hooks/use-crm";
-import { getOutlookSender } from "@/lib/invoicing.functions";
+import { getResendStatus } from "@/lib/invoicing.functions";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({
@@ -28,9 +28,9 @@ export const Route = createFileRoute("/_authenticated/settings")({
 function SettingsPage() {
   const { data: settings } = useSettings();
   const saveSettings = useSaveSettings();
-  const senderFn = useServerFn(getOutlookSender);
+  const senderFn = useServerFn(getResendStatus);
   const { data: sender } = useQuery({
-    queryKey: ["outlook-sender"],
+    queryKey: ["resend-status"],
     queryFn: () => senderFn(),
   });
   const [form, setForm] = useState({
@@ -197,14 +197,12 @@ function SettingsPage() {
           <CardContent>
             {sender?.connected ? (
               <p className="text-sm">
-                Invoices are sent from your connected Outlook account:
-                <span className="ml-1 font-medium">{sender.email}</span>
-                {sender.name ? ` (${sender.name})` : ""}
+                Resend is connected. Invoices will be sent as emails with the PDF attached.
               </p>
             ) : (
               <p className="text-sm text-muted-foreground">
-                Outlook is not connected. Use the button below to connect your Outlook account so
-                you can email invoices directly from the CRM.
+                Resend is not connected. Connect your Resend account (and verify a sending domain)
+                so you can email invoices directly from the CRM.
               </p>
             )}
           </CardContent>
