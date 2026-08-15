@@ -187,6 +187,46 @@ function DashboardPage() {
         ))}
       </div>
 
+      {/* 4. Recent invoices with status */}
+      <Card className="mt-4">
+        <CardHeader className="flex-row items-center justify-between">
+          <CardTitle className="font-display text-2xl font-normal">Billing</CardTitle>
+          <Button asChild size="sm" variant="ghost">
+            <Link to="/invoices">All invoices</Link>
+          </Button>
+        </CardHeader>
+        <CardContent className="divide-y divide-border border-t border-border p-0">
+          {recentInvoices.length === 0 ? (
+            <p className="p-5 text-sm text-muted-foreground">No invoices yet.</p>
+          ) : (
+            recentInvoices.map((inv) => {
+              const s = STATUS_STYLES[inv.status];
+              const StatusIcon = s.icon;
+              return (
+                <div key={inv.id} className="flex items-center gap-3 px-5 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">{clientName(inv.client_id)}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {inv.number} · {format(parseISO(inv.issue_date), "d MMM yyyy")}
+                    </p>
+                  </div>
+                  <span
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide ${s.className}`}
+                  >
+                    <StatusIcon className="size-3.5" />
+                    {s.label}
+                  </span>
+                  <p className="w-24 shrink-0 text-right font-display text-lg">
+                    {money(inv.total)}
+                  </p>
+                </div>
+              );
+            })
+          )}
+        </CardContent>
+      </Card>
+
+
       {unbilledTotal > 0 || outstandingTotal > 0 ? (
         <p className="mt-3 text-sm text-muted-foreground">
           {money(unbilledTotal)} ready to bill · {money(outstandingTotal)} awaiting payment.{" "}
