@@ -1,5 +1,6 @@
 import jsPDF from "jspdf";
 import type { Client, Invoice, InvoiceItem, Settings } from "@/lib/crm";
+import { LOGO_URL } from "@/components/Logo";
 
 const GREEN: [number, number, number] = [58, 122, 63];
 const BROWN: [number, number, number] = [66, 48, 33];
@@ -11,7 +12,24 @@ function gbp(n: number | string | null | undefined) {
   return `£${Number(n ?? 0).toFixed(2)}`;
 }
 
-export function buildInvoicePdf({
+async function loadLogo(): Promise<{ dataUrl: string; width: number; height: number } | null> {
+  try {
+    const response = await fetch(LOGO_URL);
+    const blob = await response.blob();
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(bitmap, 0, 0);
+    return { dataUrl: canvas.toDataURL("image/png"), width: bitmap.width, height: bitmap.height };
+  } catch {
+    return null;
+  }
+}
+
+export async function buildInvoicePdf({
   invoice,
   items,
   client,
@@ -21,34 +39,63 @@ export function buildInvoicePdf({
   items: InvoiceItem[];
   client: Client;
   settings: Settings | null;
-}): jsPDF {
+}): Promise<jsPDF> {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const left = 48;
   const right = pageWidth - 48;
   const business = settings?.business_name || "JW Garden Services";
 
-  // Header bar
-  doc.setFillColor(...GREEN);
-  doc.rect(0, 0, pageWidth, 88, "F");
-  doc.setTextColor(255, 255, 255);
+  // Letterhead
+  const logo = await loadLogo();
+  let headerY = 56;
+  let textLeft = left;
+
+  if (logo) {
+    const logoHeight = 56;
+    const logoWidth = (logo.width / logo.height) * logoHeight;
+    doc.addImage(logo.dataUrl, "PNG", left, 40, logoWidth, logoHeight);
+    textLeft = left + logoWidth + 16;
+  }
+
+  doc.setTextColor(...BROWN);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(20);
-  doc.text(business, left, 46);
+  doc.setFontSize(15);
+  doc.text(business, textLeft, headerY);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
-  const contact = [settings?.address, settings?.phone, settings?.email].filter(Boolean).join("  ·  ");
-  if (contact) doc.text(contact, left, 64);
+  doc.setTextColor(...MUTED);
+  headerY += 14;
+  if (settings?.address) {
+    const addressLines = doc.splitTextToSize(settings.address, 220) as string[];
+    doc.text(addressLines, textLeft, headerY);
+    headerY += addressLines.length * 11;
+  }
+  const contact = [settings?.phone, settings?.email].filter(Boolean).join("  ·  ");
+  if (contact) {
+    doc.text(contact, textLeft, headerY);
+    headerY += 11;
+  }
+
+  // Invoice title block (right)
+  doc.setTextColor(...GREEN);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(17);
-  doc.text("INVOICE", right, 46, { align: "right" });
+  doc.setFontSize(24);
+  doc.text("INVOICE", right, 58, { align: "right" });
+  doc.setTextColor(...BROWN);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
-  doc.text(invoice.number, right, 64, { align: "right" });
+  doc.text(invoice.number, right, 76, { align: "right" });
+
+  const ruleY = Math.max(headerY + 8, 112);
+  doc.setDrawColor(...GREEN);
+  doc.setLineWidth(2);
+  doc.line(left, ruleY, right, ruleY);
+  doc.setLineWidth(1);
 
   // Client & details
   doc.setTextColor(...BROWN);
-  let y = 128;
+  let y = ruleY + 30;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
   doc.text("Bill to", left, y);
@@ -69,6 +116,7 @@ export function buildInvoicePdf({
     y += 14;
     doc.text(`Period: ${invoice.period_start} – ${invoice.period_end}`, right - 180, y);
   }
+
 
   // Table
   y += 36;
