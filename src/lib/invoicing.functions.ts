@@ -329,3 +329,105 @@ export const getResendStatus = createServerFn({ method: "GET" })
     }
     return { connected: true as const };
   });
+
+type SendTestEmailInput = {
+  to: string;
+  subjectTemplate?: string | null;
+  bodyTemplate?: string | null;
+};
+
+export const sendTestEmail = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: SendTestEmailInput) => {
+    const to = (input?.to ?? "").trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new Error("Enter a valid email address");
+    return {
+      to,
+      subjectTemplate: input.subjectTemplate?.trim() || null,
+      bodyTemplate: input.bodyTemplate?.trim() || null,
+    };
+  })
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+
+    const lovableKey = process.env["LOVABLE_API_KEY"];
+    const resendKey = process.env["RESEND_API_KEY"];
+    if (!lovableKey || !resendKey) {
+      return { sent: false as const, reason: "Resend is not connected yet." };
+    }
+
+    const { data: settings } = await supabase
+      .from("settings")
+      .select("*")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const businessName = settings?.business_name || "JW Garden Services";
+    const fromEmail = settings?.email || "onboarding@resend.dev";
+    const today = new Date();
+    const due = new Date(today.getTime() + 14 * 86400000).toISOString().slice(0, 10);
+
+    const tokens: Record<string, string> = {
+      client_name: "Sample Client",
+      business_name: businessName,
+      invoice_number: `${settings?.invoice_prefix ?? "INV-"}0001`,
+      total: "£120.00",
+      due_date: due,
+      due_clause: ` by ${due}`,
+      issue_date: today.toISOString().slice(0, 10),
+      payment_terms: settings?.payment_terms ?? "",
+      bank_details: settings?.bank_details ?? "",
+    };
+
+    const fill = (template: string) =>
+      template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, key: string) => tokens[key] ?? "");
+
+    const escapeHtml = (value: string) =>
+      value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    const subject = `[Test] ${fill(
+      data.subjectTemplate ||
+        settings?.email_subject_template ||
+        "Invoice {{invoice_number}} from {{business_name}}",
+    )}`;
+    const body = fill(
+      data.bodyTemplate ||
+        settings?.email_body_template ||
+        "Hi {{client_name}},\n\nPlease find attached invoice {{invoice_number}} for recent garden work.\n\nTotal due: {{total}}{{due_clause}}.\n\nMany thanks,\n{{business_name}}",
+    );
+
+    const html = `<div style="font-family:Arial,sans-serif;font-size:15px;color:#243">
+      ${escapeHtml(body)
+        .split(/\n{2,}/)
+        .map((para) => `<p>${para.replace(/\n/g, "<br/>")}</p>`)
+        .join("\n")}
+      <hr style="margin-top:24px;border:none;border-top:1px solid #ddd"/>
+      <p style="font-size:12px;color:#777">This is a test email sent from your CRM using sample invoice details. No PDF is attached.</p>
+    </div>`;
+
+    const response = await fetch("https://connector-gateway.lovable.dev/resend/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${lovableKey}`,
+        "X-Connection-Api-Key": resendKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: `${businessName} <${fromEmail}>`,
+        to: data.to,
+        subject,
+        html,
+      }),
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      console.error("Resend test send error", response.status, detail);
+      return {
+        sent: false as const,
+        reason: `Resend rejected the test email (${response.status}): ${detail}`.slice(0, 500),
+      };
+    }
+
+    return { sent: true as const, to: data.to, subject };
+  });
