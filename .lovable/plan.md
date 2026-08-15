@@ -24,6 +24,15 @@ Pressing Send: generates a branded PDF (logo, your business details, itemised vi
 
 Invoice numbering is sequential (JW-0001, JW-0002…).
 
+## Recurring invoices
+
+Any client can be put on a repeating schedule: weekly, fortnightly, every 4 weeks, monthly, quarterly, or a custom interval, with a start date and optional end date.
+
+On each due date the app builds the invoice automatically from that period's logged visits (plus any fixed retainer amount for the client) and either sends it straight away or drops it in a "Ready to send" list for you to approve with one tap — your choice per client. If a period has no visits and no fixed charge, it's skipped rather than sending a £0 invoice.
+
+A Recurring tab shows every schedule, its next due date, and lets you pause, edit, or skip the next run.
+
+
 ## What's needed from you
 
 - Lovable Cloud is enabled for the database, your login, and PDF storage.
@@ -32,7 +41,8 @@ Invoice numbering is sequential (JW-0001, JW-0002…).
 
 ## Technical notes
 
-- TanStack Start routes: `/auth` (public), `/_authenticated/` for dashboard, clients, visits, invoices.
-- Cloud tables: `clients`, `visits`, `invoices`, `invoice_items`, `settings` — all RLS-scoped to your user id, with explicit grants.
-- Visit pricing derived server-side from the client's `billing_mode` (`hourly` | `fixed` | both), stored as a snapshot on the invoice item so later rate changes don't rewrite history.
+- TanStack Start routes: `/auth` (public), `/_authenticated/` for dashboard, clients, visits, invoices, recurring.
 - PDF generated in a server function and stored in a private Cloud storage bucket; emailed via Resend from the same server function.
+- Cloud tables: `clients`, `visits`, `invoices`, `invoice_items`, `recurring_schedules`, `settings` — all RLS-scoped to your user id, with explicit grants.
+- Visit pricing derived server-side from the client's `billing_mode` (`hourly` | `fixed` | both), stored as a snapshot on the invoice item so later rate changes don't rewrite history.
+- Recurring runs handled by a scheduled job (pg_cron) hitting a `/api/public/run-recurring-invoices` route protected by a shared secret; it computes due schedules, builds invoices idempotently per period, and auto-sends or queues based on the schedule's setting.
