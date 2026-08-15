@@ -53,21 +53,42 @@ function DashboardPage() {
 
   return (
     <AppShell title="Dashboard" description="Where the round stands today.">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((s) => (
-          <Card key={s.label}>
-            <CardContent className="flex items-center gap-3 py-4">
-              <span className="flex size-10 items-center justify-center rounded-xl bg-primary/12 text-primary">
-                <s.icon className="size-5" />
-              </span>
-              <div>
+      <section className="overflow-hidden rounded-3xl border border-border bg-card">
+        <div className="grid gap-6 p-6 sm:p-8 lg:grid-cols-[1.1fr_1fr] lg:items-center">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+              {format(today, "EEEE d MMMM")}
+            </p>
+            <h2 className="mt-2 font-display text-4xl leading-tight sm:text-5xl">
+              {money(unbilledTotal)}{" "}
+              <span className="italic text-primary">ready to bill</span>
+            </h2>
+            <p className="mt-3 max-w-md text-muted-foreground">
+              {unbilled.length} unbilled {unbilled.length === 1 ? "visit" : "visits"} ·{" "}
+              {money(outstandingTotal)} awaiting payment across {outstanding.length}{" "}
+              {outstanding.length === 1 ? "invoice" : "invoices"}.
+            </p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Button asChild>
+                <Link to="/invoices">Create invoice</Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link to="/schedule">Open calendar</Link>
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-border">
+            {stats.map((s) => (
+              <div key={s.label} className="bg-card p-5">
+                <s.icon className="size-5 text-primary" />
+                <p className="mt-3 font-display text-2xl">{s.value}</p>
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">{s.label}</p>
-                <p className="font-display text-xl font-semibold">{s.value}</p>
               </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+            ))}
+          </div>
+        </div>
+      </section>
 
       {overdue.length > 0 ? (
         <Card className="mt-4 border-destructive/40">
@@ -83,27 +104,32 @@ function DashboardPage() {
         </Card>
       ) : null}
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Card>
+      <div className="mt-4 grid gap-4 lg:grid-cols-5">
+        <Card className="lg:col-span-3">
           <CardHeader className="flex-row items-center justify-between">
-            <CardTitle>Next 7 days</CardTitle>
+            <CardTitle className="font-display text-2xl font-normal">Next 7 days</CardTitle>
             <Button asChild size="sm" variant="ghost">
               <Link to="/schedule">Open calendar</Link>
             </Button>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent className="divide-y divide-border border-t border-border p-0">
             {upcoming.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nothing booked yet.</p>
+              <p className="p-5 text-sm text-muted-foreground">Nothing booked yet.</p>
             ) : (
               upcoming.map((job) => (
-                <div
-                  key={job.id}
-                  className="flex items-center justify-between rounded-lg border border-border px-3 py-2"
-                >
-                  <div>
-                    <p className="font-medium">{clientName(job.client_id)}</p>
+                <div key={job.id} className="flex items-center gap-4 px-5 py-3">
+                  <div className="w-14 shrink-0 text-center">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                      {format(parseISO(job.starts_at), "EEE")}
+                    </p>
+                    <p className="font-display text-xl leading-none">
+                      {format(parseISO(job.starts_at), "d")}
+                    </p>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">{clientName(job.client_id)}</p>
                     <p className="text-sm text-muted-foreground">
-                      {format(parseISO(job.starts_at), "EEE d MMM, HH:mm")}
+                      {format(parseISO(job.starts_at), "HH:mm")}
                     </p>
                   </div>
                   <Badge variant="secondary">{job.duration_minutes} min</Badge>
@@ -113,16 +139,16 @@ function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="lg:col-span-2">
           <CardHeader className="flex-row items-center justify-between">
-            <CardTitle>Ready to invoice</CardTitle>
+            <CardTitle className="font-display text-2xl font-normal">Ready to invoice</CardTitle>
             <Button asChild size="sm" variant="ghost">
-              <Link to="/invoices">Create invoice</Link>
+              <Link to="/invoices">New</Link>
             </Button>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent className="divide-y divide-border border-t border-border p-0">
             {unbilled.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Everything is billed. Nice.</p>
+              <p className="p-5 text-sm text-muted-foreground">Everything is billed. Nice.</p>
             ) : (
               Object.entries(
                 unbilled.reduce<Record<string, number>>((acc, v) => {
@@ -130,12 +156,9 @@ function DashboardPage() {
                   return acc;
                 }, {}),
               ).map(([id, amount]) => (
-                <div
-                  key={id}
-                  className="flex items-center justify-between rounded-lg border border-border px-3 py-2"
-                >
-                  <p className="font-medium">{clientName(id)}</p>
-                  <p className="font-semibold text-primary">{money(amount)}</p>
+                <div key={id} className="flex items-center justify-between px-5 py-3">
+                  <p className="truncate font-medium">{clientName(id)}</p>
+                  <p className="font-display text-lg text-primary">{money(amount)}</p>
                 </div>
               ))
             )}
@@ -145,3 +168,4 @@ function DashboardPage() {
     </AppShell>
   );
 }
+
