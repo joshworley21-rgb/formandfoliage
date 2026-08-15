@@ -1,0 +1,240 @@
+import { createServerFn } from "@tanstack/react-start";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+
+type CreateInvoiceInput = {
+  clientId: string;
+  visitIds: string[];
+  retainerDescription?: string | null;
+  retainerAmount?: number;
+  notes?: string | null;
+  dueInDays?: number;
+};
+
+export const createInvoice = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: CreateInvoiceInput) => {
+    if (!input?.clientId) throw new Error("A client is required");
+    return {
+      clientId: input.clientId,
+      visitIds: Array.isArray(input.visitIds) ? input.visitIds : [],
+      retainerDescription: input.retainerDescription ?? null,
+      retainerAmount: Number(input.retainerAmount ?? 0) || 0,
+      notes: input.notes ?? null,
+      dueInDays: Number(input.dueInDays ?? 14) || 14,
+    };
+  })
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+
+    const { data: client, error: clientError } = await supabase
+      .from("clients")
+      .select("*")
+      .eq("id", data.clientId)
+      .single();
+    if (clientError || !client) throw new Error("Client not found");
+
+    const { data: settings } = await supabase
+      .from("settings")
+      .select("*")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    let visits: Array<{
+      id: string;
+      visit_date: string;
+      hours: number;
+      description: string | null;
+      materials_cost: number;
+      amount: number;
+    }> = [];
+
+    if (data.visitIds.length > 0) {
+      const { data: rows, error } = await supabase
+        .from("visits")
+        .select("id, visit_date, hours, description, materials_cost, amount, billed")
+        .in("id", data.visitIds)
+        .eq("client_id", data.clientId);
+      if (error) throw error;
+      visits = (rows ?? []).filter((v) => !v.billed);
+    }
+
+    if (visits.length === 0 && data.retainerAmount <= 0) {
+      throw new Error("Nothing to invoice — select visits or add a retainer amount");
+    }
+
+    const visitTotal = visits.reduce((sum, v) => sum + Number(v.amount), 0);
+    const subtotal = Math.round((visitTotal + data.retainerAmount) * 100) / 100;
+    const vatRate = settings?.vat_registered ? Number(settings.vat_rate ?? 0) : 0;
+    const vatAmount = Math.round(subtotal * (vatRate / 100) * 100) / 100;
+    const total = Math.round((subtotal + vatAmount) * 100) / 100;
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: number, error: numberError } = await supabaseAdmin.rpc("next_invoice_number", {
+      _user_id: userId,
+    });
+    if (numberError) throw numberError;
+
+    const dates = visits.map((v) => v.visit_date).sort();
+    const issueDate = new Date();
+    const dueDate = new Date(issueDate.getTime() + data.dueInDays * 86400000);
+
+    const { data: invoice, error: invoiceError } = await supabase
+      .from("invoices")
+      .insert({
+        user_id: userId,
+        client_id: data.clientId,
+        number: number as string,
+        issue_date: issueDate.toISOString().slice(0, 10),
+        due_date: dueDate.toISOString().slice(0, 10),
+        period_start: dates[0] ?? null,
+        period_end: dates[dates.length - 1] ?? null,
+        subtotal,
+        vat_amount: vatAmount,
+        total,
+        notes: data.notes,
+      })
+      .select("*")
+      .single();
+    if (invoiceError) throw invoiceError;
+
+    const items = visits.map((v) => ({
+      user_id: userId,
+      invoice_id: invoice.id,
+      visit_id: v.id,
+      item_date: v.visit_date,
+      description:
+        v.description?.trim() ||
+        (client.billing_mode === "fixed" ? "Garden maintenance visit" : "Garden maintenance"),
+      quantity: client.billing_mode === "fixed" ? 1 : Number(v.hours),
+      unit_price:
+        client.billing_mode === "fixed" ? Number(v.amount) : Number(client.hourly_rate ?? 0),
+      amount: Number(v.amount),
+    }));
+
+    if (data.retainerAmount > 0) {
+      items.push({
+        user_id: userId,
+        invoice_id: invoice.id,
+        visit_id: null as unknown as string,
+        item_date: issueDate.toISOString().slice(0, 10),
+        description: data.retainerDescription || "Maintenance retainer",
+        quantity: 1,
+        unit_price: data.retainerAmount,
+        amount: data.retainerAmount,
+      });
+    }
+
+    if (items.length > 0) {
+      const { error } = await supabase.from("invoice_items").insert(items);
+      if (error) throw error;
+    }
+
+    if (visits.length > 0) {
+      const { error } = await supabase
+        .from("visits")
+        .update({ billed: true, invoice_id: invoice.id })
+        .in(
+          "id",
+          visits.map((v) => v.id),
+        );
+      if (error) throw error;
+    }
+
+    return { invoiceId: invoice.id as string, number: invoice.number as string, total };
+  });
+
+type SendInvoiceInput = {
+  invoiceId: string;
+  pdfBase64: string;
+  message?: string | null;
+};
+
+export const sendInvoiceEmail = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: SendInvoiceInput) => {
+    if (!input?.invoiceId) throw new Error("invoiceId is required");
+    if (!input?.pdfBase64) throw new Error("Invoice PDF is missing");
+    return {
+      invoiceId: input.invoiceId,
+      pdfBase64: input.pdfBase64,
+      message: input.message ?? null,
+    };
+  })
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+
+    const { data: invoice, error } = await supabase
+      .from("invoices")
+      .select("*, clients(name, email)")
+      .eq("id", data.invoiceId)
+      .single();
+    if (error || !invoice) throw new Error("Invoice not found");
+
+    const client = invoice.clients as unknown as { name: string; email: string | null } | null;
+    if (!client?.email) throw new Error("This client has no email address saved");
+
+    const { data: settings } = await supabase
+      .from("settings")
+      .select("*")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const businessName = settings?.business_name || "JW Garden Services";
+    const path = `${userId}/${invoice.id}.pdf`;
+    const bytes = Uint8Array.from(atob(data.pdfBase64), (c) => c.charCodeAt(0));
+
+    await supabase.storage.from("invoices").upload(path, bytes, {
+      contentType: "application/pdf",
+      upsert: true,
+    });
+
+    const apiKey = process.env["RESEND_API_KEY"];
+    if (!apiKey) {
+      return {
+        sent: false,
+        reason:
+          "Email is not connected yet — add your Resend API key in Settings to send invoices by email.",
+      };
+    }
+
+    const from = settings?.email
+      ? `${businessName} <onboarding@resend.dev>`
+      : `${businessName} <onboarding@resend.dev>`;
+
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from,
+        to: [client.email],
+        ...(settings?.email ? { reply_to: settings.email } : {}),
+        subject: `Invoice ${invoice.number} from ${businessName}`,
+        html: `<div style="font-family:Arial,sans-serif;font-size:15px;color:#243">
+          <p>Hi ${client.name},</p>
+          <p>${data.message ?? `Please find attached invoice <strong>${invoice.number}</strong> for recent garden work.`}</p>
+          <p>Total due: <strong>£${Number(invoice.total).toFixed(2)}</strong>${
+            invoice.due_date ? ` by ${invoice.due_date}` : ""
+          }.</p>
+          ${settings?.bank_details ? `<p>Payment details:<br/>${String(settings.bank_details).replace(/\n/g, "<br/>")}</p>` : ""}
+          <p>Many thanks,<br/>${businessName}</p>
+        </div>`,
+        attachments: [{ filename: `${invoice.number}.pdf`, content: data.pdfBase64 }],
+      }),
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      console.error("Resend error", detail);
+      throw new Error("The email provider rejected the message. Check your Resend API key.");
+    }
+
+    await supabase
+      .from("invoices")
+      .update({ status: "sent", sent_at: new Date().toISOString(), pdf_path: path })
+      .eq("id", invoice.id);
+
+    return { sent: true, to: client.email };
+  });
