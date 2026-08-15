@@ -32,6 +32,17 @@ On each due date the app builds the invoice automatically from that period's log
 
 A Recurring tab shows every schedule, its next due date, and lets you pause, edit, or skip the next run.
 
+## Scheduling and calendar
+
+**Schedule view** — month, week and day calendars showing planned jobs, colour-coded by status (scheduled, done, missed, cancelled). On the phone, the day and week views are the default with a simple agenda list; month gives the overview.
+
+**Booking a job** — tap a day (or "New job") to schedule a client, date, start time, expected duration and notes. Jobs can repeat on their own maintenance pattern — weekly, fortnightly, every 4 weeks, monthly — generating the upcoming visits automatically. Drag or edit to move a job to another day; editing a repeat asks whether to change just that one or the whole series.
+
+**Closing the loop** — from a scheduled job you tap "Complete" and confirm the actual hours worked, which turns it into a logged visit ready for invoicing. Jobs you didn't get to can be marked missed or rescheduled, so nothing silently disappears.
+
+**Dashboard** gains a "Today / next 7 days" round list with client address and phone for quick directions and calls, plus a count of overdue jobs still awaiting completion.
+
+
 
 ## What's needed from you
 
