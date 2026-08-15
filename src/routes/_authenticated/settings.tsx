@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useSaveSettings, useSettings } from "@/hooks/use-crm";
-import { getOutlookSender } from "@/lib/invoicing.functions";
+import { getResendStatus } from "@/lib/invoicing.functions";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({
