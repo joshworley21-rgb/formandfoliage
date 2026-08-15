@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { runOrQueue } from "@/lib/offline-queue";
 import type {
   Client,
   Invoice,
@@ -69,10 +70,14 @@ export function useSaveClient() {
     mutationFn: async (input: Partial<Client> & { name: string }) => {
       const user_id = await currentUserId();
       const payload = { ...input, user_id };
-      const { error } = input.id
-        ? await supabase.from("clients").update(payload).eq("id", input.id)
-        : await supabase.from("clients").insert(payload);
-      if (error) throw error;
+      await runOrQueue(
+        input.id ? `Client "${input.name}" update` : `New client "${input.name}"`,
+        [
+          input.id
+            ? { kind: "update", table: "clients", payload, match: { id: input.id } }
+            : { kind: "insert", table: "clients", payload },
+        ],
+      );
     },
     onSuccess: () => qc.invalidateQueries(),
   });
@@ -82,8 +87,9 @@ export function useDeleteClient() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("clients").delete().eq("id", id);
-      if (error) throw error;
+      await runOrQueue("Delete client", [
+        { kind: "delete", table: "clients", match: { id } },
+      ]);
     },
     onSuccess: () => qc.invalidateQueries(),
   });
@@ -109,12 +115,15 @@ export function useSaveVisit() {
   return useMutation({
     mutationFn: async (input: Partial<Visit> & { client_id: string }) => {
       const user_id = await currentUserId();
-      const payload = { ...input, user_id };
-      const { data, error } = input.id
-        ? await supabase.from("visits").update(payload).eq("id", input.id).select("id").single()
-        : await supabase.from("visits").insert(payload).select("id").single();
-      if (error) throw error;
-      return data;
+      // Generate the id client-side so the visit can be linked (and queued) offline.
+      const id = input.id ?? crypto.randomUUID();
+      const payload = { ...input, id, user_id };
+      await runOrQueue(input.id ? "Visit update" : "New visit", [
+        input.id
+          ? { kind: "update", table: "visits", payload, match: { id } }
+          : { kind: "insert", table: "visits", payload },
+      ]);
+      return { id };
     },
     onSuccess: () => qc.invalidateQueries(),
   });
@@ -124,8 +133,9 @@ export function useDeleteVisit() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("visits").delete().eq("id", id);
-      if (error) throw error;
+      await runOrQueue("Delete visit", [
+        { kind: "delete", table: "visits", match: { id } },
+      ]);
     },
     onSuccess: () => qc.invalidateQueries(),
   });
@@ -152,10 +162,11 @@ export function useSaveJob() {
     mutationFn: async (input: Partial<ScheduledJob> & { client_id: string; starts_at: string }) => {
       const user_id = await currentUserId();
       const payload = { ...input, user_id };
-      const { error } = input.id
-        ? await supabase.from("scheduled_jobs").update(payload).eq("id", input.id)
-        : await supabase.from("scheduled_jobs").insert(payload);
-      if (error) throw error;
+      await runOrQueue(input.id ? "Job update" : "New job", [
+        input.id
+          ? { kind: "update", table: "scheduled_jobs", payload, match: { id: input.id } }
+          : { kind: "insert", table: "scheduled_jobs", payload },
+      ]);
     },
     onSuccess: () => qc.invalidateQueries(),
   });
@@ -166,17 +177,24 @@ export function useDeleteJob() {
   return useMutation({
     mutationFn: async ({ id, wholeSeries }: { id: string; wholeSeries?: string | null }) => {
       if (wholeSeries) {
-        const { error } = await supabase
-          .from("scheduled_jobs")
-          .delete()
-          .eq("series_id", wholeSeries)
-          .eq("status", "scheduled");
-        if (error) throw error;
-        await supabase.from("job_series").update({ active: false }).eq("id", wholeSeries);
+        await runOrQueue("Delete repeating job", [
+          {
+            kind: "delete",
+            table: "scheduled_jobs",
+            match: { series_id: wholeSeries, status: "scheduled" },
+          },
+          {
+            kind: "update",
+            table: "job_series",
+            payload: { active: false },
+            match: { id: wholeSeries },
+          },
+        ]);
         return;
       }
-      const { error } = await supabase.from("scheduled_jobs").delete().eq("id", id);
-      if (error) throw error;
+      await runOrQueue("Delete job", [
+        { kind: "delete", table: "scheduled_jobs", match: { id } },
+      ]);
     },
     onSuccess: () => qc.invalidateQueries(),
   });
@@ -261,8 +279,9 @@ export function useUpdateInvoice() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, patch }: { id: string; patch: Partial<Invoice> }) => {
-      const { error } = await supabase.from("invoices").update(patch).eq("id", id);
-      if (error) throw error;
+      await runOrQueue("Invoice update", [
+        { kind: "update", table: "invoices", payload: patch, match: { id } },
+      ]);
     },
     onSuccess: () => qc.invalidateQueries(),
   });
@@ -290,10 +309,11 @@ export function useSaveRecurring() {
     mutationFn: async (input: Partial<RecurringSchedule> & { client_id: string }) => {
       const user_id = await currentUserId();
       const payload = { ...input, user_id };
-      const { error } = input.id
-        ? await supabase.from("recurring_schedules").update(payload).eq("id", input.id)
-        : await supabase.from("recurring_schedules").insert(payload);
-      if (error) throw error;
+      await runOrQueue("Recurring schedule", [
+        input.id
+          ? { kind: "update", table: "recurring_schedules", payload, match: { id: input.id } }
+          : { kind: "insert", table: "recurring_schedules", payload },
+      ]);
     },
     onSuccess: () => qc.invalidateQueries(),
   });
@@ -303,8 +323,9 @@ export function useDeleteRecurring() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("recurring_schedules").delete().eq("id", id);
-      if (error) throw error;
+      await runOrQueue("Delete recurring schedule", [
+        { kind: "delete", table: "recurring_schedules", match: { id } },
+      ]);
     },
     onSuccess: () => qc.invalidateQueries(),
   });
@@ -340,10 +361,14 @@ export function useSaveSettings() {
   return useMutation({
     mutationFn: async (patch: Partial<Settings>) => {
       const user_id = await currentUserId();
-      const { error } = await supabase
-        .from("settings")
-        .upsert({ ...patch, user_id }, { onConflict: "user_id" });
-      if (error) throw error;
+      await runOrQueue("Settings update", [
+        {
+          kind: "upsert",
+          table: "settings",
+          payload: { ...patch, user_id },
+          onConflict: "user_id",
+        },
+      ]);
     },
     onSuccess: () => qc.invalidateQueries(),
   });
@@ -374,10 +399,11 @@ export function useSaveJobTask() {
     mutationFn: async (input: Partial<JobTask> & { job_id: string; title: string }) => {
       const user_id = await workspaceOwnerId();
       const payload = { ...input, user_id };
-      const { error } = input.id
-        ? await supabase.from("job_tasks").update(payload).eq("id", input.id)
-        : await supabase.from("job_tasks").insert(payload);
-      if (error) throw error;
+      await runOrQueue("Job sheet task", [
+        input.id
+          ? { kind: "update", table: "job_tasks", payload, match: { id: input.id } }
+          : { kind: "insert", table: "job_tasks", payload },
+      ]);
     },
     onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ["job_tasks", v.job_id] }),
   });
@@ -387,8 +413,9 @@ export function useDeleteJobTask() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id }: { id: string; jobId: string }) => {
-      const { error } = await supabase.from("job_tasks").delete().eq("id", id);
-      if (error) throw error;
+      await runOrQueue("Delete job sheet task", [
+        { kind: "delete", table: "job_tasks", match: { id } },
+      ]);
     },
     onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ["job_tasks", v.jobId] }),
   });
@@ -466,12 +493,17 @@ export function useStaffCompleteJob() {
       hours: number;
       description?: string;
     }) => {
-      const { error } = await supabase.rpc("staff_complete_job", {
-        _job_id: jobId,
-        _hours: hours,
-        ...(description ? { _description: description } : {}),
-      });
-      if (error) throw error;
+      await runOrQueue("Job completion", [
+        {
+          kind: "rpc",
+          fn: "staff_complete_job",
+          args: {
+            _job_id: jobId,
+            _hours: hours,
+            ...(description ? { _description: description } : {}),
+          },
+        },
+      ]);
     },
     onSuccess: () => qc.invalidateQueries(),
   });
