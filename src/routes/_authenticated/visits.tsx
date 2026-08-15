@@ -4,6 +4,7 @@ import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import { OwnerOnly } from "@/components/OwnerOnly";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -36,7 +37,11 @@ export const Route = createFileRoute("/_authenticated/visits")({
       { property: "og:description", content: "Log hours and materials for every completed garden visit." },
     ],
   }),
-  component: VisitsPage,
+  component: () => (
+    <OwnerOnly>
+      <VisitsPage />
+    </OwnerOnly>
+  ),
 });
 
 function todayISO() {

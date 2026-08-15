@@ -19,6 +19,7 @@ import {
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import { OwnerOnly } from "@/components/OwnerOnly";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -63,7 +64,11 @@ export const Route = createFileRoute("/_authenticated/invoices")({
       { property: "og:description", content: "Turn logged visits into branded PDF invoices and email them in one click." },
     ],
   }),
-  component: InvoicesPage,
+  component: () => (
+    <OwnerOnly>
+      <InvoicesPage />
+    </OwnerOnly>
+  ),
 });
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline"> = {

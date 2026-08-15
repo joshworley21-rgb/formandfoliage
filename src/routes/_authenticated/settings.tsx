@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import { OwnerOnly } from "@/components/OwnerOnly";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -23,7 +24,11 @@ export const Route = createFileRoute("/_authenticated/settings")({
       { property: "og:description", content: "Business details, VAT, invoice numbering and payment terms." },
     ],
   }),
-  component: SettingsPage,
+  component: () => (
+    <OwnerOnly>
+      <SettingsPage />
+    </OwnerOnly>
+  ),
 });
 
 function SettingsPage() {
