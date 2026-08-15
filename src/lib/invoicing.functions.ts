@@ -188,47 +188,54 @@ export const sendInvoiceEmail = createServerFn({ method: "POST" })
       upsert: true,
     });
 
-    const apiKey = process.env["RESEND_API_KEY"];
-    if (!apiKey) {
+    const lovableKey = process.env["LOVABLE_API_KEY"];
+    const outlookKey = process.env["MICROSOFT_OUTLOOK_API_KEY"];
+    if (!lovableKey || !outlookKey) {
       return {
         sent: false,
         reason:
-          "Email is not connected yet — add your Resend API key in Settings to send invoices by email.",
+          "Email is not connected yet — connect your Outlook account in Settings to send invoices by email.",
       };
     }
 
-    const from = settings?.email
-      ? `${businessName} <onboarding@resend.dev>`
-      : `${businessName} <onboarding@resend.dev>`;
+    const htmlBody = `<div style="font-family:Arial,sans-serif;font-size:15px;color:#243">
+      <p>Hi ${client.name},</p>
+      <p>${data.message ?? `Please find attached invoice <strong>${invoice.number}</strong> for recent garden work.`}</p>
+      <p>Total due: <strong>£${Number(invoice.total).toFixed(2)}</strong>${
+        invoice.due_date ? ` by ${invoice.due_date}` : ""
+      }.</p>
+      ${settings?.bank_details ? `<p>Payment details:<br/>${String(settings.bank_details).replace(/\n/g, "<br/>")}</p>` : ""}
+      <p>Many thanks,<br/>${businessName}</p>
+    </div>`;
 
-    const response = await fetch("https://api.resend.com/emails", {
+    const response = await fetch("https://connector-gateway.lovable.dev/microsoft_outlook/me/sendMail", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${lovableKey}`,
+        "X-Connection-Api-Key": outlookKey,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from,
-        to: [client.email],
-        ...(settings?.email ? { reply_to: settings.email } : {}),
-        subject: `Invoice ${invoice.number} from ${businessName}`,
-        html: `<div style="font-family:Arial,sans-serif;font-size:15px;color:#243">
-          <p>Hi ${client.name},</p>
-          <p>${data.message ?? `Please find attached invoice <strong>${invoice.number}</strong> for recent garden work.`}</p>
-          <p>Total due: <strong>£${Number(invoice.total).toFixed(2)}</strong>${
-            invoice.due_date ? ` by ${invoice.due_date}` : ""
-          }.</p>
-          ${settings?.bank_details ? `<p>Payment details:<br/>${String(settings.bank_details).replace(/\n/g, "<br/>")}</p>` : ""}
-          <p>Many thanks,<br/>${businessName}</p>
-        </div>`,
-        attachments: [{ filename: `${invoice.number}.pdf`, content: data.pdfBase64 }],
+        message: {
+          subject: `Invoice ${invoice.number} from ${businessName}`,
+          body: { contentType: "HTML", content: htmlBody },
+          toRecipients: [{ emailAddress: { address: client.email, name: client.name } }],
+          attachments: [
+            {
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              name: `${invoice.number}.pdf`,
+              contentType: "application/pdf",
+              contentBytes: data.pdfBase64,
+            },
+          ],
+        },
       }),
     });
 
     if (!response.ok) {
       const detail = await response.text();
-      console.error("Resend error", detail);
-      throw new Error("The email provider rejected the message. Check your Resend API key.");
+      console.error("Outlook send error", response.status, detail);
+      throw new Error(`Outlook could not send the email. ${response.status}: ${detail}`);
     }
 
     await supabase
