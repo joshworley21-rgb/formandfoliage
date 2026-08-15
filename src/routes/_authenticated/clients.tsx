@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useClients, useDeleteClient, useSaveClient } from "@/hooks/use-crm";
+import { useIsStaff } from "@/hooks/use-workspace";
 import { money, type BillingMode, type Client } from "@/lib/crm";
 
 export const Route = createFileRoute("/_authenticated/clients")({
@@ -51,6 +52,7 @@ const EMPTY = {
 };
 
 function ClientsPage() {
+  const isStaff = useIsStaff();
   const { data: clients = [], isLoading } = useClients();
   const save = useSaveClient();
   const remove = useDeleteClient();
@@ -103,8 +105,9 @@ function ClientsPage() {
   return (
     <AppShell
       title="Clients"
-      description="Every garden you look after, with their rates."
+      description={isStaff ? "Gardens on your round, with access notes." : "Every garden you look after, with their rates."}
       actions={
+        isStaff ? null : (
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button onClick={openNew}>
@@ -210,6 +213,7 @@ function ClientsPage() {
             </form>
           </DialogContent>
         </Dialog>
+        )
       }
     >
       {isLoading ? (
@@ -230,6 +234,10 @@ function ClientsPage() {
                   {client.address ? (
                     <p className="mt-0.5 truncate text-sm text-muted-foreground">{client.address}</p>
                   ) : null}
+                  {client.notes ? (
+                    <p className="mt-1 line-clamp-2 text-sm text-foreground/80">{client.notes}</p>
+                  ) : null}
+                  {isStaff ? null : (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <Badge variant="secondary">
                       {client.billing_mode === "fixed"
@@ -242,7 +250,9 @@ function ClientsPage() {
                       <span className="text-xs text-warning-foreground">No email for invoices</span>
                     )}
                   </div>
+                  )}
                 </div>
+                {isStaff ? null : (
                 <div className="flex shrink-0 gap-1">
                   <Button variant="ghost" size="icon" onClick={() => openEdit(client)} aria-label="Edit">
                     <Pencil className="size-4" />
@@ -260,6 +270,7 @@ function ClientsPage() {
                     <Trash2 className="size-4 text-destructive" />
                   </Button>
                 </div>
+                )}
               </CardContent>
             </Card>
           ))}

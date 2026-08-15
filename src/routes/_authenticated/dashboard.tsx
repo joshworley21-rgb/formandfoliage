@@ -20,6 +20,7 @@ import {
   Send,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { OwnerOnly } from "@/components/OwnerOnly";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,7 +39,11 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
       },
     ],
   }),
-  component: DashboardPage,
+  component: () => (
+    <OwnerOnly>
+      <DashboardPage />
+    </OwnerOnly>
+  ),
 });
 
 const STATUS_STYLES = {

@@ -642,6 +642,39 @@ export type Database = {
         }
         Relationships: []
       }
+      team_members: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          name: string | null
+          owner_id: string
+          role: Database["public"]["Enums"]["app_role"]
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          name?: string | null
+          owner_id: string
+          role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          name?: string | null
+          owner_id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       visits: {
         Row: {
           amount: number
@@ -707,9 +740,33 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_staff_invite: { Args: never; Returns: string }
+      is_staff: { Args: { _uid: string }; Returns: boolean }
+      my_workspace: {
+        Args: never
+        Returns: {
+          owner_id: string
+          role: Database["public"]["Enums"]["app_role"]
+        }[]
+      }
       next_invoice_number: { Args: { _user_id: string }; Returns: string }
+      owner_for: { Args: { _uid: string }; Returns: string }
+      staff_clients: {
+        Args: never
+        Returns: {
+          address: string
+          id: string
+          name: string
+          notes: string
+        }[]
+      }
+      staff_complete_job: {
+        Args: { _description?: string; _hours: number; _job_id: string }
+        Returns: string
+      }
     }
     Enums: {
+      app_role: "owner" | "staff"
       billing_mode: "hourly" | "fixed"
       email_event_status: "sent" | "failed" | "skipped"
       invoice_status: "draft" | "sent" | "paid"
@@ -847,6 +904,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      app_role: ["owner", "staff"],
       billing_mode: ["hourly", "fixed"],
       email_event_status: ["sent", "failed", "skipped"],
       invoice_status: ["draft", "sent", "paid"],

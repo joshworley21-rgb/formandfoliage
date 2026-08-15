@@ -20,18 +20,48 @@ async function currentUserId(): Promise<string> {
   return data.user.id;
 }
 
+/** Owner of the workspace the signed-in user belongs to (themselves, or their employer). */
+async function workspaceOwnerId(): Promise<string> {
+  const { data } = await supabase.rpc("my_workspace");
+  const row = Array.isArray(data) ? data[0] : data;
+  return (row?.owner_id as string) ?? (await currentUserId());
+}
+
 /* ---------------- clients ---------------- */
 
 export function useClients() {
   return useQuery({
     queryKey: ["clients"],
     queryFn: async (): Promise<Client[]> => {
+      const { data: ws } = await supabase.rpc("my_workspace");
+      const wsRow = Array.isArray(ws) ? ws[0] : ws;
+      if (wsRow?.role === "staff") {
+        // Staff only ever see name / address / notes — never contact details or rates.
+        const { data, error } = await supabase.rpc("staff_clients");
+        if (error) throw error;
+        return (data ?? []).map((row) => ({
+          id: row.id,
+          user_id: (wsRow.owner_id as string) ?? "",
+          name: row.name,
+          address: row.address,
+          notes: row.notes,
+          phone: null,
+          email: null,
+          billing_mode: "hourly",
+          hourly_rate: 0,
+          fixed_price: 0,
+          active: true,
+          created_at: "",
+          updated_at: "",
+        })) as Client[];
+      }
       const { data, error } = await supabase.from("clients").select("*").order("name");
       if (error) throw error;
       return data ?? [];
     },
   });
 }
+
 
 export function useSaveClient() {
   const qc = useQueryClient();
@@ -327,7 +357,7 @@ export function useSaveJobTask() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: Partial<JobTask> & { job_id: string; title: string }) => {
-      const user_id = await currentUserId();
+      const user_id = await workspaceOwnerId();
       const payload = { ...input, user_id };
       const { error } = input.id
         ? await supabase.from("job_tasks").update(payload).eq("id", input.id)
@@ -378,7 +408,7 @@ export function useUploadJobPhoto() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ jobId, file, caption }: { jobId: string; file: File; caption?: string }) => {
-      const user_id = await currentUserId();
+      const user_id = await workspaceOwnerId();
       const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
       const path = `${user_id}/${jobId}/${crypto.randomUUID()}.${ext}`;
       const { error: upErr } = await supabase.storage
@@ -403,5 +433,31 @@ export function useDeleteJobPhoto() {
       if (error) throw error;
     },
     onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ["job_photos", v.jobId] }),
+  });
+}
+
+/* ---------------- staff job completion ---------------- */
+
+/** Staff mark a job done; the visit is created and priced on the server. */
+export function useStaffCompleteJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      jobId,
+      hours,
+      description,
+    }: {
+      jobId: string;
+      hours: number;
+      description?: string;
+    }) => {
+      const { error } = await supabase.rpc("staff_complete_job", {
+        _job_id: jobId,
+        _hours: hours,
+        ...(description ? { _description: description } : {}),
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries(),
   });
 }

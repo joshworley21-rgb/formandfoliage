@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import { OwnerOnly } from "@/components/OwnerOnly";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -13,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useSaveSettings, useSettings } from "@/hooks/use-crm";
 import { getResendStatus, sendTestEmail } from "@/lib/invoicing.functions";
 import { EmailTemplatePreview } from "@/components/EmailTemplatePreview";
+import { useInviteMember, useRemoveMember, useTeam } from "@/hooks/use-workspace";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({
@@ -23,7 +25,11 @@ export const Route = createFileRoute("/_authenticated/settings")({
       { property: "og:description", content: "Business details, VAT, invoice numbering and payment terms." },
     ],
   }),
-  component: SettingsPage,
+  component: () => (
+    <OwnerOnly>
+      <SettingsPage />
+    </OwnerOnly>
+  ),
 });
 
 function SettingsPage() {
@@ -312,6 +318,94 @@ function SettingsPage() {
           </Button>
         </div>
       </form>
+
+      <div className="mt-6">
+        <TeamCard />
+      </div>
     </AppShell>
+  );
+}
+
+function TeamCard() {
+  const { data: team = [] } = useTeam();
+  const invite = useInviteMember();
+  const remove = useRemoveMember();
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Team access</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          Invite an employee by email. When they sign up with that email they can see the schedule,
+          job sheets, photos and client addresses, and mark jobs complete. They can never see rates,
+          visits, invoices, recurring billing or these settings.
+        </p>
+        <form
+          className="flex flex-wrap items-end gap-2"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!email.trim()) return;
+            try {
+              await invite.mutateAsync({ email, name });
+              setEmail("");
+              setName("");
+              toast.success("Employee invited");
+            } catch (error) {
+              toast.error(error instanceof Error ? error.message : "Could not invite");
+            }
+          }}
+        >
+          <div className="min-w-40 flex-1 space-y-1.5">
+            <Label htmlFor="staff-email">Work email</Label>
+            <Input
+              id="staff-email"
+              type="email"
+              value={email}
+              placeholder="name@example.com"
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+          <div className="min-w-32 flex-1 space-y-1.5">
+            <Label htmlFor="staff-name">Name (optional)</Label>
+            <Input id="staff-name" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <Button type="submit" disabled={invite.isPending}>
+            Invite
+          </Button>
+        </form>
+
+        {team.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No employees yet.</p>
+        ) : (
+          <ul className="divide-y divide-border rounded-xl border border-border">
+            {team.map((member) => (
+              <li key={member.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{member.name || member.email}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {member.email} · {member.user_id ? "Active" : "Invite pending"}
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={async () => {
+                    if (!confirm(`Remove access for ${member.email}?`)) return;
+                    await remove.mutateAsync(member.id);
+                    toast.success("Access removed");
+                  }}
+                >
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }

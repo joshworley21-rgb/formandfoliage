@@ -5,6 +5,7 @@ import { Plus, Repeat, Trash2, Zap } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import { OwnerOnly } from "@/components/OwnerOnly";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -45,7 +46,11 @@ export const Route = createFileRoute("/_authenticated/recurring")({
       { property: "og:description", content: "Set clients on weekly, fortnightly, monthly or quarterly invoice schedules." },
     ],
   }),
-  component: RecurringPage,
+  component: () => (
+    <OwnerOnly>
+      <RecurringPage />
+    </OwnerOnly>
+  ),
 });
 
 function advance(date: Date, frequency: Frequency) {
