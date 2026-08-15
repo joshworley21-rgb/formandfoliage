@@ -80,6 +80,9 @@ function InvoicesPage() {
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [openHistory, setOpenHistory] = useState<string | null>(null);
+  const [preview, setPreview] = useState<
+    { invoice: Invoice; url: string; intent: "download" | "send" } | null
+  >(null);
   const queryClient = useQueryClient();
 
   const sendFn = useServerFn(sendInvoiceEmail);
