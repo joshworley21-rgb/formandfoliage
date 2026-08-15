@@ -408,7 +408,7 @@ export function useUploadJobPhoto() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ jobId, file, caption }: { jobId: string; file: File; caption?: string }) => {
-      const user_id = await currentUserId();
+      const user_id = await workspaceOwnerId();
       const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
       const path = `${user_id}/${jobId}/${crypto.randomUUID()}.${ext}`;
       const { error: upErr } = await supabase.storage
