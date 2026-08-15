@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  useAllInvoiceEmailEvents,
   useClients,
   useInvoiceEmailEvents,
   useInvoices,
@@ -80,6 +81,7 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline"> = {
 function InvoicesPage() {
   const { data: clients = [] } = useClients();
   const { data: invoices = [] } = useInvoices();
+  const { data: emailEvents = [] } = useAllInvoiceEmailEvents();
   const { data: visits = [] } = useVisits();
   const { data: settings } = useSettings();
   const updateInvoice = useUpdateInvoice();
@@ -158,7 +160,7 @@ function InvoicesPage() {
     } finally {
       setBusyId(null);
       setOpenHistory(invoice.id);
-      await queryClient.invalidateQueries({ queryKey: ["invoice_email_events", invoice.id] });
+      await queryClient.invalidateQueries({ queryKey: ["invoice_email_events"] });
       await queryClient.invalidateQueries({ queryKey: ["invoices"] });
     }
   }
@@ -253,6 +255,9 @@ function InvoicesPage() {
                   </Button>
                 </div>
               </div>
+              <LastAttempt
+                event={emailEvents.find((e) => e.invoice_id === invoice.id) ?? null}
+              />
               {openHistory === invoice.id ? <EmailHistory invoiceId={invoice.id} /> : null}
               </CardContent>
             </Card>
@@ -315,6 +320,12 @@ function InvoicesPage() {
         </DialogContent>
       </Dialog>
 
+      <div className="mt-6">
+        <DeliveryLog
+          events={emailEvents}
+          invoiceNumber={(id) => invoices.find((i) => i.id === id)?.number ?? "Invoice"}
+        />
+      </div>
     </AppShell>
   );
 }
@@ -327,6 +338,76 @@ const EVENT_META: Record<
   failed: { label: "Failed", icon: AlertCircle, className: "text-destructive" },
   skipped: { label: "Not sent", icon: MinusCircle, className: "text-muted-foreground" },
 };
+
+function LastAttempt({ event }: { event: InvoiceEmailEvent | null }) {
+  if (!event) {
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <MinusCircle className="size-3.5" /> Not sent yet
+      </p>
+    );
+  }
+  const meta = EVENT_META[event.status] ?? EVENT_META["skipped"]!;
+  const Icon = meta.icon;
+  return (
+    <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+      <Icon className={`size-3.5 ${meta.className}`} />
+      <span className="font-medium text-foreground">{meta.label}</span>
+      {event.recipient ? <span>to {event.recipient}</span> : null}
+      <span>·</span>
+      <span>{format(parseISO(event.created_at), "d MMM yyyy, HH:mm")}</span>
+      {event.detail && event.status !== "sent" ? <span>· {event.detail}</span> : null}
+    </p>
+  );
+}
+
+function DeliveryLog({
+  events,
+  invoiceNumber,
+}: {
+  events: InvoiceEmailEvent[];
+  invoiceNumber: (invoiceId: string) => string;
+}) {
+  return (
+    <Card>
+      <CardContent className="space-y-3 py-4">
+        <div>
+          <p className="font-display text-lg font-semibold">Delivery log</p>
+          <p className="text-sm text-muted-foreground">
+            Every invoice email attempt, newest first, with the timestamp and result.
+          </p>
+        </div>
+        {events.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No invoice emails sent yet.</p>
+        ) : (
+          <ul className="divide-y divide-border rounded-xl border border-border">
+            {events.map((event) => {
+              const meta = EVENT_META[event.status] ?? EVENT_META["skipped"]!;
+              const Icon = meta.icon;
+              return (
+                <li key={event.id} className="flex items-start gap-3 px-3 py-2.5 text-sm">
+                  <Icon className={`mt-0.5 size-4 shrink-0 ${meta.className}`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">
+                      {invoiceNumber(event.invoice_id)} · {meta.label}
+                      {event.recipient ? ` · ${event.recipient}` : ""}
+                    </p>
+                    {event.detail ? (
+                      <p className="break-words text-xs text-muted-foreground">{event.detail}</p>
+                    ) : null}
+                  </div>
+                  <p className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+                    {format(parseISO(event.created_at), "d MMM yyyy, HH:mm")}
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function EmailHistory({ invoiceId }: { invoiceId: string }) {
   const { data: events = [], isLoading } = useInvoiceEmailEvents(invoiceId);
