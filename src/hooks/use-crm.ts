@@ -435,3 +435,29 @@ export function useDeleteJobPhoto() {
     onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ["job_photos", v.jobId] }),
   });
 }
+
+/* ---------------- staff job completion ---------------- */
+
+/** Staff mark a job done; the visit is created and priced on the server. */
+export function useStaffCompleteJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      jobId,
+      hours,
+      description,
+    }: {
+      jobId: string;
+      hours: number;
+      description?: string;
+    }) => {
+      const { error } = await supabase.rpc("staff_complete_job", {
+        _job_id: jobId,
+        _hours: hours,
+        _description: description ?? null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
