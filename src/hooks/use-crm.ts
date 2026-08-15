@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type {
   Client,
   Invoice,
+  InvoiceEmailEvent,
   InvoiceItem,
   JobSeries,
   RecurringSchedule,
@@ -170,6 +171,22 @@ export function useInvoices() {
         .from("invoices")
         .select("*")
         .order("issue_date", { ascending: false })
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+}
+
+export function useInvoiceEmailEvents(invoiceId?: string) {
+  return useQuery({
+    enabled: Boolean(invoiceId),
+    queryKey: ["invoice_email_events", invoiceId],
+    queryFn: async (): Promise<InvoiceEmailEvent[]> => {
+      const { data, error } = await supabase
+        .from("invoice_email_events")
+        .select("*")
+        .eq("invoice_id", invoiceId!)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data ?? [];
