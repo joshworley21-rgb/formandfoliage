@@ -264,6 +264,51 @@ function InvoicesPage() {
           setCreating(false);
         }}
       />
+
+      <Dialog open={preview !== null} onOpenChange={(open) => (open ? null : closePreview())}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Preview {preview?.invoice.number}</DialogTitle>
+            <DialogDescription>
+              Check the layout before you {preview?.intent === "send" ? "send" : "download"} it.
+            </DialogDescription>
+          </DialogHeader>
+          {preview ? (
+            <iframe
+              title={`Invoice ${preview.invoice.number} preview`}
+              src={preview.url}
+              className="h-[65vh] w-full rounded-lg border bg-muted"
+            />
+          ) : null}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={closePreview}>
+              Close
+            </Button>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                if (!preview) return;
+                const invoice = preview.invoice;
+                closePreview();
+                await download(invoice);
+              }}
+            >
+              <Download className="size-4" /> Download PDF
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!preview) return;
+                const invoice = preview.invoice;
+                closePreview();
+                await sendOneClick(invoice);
+              }}
+            >
+              <Mail className="size-4" /> {preview?.invoice.status === "draft" ? "Send" : "Resend"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </AppShell>
   );
 }
