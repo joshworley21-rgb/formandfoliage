@@ -5,6 +5,7 @@ export type Visit = Database["public"]["Tables"]["visits"]["Row"];
 export type ScheduledJob = Database["public"]["Tables"]["scheduled_jobs"]["Row"];
 export type JobSeries = Database["public"]["Tables"]["job_series"]["Row"];
 export type Invoice = Database["public"]["Tables"]["invoices"]["Row"];
+export type InvoiceEmailEvent = Database["public"]["Tables"]["invoice_email_events"]["Row"];
 export type InvoiceItem = Database["public"]["Tables"]["invoice_items"]["Row"];
 export type RecurringSchedule = Database["public"]["Tables"]["recurring_schedules"]["Row"];
 export type Settings = Database["public"]["Tables"]["settings"]["Row"];

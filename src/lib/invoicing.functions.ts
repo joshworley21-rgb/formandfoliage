@@ -171,7 +171,26 @@ export const sendInvoiceEmail = createServerFn({ method: "POST" })
     if (error || !invoice) throw new Error("Invoice not found");
 
     const client = invoice.clients as unknown as { name: string; email: string | null } | null;
-    if (!client?.email) throw new Error("This client has no email address saved");
+
+    const logEvent = async (
+      status: "sent" | "failed" | "skipped",
+      detail: string | null,
+      providerMessageId?: string | null,
+    ) => {
+      await supabase.from("invoice_email_events").insert({
+        user_id: userId,
+        invoice_id: data.invoiceId,
+        status,
+        recipient: client?.email ?? null,
+        provider_message_id: providerMessageId ?? null,
+        detail,
+      });
+    };
+
+    if (!client?.email) {
+      await logEvent("failed", "This client has no email address saved");
+      throw new Error("This client has no email address saved");
+    }
 
     const { data: settings } = await supabase
       .from("settings")
@@ -191,6 +210,7 @@ export const sendInvoiceEmail = createServerFn({ method: "POST" })
     const lovableKey = process.env["LOVABLE_API_KEY"];
     const resendKey = process.env["RESEND_API_KEY"];
     if (!lovableKey || !resendKey) {
+      await logEvent("skipped", "Email is not connected — Resend is not set up yet.");
       return {
         sent: false,
         reason:
@@ -234,13 +254,24 @@ export const sendInvoiceEmail = createServerFn({ method: "POST" })
     if (!response.ok) {
       const detail = await response.text();
       console.error("Resend send error", response.status, detail);
+      await logEvent("failed", `${response.status}: ${detail}`.slice(0, 500));
       throw new Error(`Resend could not send the email. ${response.status}: ${detail}`);
+    }
+
+    let providerMessageId: string | null = null;
+    try {
+      const payload = (await response.json()) as { id?: string };
+      providerMessageId = payload?.id ?? null;
+    } catch {
+      providerMessageId = null;
     }
 
     await supabase
       .from("invoices")
       .update({ status: "sent", sent_at: new Date().toISOString(), pdf_path: path })
       .eq("id", invoice.id);
+
+    await logEvent("sent", `Delivered to ${client.email} via Resend`, providerMessageId);
 
     return { sent: true, to: client.email };
   });

@@ -1,8 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { format, parseISO } from "date-fns";
-import { Download, FilePlus2, Mail, Plus } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Download,
+  FilePlus2,
+  History,
+  Mail,
+  MinusCircle,
+  Plus,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
@@ -30,13 +42,14 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import {
   useClients,
+  useInvoiceEmailEvents,
   useInvoices,
   useSettings,
   useUpdateInvoice,
   useVisits,
 } from "@/hooks/use-crm";
 import { supabase } from "@/integrations/supabase/client";
-import { money, type Invoice } from "@/lib/crm";
+import { money, type Invoice, type InvoiceEmailEvent } from "@/lib/crm";
 import { buildInvoicePdf, pdfToBase64 } from "@/lib/invoice-pdf";
 import { createInvoice, sendInvoiceEmail } from "@/lib/invoicing.functions";
 
@@ -66,6 +79,8 @@ function InvoicesPage() {
   const updateInvoice = useUpdateInvoice();
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [openHistory, setOpenHistory] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   const sendFn = useServerFn(sendInvoiceEmail);
   const createFn = useServerFn(createInvoice);
@@ -109,6 +124,9 @@ function InvoicesPage() {
       toast.error(error instanceof Error ? error.message : "Could not send the invoice");
     } finally {
       setBusyId(null);
+      setOpenHistory(invoice.id);
+      await queryClient.invalidateQueries({ queryKey: ["invoice_email_events", invoice.id] });
+      await queryClient.invalidateQueries({ queryKey: ["invoices"] });
     }
   }
 
@@ -135,7 +153,8 @@ function InvoicesPage() {
         <div className="space-y-2">
           {invoices.map((invoice) => (
             <Card key={invoice.id}>
-              <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+              <CardContent className="space-y-3 py-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-semibold">{invoice.number}</p>
@@ -183,7 +202,24 @@ function InvoicesPage() {
                       Mark paid
                     </Button>
                   ) : null}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Email history"
+                    onClick={() =>
+                      setOpenHistory((current) => (current === invoice.id ? null : invoice.id))
+                    }
+                  >
+                    <History className="size-4" />
+                    {openHistory === invoice.id ? (
+                      <ChevronUp className="size-4" />
+                    ) : (
+                      <ChevronDown className="size-4" />
+                    )}
+                  </Button>
                 </div>
+              </div>
+              {openHistory === invoice.id ? <EmailHistory invoiceId={invoice.id} /> : null}
               </CardContent>
             </Card>
           ))}
@@ -201,6 +237,63 @@ function InvoicesPage() {
         }}
       />
     </AppShell>
+  );
+}
+
+const EVENT_META: Record<
+  string,
+  { label: string; icon: typeof CheckCircle2; className: string }
+> = {
+  sent: { label: "Sent", icon: CheckCircle2, className: "text-primary" },
+  failed: { label: "Failed", icon: AlertCircle, className: "text-destructive" },
+  skipped: { label: "Not sent", icon: MinusCircle, className: "text-muted-foreground" },
+};
+
+function EmailHistory({ invoiceId }: { invoiceId: string }) {
+  const { data: events = [], isLoading } = useInvoiceEmailEvents(invoiceId);
+
+  if (isLoading) {
+    return <p className="border-t pt-3 text-sm text-muted-foreground">Loading email history…</p>;
+  }
+
+  if (events.length === 0) {
+    return (
+      <p className="border-t pt-3 text-sm text-muted-foreground">
+        No email attempts recorded for this invoice yet.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2 border-t pt-3">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Email history
+      </p>
+      <ul className="space-y-2">
+        {events.map((event: InvoiceEmailEvent) => {
+          const meta = EVENT_META[event.status] ?? EVENT_META["skipped"]!;
+          const Icon = meta.icon;
+          return (
+            <li key={event.id} className="flex items-start gap-2 text-sm">
+              <Icon className={`mt-0.5 size-4 shrink-0 ${meta.className}`} />
+              <div className="min-w-0">
+                <p className="font-medium">
+                  {meta.label}
+                  {event.recipient ? ` · ${event.recipient}` : ""}
+                </p>
+                <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Clock className="size-3" />
+                  {format(parseISO(event.created_at), "d MMM yyyy, HH:mm")}
+                </p>
+                {event.detail ? (
+                  <p className="break-words text-xs text-muted-foreground">{event.detail}</p>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
