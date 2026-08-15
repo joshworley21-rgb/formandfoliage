@@ -32,6 +32,17 @@ On each due date the app builds the invoice automatically from that period's log
 
 A Recurring tab shows every schedule, its next due date, and lets you pause, edit, or skip the next run.
 
+## Scheduling and calendar
+
+**Schedule view** — month, week and day calendars showing planned jobs, colour-coded by status (scheduled, done, missed, cancelled). On the phone, the day and week views are the default with a simple agenda list; month gives the overview.
+
+**Booking a job** — tap a day (or "New job") to schedule a client, date, start time, expected duration and notes. Jobs can repeat on their own maintenance pattern — weekly, fortnightly, every 4 weeks, monthly — generating the upcoming visits automatically. Drag or edit to move a job to another day; editing a repeat asks whether to change just that one or the whole series.
+
+**Closing the loop** — from a scheduled job you tap "Complete" and confirm the actual hours worked, which turns it into a logged visit ready for invoicing. Jobs you didn't get to can be marked missed or rescheduled, so nothing silently disappears.
+
+**Dashboard** gains a "Today / next 7 days" round list with client address and phone for quick directions and calls, plus a count of overdue jobs still awaiting completion.
+
+
 
 ## What's needed from you
 
@@ -41,8 +52,10 @@ A Recurring tab shows every schedule, its next due date, and lets you pause, edi
 
 ## Technical notes
 
-- TanStack Start routes: `/auth` (public), `/_authenticated/` for dashboard, clients, visits, invoices, recurring.
+- TanStack Start routes: `/auth` (public), `/_authenticated/` for dashboard, schedule, clients, visits, invoices, recurring.
+- Calendar UI built with react-big-calendar (month/week/day) plus a custom mobile agenda list; date maths with date-fns.
 - PDF generated in a server function and stored in a private Cloud storage bucket; emailed via Resend from the same server function.
-- Cloud tables: `clients`, `visits`, `invoices`, `invoice_items`, `recurring_schedules`, `settings` — all RLS-scoped to your user id, with explicit grants.
+- Cloud tables: `clients`, `visits`, `scheduled_jobs`, `job_series`, `invoices`, `invoice_items`, `recurring_schedules`, `settings` — all RLS-scoped to your user id, with explicit grants.
+- A scheduled job stores `starts_at`, `duration_minutes`, `status`, optional `series_id`; completing one creates the linked `visits` row with actual hours. Repeat series materialise upcoming occurrences ahead of time so they can be edited individually.
 - Visit pricing derived server-side from the client's `billing_mode` (`hourly` | `fixed` | both), stored as a snapshot on the invoice item so later rate changes don't rewrite history.
 - Recurring runs handled by a scheduled job (pg_cron) hitting a `/api/public/run-recurring-invoices` route protected by a shared secret; it computes due schedules, builds invoices idempotently per period, and auto-sends or queues based on the schedule's setting.
