@@ -51,3 +51,6 @@ export function priceVisit(
       : Number(client.hourly_rate ?? 0) * (Number.isFinite(hours) ? hours : 0);
   return Math.round((labour + (Number(materialsCost) || 0)) * 100) / 100;
 }
+
+export type JobTask = Database["public"]["Tables"]["job_tasks"]["Row"];
+export type JobPhoto = Database["public"]["Tables"]["job_photos"]["Row"];
