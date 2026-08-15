@@ -28,9 +28,9 @@ export const Route = createFileRoute("/_authenticated/settings")({
 function SettingsPage() {
   const { data: settings } = useSettings();
   const saveSettings = useSaveSettings();
-  const senderFn = useServerFn(getOutlookSender);
+  const senderFn = useServerFn(getResendStatus);
   const { data: sender } = useQuery({
-    queryKey: ["outlook-sender"],
+    queryKey: ["resend-status"],
     queryFn: () => senderFn(),
   });
   const [form, setForm] = useState({
