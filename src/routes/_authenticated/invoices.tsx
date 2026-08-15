@@ -424,6 +424,8 @@ function NewInvoiceDialog({
         retainerAmount: Number(retainer) || 0,
         retainerDescription: retainerDescription || null,
         notes: notes || null,
+        dueDate: dueDate || null,
+
       }),
     onError: (error) =>
       toast.error(error instanceof Error ? error.message : "Could not create the invoice"),
