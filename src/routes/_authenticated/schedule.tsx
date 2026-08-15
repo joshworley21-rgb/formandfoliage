@@ -14,10 +14,11 @@ import {
   startOfMonth,
   startOfWeek,
 } from "date-fns";
-import { CalendarCheck, ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { CalendarCheck, ChevronLeft, ChevronRight, ClipboardList, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import { JobSheetDialog } from "@/components/JobSheetDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -106,6 +107,7 @@ function SchedulePage() {
 
   const [bookingOpen, setBookingOpen] = useState(false);
   const [completing, setCompleting] = useState<ScheduledJob | null>(null);
+  const [sheetJob, setSheetJob] = useState<ScheduledJob | null>(null);
 
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name ?? "Client";
 
@@ -252,6 +254,13 @@ function SchedulePage() {
                           ) : null}
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setSheetJob(job)}
+                          >
+                            <ClipboardList className="size-4" /> Job sheet
+                          </Button>
                           {job.status !== "done" ? (
                             <Button size="sm" onClick={() => setCompleting(job)}>
                               <CalendarCheck className="size-4" /> Complete
@@ -289,6 +298,12 @@ function SchedulePage() {
         defaultDate={view === "month" ? selectedDay : cursor}
         onSaved={() => setBookingOpen(false)}
         saveJob={saveJob.mutateAsync}
+      />
+
+      <JobSheetDialog
+        job={sheetJob}
+        clientName={sheetJob ? clientName(sheetJob.client_id) : ""}
+        onClose={() => setSheetJob(null)}
       />
 
       <CompleteDialog
