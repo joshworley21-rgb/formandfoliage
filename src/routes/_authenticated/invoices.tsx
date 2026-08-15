@@ -392,6 +392,7 @@ function NewInvoiceDialog({
     retainerAmount: number;
     retainerDescription: string | null;
     notes: string | null;
+    dueDate: string | null;
   }) => Promise<void>;
 }) {
   const { data: clients = [] } = useClients();
@@ -400,6 +401,10 @@ function NewInvoiceDialog({
   const [retainer, setRetainer] = useState("0");
   const [retainerDescription, setRetainerDescription] = useState("");
   const [notes, setNotes] = useState("");
+  const [dueDate, setDueDate] = useState(() =>
+    new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+  );
+
 
   const clientVisits = useMemo(
     () => unbilledVisits.filter((v) => v.client_id === clientId),
