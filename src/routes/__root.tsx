@@ -197,6 +197,9 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <AuthSync />
       <ClientOnly fallback={null}>
+        <SplashDismiss />
+      </ClientOnly>
+      <ClientOnly fallback={null}>
         <OfflineSupport queryClient={queryClient} />
       </ClientOnly>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
