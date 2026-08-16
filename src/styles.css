@@ -168,3 +168,45 @@
     color: var(--color-foreground);
   }
 }
+
+/* Native-feeling launch splash (hidden as soon as the app hydrates) */
+#app-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  background-color: var(--color-background);
+  font-family: var(--font-display, inherit);
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--color-primary);
+  transition: opacity 250ms ease;
+}
+
+#app-splash img {
+  width: 112px;
+  height: 112px;
+  border-radius: 24px;
+  animation: app-splash-pop 600ms ease-out both;
+}
+
+#app-splash[data-hidden="true"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+@keyframes app-splash-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
