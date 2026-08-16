@@ -27,7 +27,13 @@ export function Landing() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-10 bg-background px-6 py-12">
       <div className="flex flex-col items-center gap-6">
-        <Logo className="flex-col gap-4" showWordmark={false} />
+        <img
+          src={LOGO_URL}
+          alt="JW Garden Services logo"
+          className="h-40 w-auto object-contain"
+          width={160}
+          height={160}
+        />
         <h1 className="text-center font-display text-2xl font-semibold tracking-tight text-foreground">
           JW Garden Services
         </h1>
