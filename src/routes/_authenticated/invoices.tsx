@@ -58,6 +58,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   useAllInvoiceEmailEvents,
   useClients,
+  useDeleteInvoice,
   useInvoiceEmailEvents,
   useInvoices,
   useSettings,
@@ -98,6 +99,7 @@ function InvoicesPage() {
   const { data: visits = [] } = useVisits();
   const { data: settings } = useSettings();
   const updateInvoice = useUpdateInvoice();
+  const deleteInvoice = useDeleteInvoice();
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [openHistory, setOpenHistory] = useState<string | null>(null);
