@@ -15,6 +15,7 @@ import {
   Mail,
   MinusCircle,
   Plus,
+  Trash2,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
