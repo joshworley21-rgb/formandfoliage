@@ -40,9 +40,14 @@ export function registerOfflineSupport() {
     return;
   }
 
-  window.addEventListener("load", () => {
+  const register = () => {
     void navigator.serviceWorker.register(SW_URL, { scope: "/" }).catch(() => {
       /* offline support is best-effort */
     });
-  });
+  };
+
+  // Register as soon as possible so scanners (PWABuilder, Lighthouse) detect it.
+  if (document.readyState === "complete") register();
+  else window.addEventListener("load", register, { once: true });
 }
+
