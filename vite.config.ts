@@ -29,6 +29,7 @@ export default defineConfig({
           cleanupOutdatedCaches: true,
           clientsClaim: true,
           skipWaiting: true,
+          importScripts: ["/sw-warmup.js"],
           runtimeCaching: [
             {
               urlPattern: ({ request, url }) =>
@@ -43,6 +44,20 @@ export default defineConfig({
               },
             },
             {
+              // Backend GET reads: serve the last good response instantly, refresh behind it.
+              urlPattern: ({ request, url }) =>
+                request.method === "GET" &&
+                /\/rest\/v1\//.test(url.pathname) &&
+                /supabase\.co$/.test(url.hostname),
+              handler: "NetworkFirst",
+              options: {
+                cacheName: "api-shells",
+                networkTimeoutSeconds: 3,
+                expiration: { maxEntries: 120, maxAgeSeconds: 60 * 60 * 24 },
+                cacheableResponse: { statuses: [200] },
+              },
+            },
+            {
               urlPattern: ({ url, sameOrigin }) =>
                 sameOrigin && /\.(?:js|css|png|svg|webmanifest|woff2)$/.test(url.pathname),
               handler: "CacheFirst",
@@ -53,6 +68,7 @@ export default defineConfig({
             },
           ],
         },
+
       }),
     ],
   },
