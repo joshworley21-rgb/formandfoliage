@@ -2,11 +2,28 @@ import { Link } from "@tanstack/react-router";
 import { BellRing } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { useClients, useVisits } from "@/hooks/use-crm";
-import { money } from "@/lib/crm";
+import { useClients, useRecurring, useSeries, useVisits } from "@/hooks/use-crm";
+import { money, type Frequency } from "@/lib/crm";
 
-/** Nudge to raise an invoice once a client has this many unbilled visits. */
-export const REMINDER_VISIT_THRESHOLD = 4;
+/** Unbilled visits needed before we nudge, by how often the client is visited. */
+export const REMINDER_THRESHOLDS: Record<Frequency, number> = {
+  weekly: 4,
+  fortnightly: 2,
+  four_weekly: 1,
+  monthly: 1,
+  quarterly: 1,
+};
+
+/** Used when a client has no recurring schedule to tell us their visit rhythm. */
+export const DEFAULT_REMINDER_THRESHOLD = 4;
+
+const FREQUENCY_LABEL: Record<Frequency, string> = {
+  weekly: "weekly",
+  fortnightly: "fortnightly",
+  four_weekly: "four-weekly",
+  monthly: "monthly",
+  quarterly: "quarterly",
+};
 
 export type InvoiceReminder = {
   clientId: string;
@@ -14,11 +31,26 @@ export type InvoiceReminder = {
   visits: number;
   value: number;
   oldest: string;
+  threshold: number;
+  frequency: Frequency | null;
 };
 
 export function useInvoiceReminders(): InvoiceReminder[] {
   const { data: visits = [] } = useVisits();
   const { data: clients = [] } = useClients();
+  const { data: series = [] } = useSeries();
+  const { data: recurring = [] } = useRecurring();
+
+  // Most frequent active rhythm we know about for each client.
+  const frequencyByClient = new Map<string, Frequency>();
+  const rank = (f: Frequency) => REMINDER_THRESHOLDS[f];
+  for (const source of [...series, ...recurring]) {
+    if (!source.active) continue;
+    const current = frequencyByClient.get(source.client_id);
+    if (!current || rank(source.frequency) > rank(current)) {
+      frequencyByClient.set(source.client_id, source.frequency);
+    }
+  }
 
   const byClient = new Map<string, { visits: number; value: number; oldest: string }>();
   for (const visit of visits) {
@@ -35,15 +67,20 @@ export function useInvoiceReminders(): InvoiceReminder[] {
   }
 
   return [...byClient.entries()]
-    .filter(([, v]) => v.visits >= REMINDER_VISIT_THRESHOLD)
-    .map(([clientId, v]) => ({
-      clientId,
-      clientName: clients.find((c) => c.id === clientId)?.name ?? "Client",
-      visits: v.visits,
-      value: v.value,
-      oldest: v.oldest,
-    }))
-    .sort((a, b) => b.visits - a.visits);
+    .map(([clientId, v]) => {
+      const frequency = frequencyByClient.get(clientId) ?? null;
+      return {
+        clientId,
+        clientName: clients.find((c) => c.id === clientId)?.name ?? "Client",
+        visits: v.visits,
+        value: v.value,
+        oldest: v.oldest,
+        frequency,
+        threshold: frequency ? REMINDER_THRESHOLDS[frequency] : DEFAULT_REMINDER_THRESHOLD,
+      };
+    })
+    .filter((r) => r.visits >= r.threshold)
+    .sort((a, b) => b.visits / b.threshold - a.visits / a.threshold);
 }
 
 export function InvoiceReminders({ compact = false }: { compact?: boolean }) {
@@ -58,11 +95,12 @@ export function InvoiceReminders({ compact = false }: { compact?: boolean }) {
           <div>
             <p className="font-display text-lg font-semibold">Time to invoice</p>
             <p className="text-sm text-muted-foreground">
-              {reminders.length === 1 ? "This client has" : "These clients have"}{" "}
-              {REMINDER_VISIT_THRESHOLD}+ visits logged that haven&apos;t been billed yet.
+              {reminders.length === 1 ? "This client has" : "These clients have"} enough
+              unbilled visits to bill — 4 for weekly clients, 2 for fortnightly.
             </p>
           </div>
         </div>
+
         <ul className="divide-y divide-border rounded-xl border border-border bg-card">
           {reminders.map((r) => (
             <li key={r.clientId} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
