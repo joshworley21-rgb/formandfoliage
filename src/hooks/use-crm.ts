@@ -287,6 +287,33 @@ export function useUpdateInvoice() {
   });
 }
 
+/** Delete an invoice: unbill its visits, then remove items, email events and the invoice. */
+export function useDeleteInvoice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await runOrQueue("Delete invoice", [
+        {
+          kind: "update",
+          table: "visits",
+          payload: { billed: false, invoice_id: null },
+          match: { invoice_id: id },
+        },
+        {
+          kind: "update",
+          table: "bank_transactions",
+          payload: { invoice_id: null, matched_at: null },
+          match: { invoice_id: id },
+        },
+        { kind: "delete", table: "invoice_items", match: { invoice_id: id } },
+        { kind: "delete", table: "invoice_email_events", match: { invoice_id: id } },
+        { kind: "delete", table: "invoices", match: { id } },
+      ]);
+    },
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
 /* ---------------- recurring ---------------- */
 
 export function useRecurring() {
