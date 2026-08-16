@@ -315,7 +315,7 @@ function InvoicesPage() {
                     </AlertDialogContent>
                   </AlertDialog>
                 </div>
-              </div>
+
               <LastAttempt
                 event={emailEvents.find((e) => e.invoice_id === invoice.id) ?? null}
               />
