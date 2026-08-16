@@ -115,6 +115,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "manifest", href: "/manifest.webmanifest" },
       { rel: "icon", href: "/favicon.png", type: "image/png" },
       { rel: "apple-touch-icon", href: "/apple-touch-icon.png", sizes: "180x180" },
+      ...APPLE_SPLASH_LINKS,
     ],
   }),
   shellComponent: RootShell,
@@ -130,6 +131,10 @@ function RootShell({ children }: { children: ReactNode }) {
         <HeadContent />
       </head>
       <body>
+        <div id="app-splash" aria-hidden="true">
+          <img src="/icon-512.png" alt="" width={112} height={112} />
+          <span>JW Garden Services</span>
+        </div>
         {children}
         <Scripts />
       </body>
