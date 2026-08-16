@@ -177,8 +177,21 @@ function AuthSync() {
   return null;
 }
 
+function SplashDismiss() {
+  useEffect(() => {
+    const splash = document.getElementById("app-splash");
+    if (!splash) return;
+    splash.dataset.hidden = "true";
+    const timer = window.setTimeout(() => splash.remove(), 350);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return null;
+}
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+
+
 
   return (
     <QueryClientProvider client={queryClient}>
