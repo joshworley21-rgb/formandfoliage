@@ -107,7 +107,9 @@ export function InvoiceReminders({ compact = false }: { compact?: boolean }) {
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">{r.clientName}</p>
                 <p className="text-xs text-muted-foreground">
-                  {r.visits} unbilled visits · oldest {r.oldest}
+                  {r.visits} unbilled {r.visits === 1 ? "visit" : "visits"}
+                  {r.frequency ? ` · ${FREQUENCY_LABEL[r.frequency]} (bill every ${r.threshold})` : ""} · oldest{" "}
+                  {r.oldest}
                 </p>
               </div>
               <p className="font-display text-lg">{money(r.value)}</p>
