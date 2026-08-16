@@ -258,6 +258,44 @@ function InvoicesPage() {
                       <ChevronDown className="size-4" />
                     )}
                   </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Delete invoice ${invoice.number}`}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete {invoice.number}?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This removes the invoice, its lines and its email history. Any visits on
+                          it go back to unbilled so you can invoice them again.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={async () => {
+                            try {
+                              await deleteInvoice.mutateAsync(invoice.id);
+                              toast.success(`Invoice ${invoice.number} deleted`);
+                            } catch (error) {
+                              toast.error(
+                                error instanceof Error ? error.message : "Could not delete",
+                              );
+                            }
+                          }}
+                        >
+                          Delete invoice
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               </div>
               <LastAttempt
