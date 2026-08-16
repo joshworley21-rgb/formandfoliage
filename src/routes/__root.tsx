@@ -181,7 +181,7 @@ function SplashDismiss() {
   useEffect(() => {
     const splash = document.getElementById("app-splash");
     if (!splash) return;
-    splash.dataset.hidden = "true";
+    splash.setAttribute("data-hidden", "true");
     const timer = window.setTimeout(() => splash.remove(), 350);
     return () => window.clearTimeout(timer);
   }, []);
