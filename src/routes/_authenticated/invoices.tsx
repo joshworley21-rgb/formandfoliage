@@ -119,7 +119,7 @@ function InvoicesPage() {
 
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name ?? "Client";
 
-  async function buildPdf(invoice: Invoice) {
+  async function loadInvoiceData(invoice: Invoice) {
     const client = clients.find((c) => c.id === invoice.client_id);
     if (!client) throw new Error("Client missing");
     const { data: items, error } = await supabase
@@ -128,7 +128,12 @@ function InvoicesPage() {
       .eq("invoice_id", invoice.id)
       .order("item_date");
     if (error) throw error;
-    return await buildInvoicePdf({ invoice, items: items ?? [], client, settings: settings ?? null });
+    return { client, items: items ?? [] };
+  }
+
+  async function buildPdf(invoice: Invoice) {
+    const { client, items } = await loadInvoiceData(invoice);
+    return await buildInvoicePdf({ invoice, items, client, settings: settings ?? null });
   }
 
   async function download(invoice: Invoice) {
@@ -146,11 +151,12 @@ function InvoicesPage() {
   async function openPreview(invoice: Invoice, intent: "download" | "send") {
     try {
       setBusyId(invoice.id);
-      const doc = await buildPdf(invoice);
+      const { client, items } = await loadInvoiceData(invoice);
+      const doc = await buildInvoicePdf({ invoice, items, client, settings: settings ?? null });
       const url = URL.createObjectURL(doc.output("blob"));
       setPreview((current) => {
         if (current?.url) URL.revokeObjectURL(current.url);
-        return { invoice, url, intent };
+        return { invoice, client, items, url, intent };
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not build the preview");
