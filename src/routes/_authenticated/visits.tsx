@@ -61,9 +61,22 @@ function VisitsPage() {
   const [hours, setHours] = useState("2");
   const [materials, setMaterials] = useState("0");
   const [description, setDescription] = useState("");
+  const [payMode, setPayMode] = useState<"client" | "hourly" | "day">("client");
+  const [rate, setRate] = useState("0");
+  const [days, setDays] = useState("1");
 
   const client = clients.find((c) => c.id === clientId);
-  const preview = client ? priceVisit(client, Number(hours) || 0, Number(materials) || 0) : 0;
+  const materialsNum = Number(materials) || 0;
+  const computedAmount =
+    payMode === "day"
+      ? (Number(rate) || 0) * (Number(days) || 0) + materialsNum
+      : payMode === "hourly"
+        ? (Number(rate) || 0) * (Number(hours) || 0) + materialsNum
+        : client
+          ? priceVisit(client, Number(hours) || 0, materialsNum)
+          : 0;
+  const preview = computedAmount;
+
 
   const totals = useMemo(() => {
     const unbilled = visits.filter((v) => !v.billed);
