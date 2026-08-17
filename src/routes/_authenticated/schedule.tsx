@@ -317,7 +317,10 @@ function SchedulePage() {
       <CompleteDialog
         job={completing}
         onClose={() => setCompleting(null)}
-        onComplete={async ({ hours, materials, description }) => {
+        defaultHourlyRate={
+          completing ? Number(clients.find((c) => c.id === completing.client_id)?.hourly_rate ?? 0) : 0
+        }
+        onComplete={async ({ hours, materials, description, amount }) => {
           if (!completing) return;
           if (isStaff) {
             await staffComplete.mutateAsync({
