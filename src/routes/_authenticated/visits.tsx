@@ -273,6 +273,52 @@ function VisitsPage() {
                 />
               </div>
             </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label>Pay basis</Label>
+                <Select
+                  value={payMode}
+                  onValueChange={(v) => setPayMode(v as "client" | "hourly" | "day")}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="client">Client default</SelectItem>
+                    <SelectItem value="hourly">Hourly rate</SelectItem>
+                    <SelectItem value="day">Day rate</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {payMode === "client" ? null : (
+                <div className="space-y-1.5">
+                  <Label htmlFor="vrate">
+                    {payMode === "day" ? "Day rate (£)" : "Hourly rate (£)"}
+                  </Label>
+                  <Input
+                    id="vrate"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={rate}
+                    onChange={(e) => setRate(e.target.value)}
+                  />
+                </div>
+              )}
+              {payMode === "day" ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="vdays">Days worked</Label>
+                  <Input
+                    id="vdays"
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={days}
+                    onChange={(e) => setDays(e.target.value)}
+                  />
+                </div>
+              ) : null}
+            </div>
             <div className="space-y-1.5">
               <Label htmlFor="work">Work done</Label>
               <Textarea
@@ -286,9 +332,18 @@ function VisitsPage() {
             <p className="rounded-lg bg-secondary px-3 py-2 text-sm">
               Charge: <span className="font-semibold">{money(preview)}</span>{" "}
               <span className="text-muted-foreground">
-                ({client?.billing_mode === "fixed" ? "fixed price" : "hourly"} + materials)
+                (
+                {payMode === "day"
+                  ? "day rate"
+                  : payMode === "hourly"
+                    ? "hourly rate"
+                    : client?.billing_mode === "fixed"
+                      ? "fixed price"
+                      : "hourly"}{" "}
+                + materials)
               </span>
             </p>
+
             <DialogFooter>
               <Button type="submit" disabled={save.isPending}>
                 Save visit
