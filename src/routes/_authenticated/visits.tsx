@@ -61,9 +61,22 @@ function VisitsPage() {
   const [hours, setHours] = useState("2");
   const [materials, setMaterials] = useState("0");
   const [description, setDescription] = useState("");
+  const [payMode, setPayMode] = useState<"client" | "hourly" | "day">("client");
+  const [rate, setRate] = useState("0");
+  const [days, setDays] = useState("1");
 
   const client = clients.find((c) => c.id === clientId);
-  const preview = client ? priceVisit(client, Number(hours) || 0, Number(materials) || 0) : 0;
+  const materialsNum = Number(materials) || 0;
+  const computedAmount =
+    payMode === "day"
+      ? (Number(rate) || 0) * (Number(days) || 0) + materialsNum
+      : payMode === "hourly"
+        ? (Number(rate) || 0) * (Number(hours) || 0) + materialsNum
+        : client
+          ? priceVisit(client, Number(hours) || 0, materialsNum)
+          : 0;
+  const preview = computedAmount;
+
 
   const totals = useMemo(() => {
     const unbilled = visits.filter((v) => !v.billed);
@@ -73,13 +86,21 @@ function VisitsPage() {
     };
   }, [visits]);
 
+  function resetRate(c?: { hourly_rate?: number | string } | null) {
+    setPayMode("client");
+    setRate(String(c?.hourly_rate ?? 0));
+    setDays("1");
+  }
+
   function openNew() {
     setEditing(null);
-    setClientId(clients[0]?.id ?? "");
+    const first = clients[0];
+    setClientId(first?.id ?? "");
     setDate(todayISO());
     setHours("2");
     setMaterials("0");
     setDescription("");
+    resetRate(first);
     setOpen(true);
   }
 
@@ -90,6 +111,7 @@ function VisitsPage() {
     setHours(String(visit.hours));
     setMaterials(String(visit.materials_cost));
     setDescription(visit.description ?? "");
+    resetRate(clients.find((c) => c.id === visit.client_id));
     setOpen(true);
   }
 
@@ -108,8 +130,9 @@ function VisitsPage() {
         hours: Number(hours) || 0,
         materials_cost: Number(materials) || 0,
         description: description || null,
-        amount: priceVisit(client, Number(hours) || 0, Number(materials) || 0),
+        amount: computedAmount,
       });
+
       toast.success(editing ? "Visit updated" : "Visit logged");
       setOpen(false);
     } catch (error) {
@@ -209,7 +232,14 @@ function VisitsPage() {
           <form className="space-y-3" onSubmit={submit}>
             <div className="space-y-1.5">
               <Label>Client</Label>
-              <Select value={clientId} onValueChange={setClientId}>
+              <Select
+                value={clientId}
+                onValueChange={(v) => {
+                  setClientId(v);
+                  const c = clients.find((x) => x.id === v);
+                  if (c) setRate(String(c.hourly_rate ?? 0));
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Choose client" />
                 </SelectTrigger>
@@ -250,6 +280,52 @@ function VisitsPage() {
                 />
               </div>
             </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label>Pay basis</Label>
+                <Select
+                  value={payMode}
+                  onValueChange={(v) => setPayMode(v as "client" | "hourly" | "day")}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="client">Client default</SelectItem>
+                    <SelectItem value="hourly">Hourly rate</SelectItem>
+                    <SelectItem value="day">Day rate</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {payMode === "client" ? null : (
+                <div className="space-y-1.5">
+                  <Label htmlFor="vrate">
+                    {payMode === "day" ? "Day rate (£)" : "Hourly rate (£)"}
+                  </Label>
+                  <Input
+                    id="vrate"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={rate}
+                    onChange={(e) => setRate(e.target.value)}
+                  />
+                </div>
+              )}
+              {payMode === "day" ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="vdays">Days worked</Label>
+                  <Input
+                    id="vdays"
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={days}
+                    onChange={(e) => setDays(e.target.value)}
+                  />
+                </div>
+              ) : null}
+            </div>
             <div className="space-y-1.5">
               <Label htmlFor="work">Work done</Label>
               <Textarea
@@ -263,9 +339,18 @@ function VisitsPage() {
             <p className="rounded-lg bg-secondary px-3 py-2 text-sm">
               Charge: <span className="font-semibold">{money(preview)}</span>{" "}
               <span className="text-muted-foreground">
-                ({client?.billing_mode === "fixed" ? "fixed price" : "hourly"} + materials)
+                (
+                {payMode === "day"
+                  ? "day rate"
+                  : payMode === "hourly"
+                    ? "hourly rate"
+                    : client?.billing_mode === "fixed"
+                      ? "fixed price"
+                      : "hourly"}{" "}
+                + materials)
               </span>
             </p>
+
             <DialogFooter>
               <Button type="submit" disabled={save.isPending}>
                 Save visit
