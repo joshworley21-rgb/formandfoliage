@@ -317,7 +317,10 @@ function SchedulePage() {
       <CompleteDialog
         job={completing}
         onClose={() => setCompleting(null)}
-        onComplete={async ({ hours, materials, description }) => {
+        defaultHourlyRate={
+          completing ? Number(clients.find((c) => c.id === completing.client_id)?.hourly_rate ?? 0) : 0
+        }
+        onComplete={async ({ hours, materials, description, amount }) => {
           if (!completing) return;
           if (isStaff) {
             await staffComplete.mutateAsync({
@@ -339,7 +342,7 @@ function SchedulePage() {
             hours,
             materials_cost: materials,
             description: description || completing.notes,
-            amount: priceVisit(client, hours, materials),
+            amount: amount ?? priceVisit(client, hours, materials),
           });
           await saveJob.mutateAsync({
             id: completing.id,
@@ -569,17 +572,38 @@ function CompleteDialog({
   onClose,
   onComplete,
   hideMaterials,
+  defaultHourlyRate = 0,
 }: {
   job: ScheduledJob | null;
   clientName: string;
   hideMaterials?: boolean;
+  defaultHourlyRate?: number;
   onClose: () => void;
-  onComplete: (input: { hours: number; materials: number; description: string }) => Promise<void>;
+  onComplete: (input: {
+    hours: number;
+    materials: number;
+    description: string;
+    amount?: number;
+  }) => Promise<void>;
 }) {
   const [hours, setHours] = useState("1");
   const [materials, setMaterials] = useState("0");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
+  const [payMode, setPayMode] = useState<"client" | "hourly" | "day">("client");
+  const [rate, setRate] = useState("0");
+  const [days, setDays] = useState("1");
+
+  const labour =
+    payMode === "hourly"
+      ? (Number(rate) || 0) * (Number(hours) || 0)
+      : payMode === "day"
+        ? (Number(rate) || 0) * (Number(days) || 0)
+        : 0;
+  const amountOverride =
+    payMode === "client"
+      ? undefined
+      : Math.round((labour + (hideMaterials ? 0 : Number(materials) || 0)) * 100) / 100;
 
   return (
     <Dialog
@@ -590,6 +614,9 @@ function CompleteDialog({
           setHours(String((job.duration_minutes / 60).toFixed(2)));
           setMaterials("0");
           setDescription(job.notes ?? "");
+          setPayMode("client");
+          setRate(String(defaultHourlyRate || 0));
+          setDays("1");
         }
       }}
     >
@@ -607,6 +634,7 @@ function CompleteDialog({
                 hours: Number(hours) || 0,
                 materials: Number(materials) || 0,
                 description,
+                ...(amountOverride === undefined ? {} : { amount: amountOverride }),
               });
             } finally {
               setBusy(false);
@@ -639,6 +667,59 @@ function CompleteDialog({
             </div>
             )}
           </div>
+          {hideMaterials ? null : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Pay basis</Label>
+                <Select
+                  value={payMode}
+                  onValueChange={(v) => setPayMode(v as "client" | "hourly" | "day")}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="client">Client default</SelectItem>
+                    <SelectItem value="hourly">Hourly rate</SelectItem>
+                    <SelectItem value="day">Day rate</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {payMode === "client" ? null : (
+                <div className="space-y-1.5">
+                  <Label htmlFor="crate">
+                    {payMode === "day" ? "Day rate (£)" : "Hourly rate (£)"}
+                  </Label>
+                  <Input
+                    id="crate"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={rate}
+                    onChange={(e) => setRate(e.target.value)}
+                  />
+                </div>
+              )}
+              {payMode === "day" ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="cdays">Days worked</Label>
+                  <Input
+                    id="cdays"
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={days}
+                    onChange={(e) => setDays(e.target.value)}
+                  />
+                </div>
+              ) : null}
+              {amountOverride === undefined ? null : (
+                <p className="self-end text-sm text-muted-foreground sm:col-span-2">
+                  Visit total: £{amountOverride.toFixed(2)}
+                </p>
+              )}
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="cdesc">Work done</Label>
             <Textarea
