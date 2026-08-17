@@ -232,7 +232,14 @@ function VisitsPage() {
           <form className="space-y-3" onSubmit={submit}>
             <div className="space-y-1.5">
               <Label>Client</Label>
-              <Select value={clientId} onValueChange={setClientId}>
+              <Select
+                value={clientId}
+                onValueChange={(v) => {
+                  setClientId(v);
+                  const c = clients.find((x) => x.id === v);
+                  if (c) setRate(String(c.hourly_rate ?? 0));
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Choose client" />
                 </SelectTrigger>
