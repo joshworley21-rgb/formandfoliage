@@ -365,11 +365,24 @@ function InvoicesPage() {
             </DialogDescription>
           </DialogHeader>
           {preview ? (
-            <iframe
-              title={`Invoice ${preview.invoice.number} preview`}
-              src={preview.url}
-              className="h-[65vh] w-full rounded-lg border bg-muted"
-            />
+            <div className="max-h-[65vh] overflow-y-auto">
+              <InvoicePreviewDoc
+                invoice={preview.invoice}
+                items={preview.items}
+                client={preview.client}
+                settings={settings ?? null}
+              />
+              <div className="mt-3 text-center">
+                <a
+                  href={preview.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm underline underline-offset-4"
+                >
+                  Open the PDF in a new tab
+                </a>
+              </div>
+            </div>
           ) : null}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={closePreview}>
