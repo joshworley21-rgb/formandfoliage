@@ -66,7 +66,14 @@ import {
   useVisits,
 } from "@/hooks/use-crm";
 import { supabase } from "@/integrations/supabase/client";
-import { money, type Invoice, type InvoiceEmailEvent } from "@/lib/crm";
+import {
+  money,
+  type Client,
+  type Invoice,
+  type InvoiceEmailEvent,
+  type InvoiceItem,
+} from "@/lib/crm";
+import { InvoicePreviewDoc } from "@/components/InvoicePreviewDoc";
 import { buildInvoicePdf, pdfToBase64 } from "@/lib/invoice-pdf";
 import { createInvoice, sendInvoiceEmail } from "@/lib/invoicing.functions";
 
@@ -104,7 +111,13 @@ function InvoicesPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [openHistory, setOpenHistory] = useState<string | null>(null);
   const [preview, setPreview] = useState<
-    { invoice: Invoice; url: string; intent: "download" | "send" } | null
+    {
+      invoice: Invoice;
+      client: Client;
+      items: InvoiceItem[];
+      url: string;
+      intent: "download" | "send";
+    } | null
   >(null);
   const queryClient = useQueryClient();
 
@@ -113,7 +126,7 @@ function InvoicesPage() {
 
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name ?? "Client";
 
-  async function buildPdf(invoice: Invoice) {
+  async function loadInvoiceData(invoice: Invoice) {
     const client = clients.find((c) => c.id === invoice.client_id);
     if (!client) throw new Error("Client missing");
     const { data: items, error } = await supabase
@@ -122,7 +135,12 @@ function InvoicesPage() {
       .eq("invoice_id", invoice.id)
       .order("item_date");
     if (error) throw error;
-    return await buildInvoicePdf({ invoice, items: items ?? [], client, settings: settings ?? null });
+    return { client, items: items ?? [] };
+  }
+
+  async function buildPdf(invoice: Invoice) {
+    const { client, items } = await loadInvoiceData(invoice);
+    return await buildInvoicePdf({ invoice, items, client, settings: settings ?? null });
   }
 
   async function download(invoice: Invoice) {
@@ -140,11 +158,12 @@ function InvoicesPage() {
   async function openPreview(invoice: Invoice, intent: "download" | "send") {
     try {
       setBusyId(invoice.id);
-      const doc = await buildPdf(invoice);
+      const { client, items } = await loadInvoiceData(invoice);
+      const doc = await buildInvoicePdf({ invoice, items, client, settings: settings ?? null });
       const url = URL.createObjectURL(doc.output("blob"));
       setPreview((current) => {
         if (current?.url) URL.revokeObjectURL(current.url);
-        return { invoice, url, intent };
+        return { invoice, client, items, url, intent };
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not build the preview");
@@ -346,11 +365,24 @@ function InvoicesPage() {
             </DialogDescription>
           </DialogHeader>
           {preview ? (
-            <iframe
-              title={`Invoice ${preview.invoice.number} preview`}
-              src={preview.url}
-              className="h-[65vh] w-full rounded-lg border bg-muted"
-            />
+            <div className="max-h-[65vh] overflow-y-auto">
+              <InvoicePreviewDoc
+                invoice={preview.invoice}
+                items={preview.items}
+                client={preview.client}
+                settings={settings ?? null}
+              />
+              <div className="mt-3 text-center">
+                <a
+                  href={preview.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm underline underline-offset-4"
+                >
+                  Open the PDF in a new tab
+                </a>
+              </div>
+            </div>
           ) : null}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={closePreview}>
