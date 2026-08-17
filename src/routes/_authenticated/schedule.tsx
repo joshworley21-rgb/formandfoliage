@@ -572,17 +572,38 @@ function CompleteDialog({
   onClose,
   onComplete,
   hideMaterials,
+  defaultHourlyRate = 0,
 }: {
   job: ScheduledJob | null;
   clientName: string;
   hideMaterials?: boolean;
+  defaultHourlyRate?: number;
   onClose: () => void;
-  onComplete: (input: { hours: number; materials: number; description: string }) => Promise<void>;
+  onComplete: (input: {
+    hours: number;
+    materials: number;
+    description: string;
+    amount?: number;
+  }) => Promise<void>;
 }) {
   const [hours, setHours] = useState("1");
   const [materials, setMaterials] = useState("0");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
+  const [payMode, setPayMode] = useState<"client" | "hourly" | "day">("client");
+  const [rate, setRate] = useState("0");
+  const [days, setDays] = useState("1");
+
+  const labour =
+    payMode === "hourly"
+      ? (Number(rate) || 0) * (Number(hours) || 0)
+      : payMode === "day"
+        ? (Number(rate) || 0) * (Number(days) || 0)
+        : 0;
+  const amountOverride =
+    payMode === "client"
+      ? undefined
+      : Math.round((labour + (hideMaterials ? 0 : Number(materials) || 0)) * 100) / 100;
 
   return (
     <Dialog
@@ -593,6 +614,9 @@ function CompleteDialog({
           setHours(String((job.duration_minutes / 60).toFixed(2)));
           setMaterials("0");
           setDescription(job.notes ?? "");
+          setPayMode("client");
+          setRate(String(defaultHourlyRate || 0));
+          setDays("1");
         }
       }}
     >
