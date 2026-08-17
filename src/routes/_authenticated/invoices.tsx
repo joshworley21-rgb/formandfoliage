@@ -104,7 +104,13 @@ function InvoicesPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [openHistory, setOpenHistory] = useState<string | null>(null);
   const [preview, setPreview] = useState<
-    { invoice: Invoice; url: string; intent: "download" | "send" } | null
+    {
+      invoice: Invoice;
+      client: Client;
+      items: InvoiceItem[];
+      url: string;
+      intent: "download" | "send";
+    } | null
   >(null);
   const queryClient = useQueryClient();
 
