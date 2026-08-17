@@ -66,7 +66,14 @@ import {
   useVisits,
 } from "@/hooks/use-crm";
 import { supabase } from "@/integrations/supabase/client";
-import { money, type Invoice, type InvoiceEmailEvent } from "@/lib/crm";
+import {
+  money,
+  type Client,
+  type Invoice,
+  type InvoiceEmailEvent,
+  type InvoiceItem,
+} from "@/lib/crm";
+import { InvoicePreviewDoc } from "@/components/InvoicePreviewDoc";
 import { buildInvoicePdf, pdfToBase64 } from "@/lib/invoice-pdf";
 import { createInvoice, sendInvoiceEmail } from "@/lib/invoicing.functions";
 
