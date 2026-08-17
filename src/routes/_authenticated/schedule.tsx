@@ -634,6 +634,7 @@ function CompleteDialog({
                 hours: Number(hours) || 0,
                 materials: Number(materials) || 0,
                 description,
+                ...(amountOverride === undefined ? {} : { amount: amountOverride }),
               });
             } finally {
               setBusy(false);
