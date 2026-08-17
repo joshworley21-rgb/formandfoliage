@@ -86,13 +86,21 @@ function VisitsPage() {
     };
   }, [visits]);
 
+  function resetRate(c?: { hourly_rate?: number | string } | null) {
+    setPayMode("client");
+    setRate(String(c?.hourly_rate ?? 0));
+    setDays("1");
+  }
+
   function openNew() {
     setEditing(null);
-    setClientId(clients[0]?.id ?? "");
+    const first = clients[0];
+    setClientId(first?.id ?? "");
     setDate(todayISO());
     setHours("2");
     setMaterials("0");
     setDescription("");
+    resetRate(first);
     setOpen(true);
   }
 
@@ -103,6 +111,7 @@ function VisitsPage() {
     setHours(String(visit.hours));
     setMaterials(String(visit.materials_cost));
     setDescription(visit.description ?? "");
+    resetRate(clients.find((c) => c.id === visit.client_id));
     setOpen(true);
   }
 
@@ -121,8 +130,9 @@ function VisitsPage() {
         hours: Number(hours) || 0,
         materials_cost: Number(materials) || 0,
         description: description || null,
-        amount: priceVisit(client, Number(hours) || 0, Number(materials) || 0),
+        amount: computedAmount,
       });
+
       toast.success(editing ? "Visit updated" : "Visit logged");
       setOpen(false);
     } catch (error) {
