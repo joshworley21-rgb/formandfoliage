@@ -342,7 +342,7 @@ function SchedulePage() {
             hours,
             materials_cost: materials,
             description: description || completing.notes,
-            amount: priceVisit(client, hours, materials),
+            amount: amount ?? priceVisit(client, hours, materials),
           });
           await saveJob.mutateAsync({
             id: completing.id,
