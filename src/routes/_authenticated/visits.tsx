@@ -243,8 +243,9 @@ function VisitsPage() {
                 onValueChange={(v) => {
                   setClientId(v);
                   const c = clients.find((x) => x.id === v);
-                  if (c) setRate(String(c.hourly_rate ?? 0));
+                  if (c) resetRate(c);
                 }}
+
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Choose client" />
