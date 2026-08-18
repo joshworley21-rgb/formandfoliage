@@ -19,6 +19,7 @@ import { Route as AuthenticatedRecurringRouteImport } from './routes/_authentica
 import { Route as AuthenticatedScheduleRouteImport } from './routes/_authenticated/schedule'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedVisitsRouteImport } from './routes/_authenticated/visits'
+import { Route as EnquireKeyRouteImport } from './routes/enquire.$key'
 import { Route as ApiPublicEnquiryRouteImport } from './routes/api/public/enquiry'
 import { Route as ApiPublicHooksPaymentRemindersRouteImport } from './routes/api/public/hooks/payment-reminders'
 
@@ -71,6 +72,11 @@ const AuthenticatedVisitsRoute = AuthenticatedVisitsRouteImport.update({
   path: '/visits',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const EnquireKeyRoute = EnquireKeyRouteImport.update({
+  id: '/enquire/$key',
+  path: '/enquire/$key',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicEnquiryRoute = ApiPublicEnquiryRouteImport.update({
   id: '/api/public/enquiry',
   path: '/api/public/enquiry',
@@ -93,6 +99,7 @@ export interface FileRoutesByFullPath {
   '/schedule': typeof AuthenticatedScheduleRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/visits': typeof AuthenticatedVisitsRoute
+  '/enquire/$key': typeof EnquireKeyRoute
   '/api/public/enquiry': typeof ApiPublicEnquiryRoute
   '/api/public/hooks/payment-reminders': typeof ApiPublicHooksPaymentRemindersRoute
 }
@@ -106,6 +113,7 @@ export interface FileRoutesByTo {
   '/schedule': typeof AuthenticatedScheduleRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/visits': typeof AuthenticatedVisitsRoute
+  '/enquire/$key': typeof EnquireKeyRoute
   '/api/public/enquiry': typeof ApiPublicEnquiryRoute
   '/api/public/hooks/payment-reminders': typeof ApiPublicHooksPaymentRemindersRoute
 }
@@ -121,6 +129,7 @@ export interface FileRoutesById {
   '/_authenticated/schedule': typeof AuthenticatedScheduleRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/visits': typeof AuthenticatedVisitsRoute
+  '/enquire/$key': typeof EnquireKeyRoute
   '/api/public/enquiry': typeof ApiPublicEnquiryRoute
   '/api/public/hooks/payment-reminders': typeof ApiPublicHooksPaymentRemindersRoute
 }
@@ -136,6 +145,7 @@ export interface FileRouteTypes {
     | '/schedule'
     | '/settings'
     | '/visits'
+    | '/enquire/$key'
     | '/api/public/enquiry'
     | '/api/public/hooks/payment-reminders'
   fileRoutesByTo: FileRoutesByTo
@@ -149,6 +159,7 @@ export interface FileRouteTypes {
     | '/schedule'
     | '/settings'
     | '/visits'
+    | '/enquire/$key'
     | '/api/public/enquiry'
     | '/api/public/hooks/payment-reminders'
   id:
@@ -163,6 +174,7 @@ export interface FileRouteTypes {
     | '/_authenticated/schedule'
     | '/_authenticated/settings'
     | '/_authenticated/visits'
+    | '/enquire/$key'
     | '/api/public/enquiry'
     | '/api/public/hooks/payment-reminders'
   fileRoutesById: FileRoutesById
@@ -171,6 +183,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  EnquireKeyRoute: typeof EnquireKeyRoute
   ApiPublicEnquiryRoute: typeof ApiPublicEnquiryRoute
   ApiPublicHooksPaymentRemindersRoute: typeof ApiPublicHooksPaymentRemindersRoute
 }
@@ -247,6 +260,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedVisitsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/enquire/$key': {
+      id: '/enquire/$key'
+      path: '/enquire/$key'
+      fullPath: '/enquire/$key'
+      preLoaderRoute: typeof EnquireKeyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/enquiry': {
       id: '/api/public/enquiry'
       path: '/api/public/enquiry'
@@ -291,6 +311,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  EnquireKeyRoute: EnquireKeyRoute,
   ApiPublicEnquiryRoute: ApiPublicEnquiryRoute,
   ApiPublicHooksPaymentRemindersRoute: ApiPublicHooksPaymentRemindersRoute,
 }

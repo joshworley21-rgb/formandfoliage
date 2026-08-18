@@ -1,0 +1,216 @@
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Mail, Phone, Trash2, UserPlus } from "lucide-react";
+import { toast } from "sonner";
+import { AppShell } from "@/components/AppShell";
+import { OwnerOnly } from "@/components/OwnerOnly";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  ENQUIRY_STATUS_LABELS,
+  useConvertEnquiry,
+  useDeleteEnquiry,
+  useEnquiries,
+  useEnquiryLink,
+  useUpdateEnquiry,
+  type Enquiry,
+  type EnquiryStatus,
+} from "@/hooks/use-enquiries";
+
+export const Route = createFileRoute("/_authenticated/enquiries")({
+  head: () => ({
+    meta: [
+      { title: "Enquiries — JW Garden Services CRM" },
+      { name: "description", content: "Website enquiries inbox: new leads, contact details and job descriptions." },
+      { property: "og:title", content: "Enquiries — JW Garden Services CRM" },
+      { property: "og:description", content: "Website enquiries inbox: new leads, contact details and job descriptions." },
+    ],
+  }),
+  component: () => (
+    <OwnerOnly>
+      <EnquiriesPage />
+    </OwnerOnly>
+  ),
+});
+
+const STATUS_VARIANT: Record<EnquiryStatus, "default" | "secondary" | "outline"> = {
+  new: "default",
+  contacted: "secondary",
+  converted: "outline",
+  closed: "outline",
+};
+
+function EnquiriesPage() {
+  const { data: enquiries = [], isLoading } = useEnquiries();
+  const { data: key } = useEnquiryLink();
+  const update = useUpdateEnquiry();
+  const remove = useDeleteEnquiry();
+  const convert = useConvertEnquiry();
+  const navigate = useNavigate();
+
+  const formUrl =
+    key && typeof window !== "undefined" ? `${window.location.origin}/enquire/${key}` : null;
+
+  return (
+    <AppShell
+      title="Enquiries"
+      description="Everything sent from your website enquiry form lands here."
+    >
+      <Card className="mb-4">
+        <CardHeader>
+          <CardTitle>Your website enquiry link</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Link (or embed) this page from your website's "Get in touch" button. Every submission
+            appears below instead of just landing in your inbox.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded-lg border border-border bg-muted px-3 py-2 text-xs">
+              {formUrl ?? "Loading…"}
+            </code>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!formUrl}
+              onClick={async () => {
+                if (!formUrl) return;
+                await navigator.clipboard.writeText(formUrl);
+                toast.success("Link copied");
+              }}
+            >
+              Copy link
+            </Button>
+            <Button variant="ghost" size="sm" disabled={!key} asChild>
+              <a href={formUrl ?? "#"} target="_blank" rel="noreferrer">
+                Preview
+              </a>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading enquiries…</p>
+      ) : enquiries.length === 0 ? (
+        <Card>
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+            No enquiries yet. Point your website form at the link above and they'll appear here.
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-3">
+          {enquiries.map((enquiry) => (
+            <EnquiryCard
+              key={enquiry.id}
+              enquiry={enquiry}
+              onStatus={async (status) => {
+                await update.mutateAsync({ id: enquiry.id, status });
+              }}
+              onConvert={async () => {
+                try {
+                  await convert.mutateAsync(enquiry);
+                  toast.success(`${enquiry.name} added to clients`);
+                  navigate({ to: "/clients" });
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : "Could not convert");
+                }
+              }}
+              onDelete={async () => {
+                if (!confirm(`Delete the enquiry from ${enquiry.name}?`)) return;
+                await remove.mutateAsync(enquiry.id);
+                toast.success("Enquiry deleted");
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </AppShell>
+  );
+}
+
+function EnquiryCard({
+  enquiry,
+  onStatus,
+  onConvert,
+  onDelete,
+}: {
+  enquiry: Enquiry;
+  onStatus: (status: EnquiryStatus) => void | Promise<void>;
+  onConvert: () => void | Promise<void>;
+  onDelete: () => void | Promise<void>;
+}) {
+  const status = (enquiry.status as EnquiryStatus) ?? "new";
+  return (
+    <Card>
+      <CardContent className="space-y-3 py-5">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="truncate font-semibold text-foreground">{enquiry.name}</p>
+            <p className="text-xs text-muted-foreground">
+              {new Date(enquiry.created_at).toLocaleString("en-GB", {
+                dateStyle: "medium",
+                timeStyle: "short",
+              })}
+              {enquiry.source ? ` · ${enquiry.source}` : ""}
+            </p>
+          </div>
+          <Badge variant={STATUS_VARIANT[status]}>{ENQUIRY_STATUS_LABELS[status]}</Badge>
+        </div>
+
+        {enquiry.address ? (
+          <p className="whitespace-pre-line text-sm text-muted-foreground">{enquiry.address}</p>
+        ) : null}
+        {enquiry.message ? (
+          <p className="whitespace-pre-line text-sm text-foreground/90">{enquiry.message}</p>
+        ) : null}
+
+        <div className="flex flex-wrap gap-2">
+          {enquiry.phone ? (
+            <Button variant="outline" size="sm" asChild>
+              <a href={`tel:${enquiry.phone}`}>
+                <Phone className="size-4" /> {enquiry.phone}
+              </a>
+            </Button>
+          ) : null}
+          {enquiry.email ? (
+            <Button variant="outline" size="sm" asChild>
+              <a href={`mailto:${enquiry.email}`}>
+                <Mail className="size-4" /> Email
+              </a>
+            </Button>
+          ) : null}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+          <Select value={status} onValueChange={(value) => onStatus(value as EnquiryStatus)}>
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.keys(ENQUIRY_STATUS_LABELS) as EnquiryStatus[]).map((value) => (
+                <SelectItem key={value} value={value}>
+                  {ENQUIRY_STATUS_LABELS[value]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button size="sm" onClick={onConvert} disabled={Boolean(enquiry.client_id)}>
+            <UserPlus className="size-4" />
+            {enquiry.client_id ? "Client created" : "Add as client"}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onDelete} aria-label="Delete enquiry">
+            <Trash2 className="size-4 text-destructive" />
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
