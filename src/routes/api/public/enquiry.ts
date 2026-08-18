@@ -7,6 +7,9 @@ const CORS = {
   "Access-Control-Allow-Headers": "content-type",
 };
 
+const escapeHtml = (value: string) =>
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
 const schema = z.object({
   key: z.string().trim().min(4).max(64),
   name: z.string().trim().min(1).max(120),
