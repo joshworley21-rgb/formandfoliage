@@ -677,33 +677,35 @@ function CompleteDialog({
                 <Label>Pay basis</Label>
                 <Select
                   value={payMode}
-                  onValueChange={(v) => setPayMode(v as "client" | "hourly" | "day")}
+                  onValueChange={(v) => {
+                    const mode = v as "hourly" | "day";
+                    setPayMode(mode);
+                    setRate(rateFor(mode));
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="client">Client default</SelectItem>
                     <SelectItem value="hourly">Hourly rate</SelectItem>
                     <SelectItem value="day">Day rate</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              {payMode === "client" ? null : (
-                <div className="space-y-1.5">
-                  <Label htmlFor="crate">
-                    {payMode === "day" ? "Day rate (£)" : "Hourly rate (£)"}
-                  </Label>
-                  <Input
-                    id="crate"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={rate}
-                    onChange={(e) => setRate(e.target.value)}
-                  />
-                </div>
-              )}
+              <div className="space-y-1.5">
+                <Label htmlFor="crate">
+                  {payMode === "day" ? "Day rate (£)" : "Hourly rate (£)"}
+                </Label>
+                <Input
+                  id="crate"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={rate}
+                  onChange={(e) => setRate(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">From the client record</p>
+              </div>
               {payMode === "day" ? (
                 <div className="space-y-1.5">
                   <Label htmlFor="cdays">Days worked</Label>
@@ -717,11 +719,10 @@ function CompleteDialog({
                   />
                 </div>
               ) : null}
-              {amountOverride === undefined ? null : (
-                <p className="self-end text-sm text-muted-foreground sm:col-span-2">
-                  Visit total: £{amountOverride.toFixed(2)}
-                </p>
-              )}
+              <p className="self-end text-sm text-muted-foreground sm:col-span-2">
+                Visit total: £{amountOverride.toFixed(2)}
+              </p>
+
             </div>
           )}
           <div className="space-y-1.5">
