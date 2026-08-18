@@ -115,10 +115,10 @@ function InvoicesPage() {
       invoice: Invoice;
       client: Client;
       items: InvoiceItem[];
-      url: string;
       intent: "download" | "send";
     } | null
   >(null);
+
   const queryClient = useQueryClient();
 
   const sendFn = useServerFn(sendInvoiceEmail);
@@ -159,12 +159,7 @@ function InvoicesPage() {
     try {
       setBusyId(invoice.id);
       const { client, items } = await loadInvoiceData(invoice);
-      const doc = await buildInvoicePdf({ invoice, items, client, settings: settings ?? null });
-      const url = URL.createObjectURL(doc.output("blob"));
-      setPreview((current) => {
-        if (current?.url) URL.revokeObjectURL(current.url);
-        return { invoice, client, items, url, intent };
-      });
+      setPreview({ invoice, client, items, intent });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not build the preview");
     } finally {
@@ -173,11 +168,9 @@ function InvoicesPage() {
   }
 
   function closePreview() {
-    setPreview((current) => {
-      if (current?.url) URL.revokeObjectURL(current.url);
-      return null;
-    });
+    setPreview(null);
   }
+
 
 
   async function sendOneClick(invoice: Invoice) {
@@ -357,7 +350,7 @@ function InvoicesPage() {
       />
 
       <Dialog open={preview !== null} onOpenChange={(open) => (open ? null : closePreview())}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-h-[92svh] w-[calc(100vw-1.5rem)] max-w-3xl overflow-hidden p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle>Preview {preview?.invoice.number}</DialogTitle>
             <DialogDescription>
@@ -365,25 +358,16 @@ function InvoicesPage() {
             </DialogDescription>
           </DialogHeader>
           {preview ? (
-            <div className="max-h-[65vh] overflow-y-auto">
+            <div className="-mx-1 max-h-[62svh] overflow-auto px-1">
               <InvoicePreviewDoc
                 invoice={preview.invoice}
                 items={preview.items}
                 client={preview.client}
                 settings={settings ?? null}
               />
-              <div className="mt-3 text-center">
-                <a
-                  href={preview.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-sm underline underline-offset-4"
-                >
-                  Open the PDF in a new tab
-                </a>
-              </div>
             </div>
           ) : null}
+
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={closePreview}>
               Close
