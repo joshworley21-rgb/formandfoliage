@@ -647,6 +647,7 @@ export type Database = {
           email: string | null
           email_body_template: string
           email_subject_template: string
+          enquiry_key: string | null
           invoice_counter: number
           invoice_prefix: string
           payment_terms: string | null
@@ -665,6 +666,7 @@ export type Database = {
           email?: string | null
           email_body_template?: string
           email_subject_template?: string
+          enquiry_key?: string | null
           invoice_counter?: number
           invoice_prefix?: string
           payment_terms?: string | null
@@ -683,6 +685,7 @@ export type Database = {
           email?: string | null
           email_body_template?: string
           email_subject_template?: string
+          enquiry_key?: string | null
           invoice_counter?: number
           invoice_prefix?: string
           payment_terms?: string | null
