@@ -115,10 +115,10 @@ function InvoicesPage() {
       invoice: Invoice;
       client: Client;
       items: InvoiceItem[];
-      url: string;
       intent: "download" | "send";
     } | null
   >(null);
+
   const queryClient = useQueryClient();
 
   const sendFn = useServerFn(sendInvoiceEmail);
