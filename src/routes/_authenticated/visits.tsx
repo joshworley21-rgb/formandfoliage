@@ -349,15 +349,8 @@ function VisitsPage() {
             <p className="rounded-lg bg-secondary px-3 py-2 text-sm">
               Charge: <span className="font-semibold">{money(preview)}</span>{" "}
               <span className="text-muted-foreground">
-                (
-                {payMode === "day"
-                  ? "day rate"
-                  : payMode === "hourly"
-                    ? "hourly rate"
-                    : client?.billing_mode === "fixed"
-                      ? "fixed price"
-                      : "hourly"}{" "}
-                + materials)
+                ({payMode === "day" ? "day rate" : "hourly rate"} + materials)
+
               </span>
             </p>
 
