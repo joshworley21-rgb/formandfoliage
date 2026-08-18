@@ -320,6 +320,16 @@ function SchedulePage() {
         defaultHourlyRate={
           completing ? Number(clients.find((c) => c.id === completing.client_id)?.hourly_rate ?? 0) : 0
         }
+        defaultDayRate={
+          completing ? Number(clients.find((c) => c.id === completing.client_id)?.fixed_price ?? 0) : 0
+        }
+        defaultPayMode={
+          completing &&
+          clients.find((c) => c.id === completing.client_id)?.billing_mode === "fixed"
+            ? "day"
+            : "hourly"
+        }
+
         onComplete={async ({ hours, materials, description, amount }) => {
           if (!completing) return;
           if (isStaff) {
