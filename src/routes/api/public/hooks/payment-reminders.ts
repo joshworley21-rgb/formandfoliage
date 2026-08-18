@@ -155,7 +155,7 @@ export const Route = createFileRoute("/api/public/hooks/payment-reminders")({
             status: "sent",
             recipient: client.email,
             provider_message_id: providerMessageId,
-            detail: `${REMINDER_TAG} Payment reminder sent to ${client.email} (${daysOutstanding} days unpaid)`,
+            detail: `${REMINDER_TAG} ${isOverdue ? `Overdue reminder sent to ${client.email} (${overdueDays} days past due)` : `Payment reminder sent to ${client.email} (${daysSinceSent} days unpaid)`}`,
           });
           sent++;
         }
