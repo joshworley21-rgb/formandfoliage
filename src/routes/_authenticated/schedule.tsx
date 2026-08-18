@@ -573,11 +573,15 @@ function CompleteDialog({
   onComplete,
   hideMaterials,
   defaultHourlyRate = 0,
+  defaultDayRate = 0,
+  defaultPayMode = "hourly",
 }: {
   job: ScheduledJob | null;
   clientName: string;
   hideMaterials?: boolean;
   defaultHourlyRate?: number;
+  defaultDayRate?: number;
+  defaultPayMode?: "hourly" | "day";
   onClose: () => void;
   onComplete: (input: {
     hours: number;
@@ -590,20 +594,19 @@ function CompleteDialog({
   const [materials, setMaterials] = useState("0");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
-  const [payMode, setPayMode] = useState<"client" | "hourly" | "day">("client");
+  const [payMode, setPayMode] = useState<"hourly" | "day">(defaultPayMode);
   const [rate, setRate] = useState("0");
   const [days, setDays] = useState("1");
 
+  const rateFor = (mode: "hourly" | "day") =>
+    String(Number((mode === "day" ? defaultDayRate : defaultHourlyRate) || 0));
+
   const labour =
-    payMode === "hourly"
-      ? (Number(rate) || 0) * (Number(hours) || 0)
-      : payMode === "day"
-        ? (Number(rate) || 0) * (Number(days) || 0)
-        : 0;
+    payMode === "day"
+      ? (Number(rate) || 0) * (Number(days) || 0)
+      : (Number(rate) || 0) * (Number(hours) || 0);
   const amountOverride =
-    payMode === "client"
-      ? undefined
-      : Math.round((labour + (hideMaterials ? 0 : Number(materials) || 0)) * 100) / 100;
+    Math.round((labour + (hideMaterials ? 0 : Number(materials) || 0)) * 100) / 100;
 
   return (
     <Dialog
@@ -614,12 +617,13 @@ function CompleteDialog({
           setHours(String((job.duration_minutes / 60).toFixed(2)));
           setMaterials("0");
           setDescription(job.notes ?? "");
-          setPayMode("client");
-          setRate(String(defaultHourlyRate || 0));
+          setPayMode(defaultPayMode);
+          setRate(rateFor(defaultPayMode));
           setDays("1");
         }
       }}
     >
+
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Complete job — {clientName}</DialogTitle>
