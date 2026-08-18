@@ -19,6 +19,7 @@ import { Route as AuthenticatedRecurringRouteImport } from './routes/_authentica
 import { Route as AuthenticatedScheduleRouteImport } from './routes/_authenticated/schedule'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedVisitsRouteImport } from './routes/_authenticated/visits'
+import { Route as ApiPublicEnquiryRouteImport } from './routes/api/public/enquiry'
 import { Route as ApiPublicHooksPaymentRemindersRouteImport } from './routes/api/public/hooks/payment-reminders'
 
 const IndexRoute = IndexRouteImport.update({
@@ -70,6 +71,11 @@ const AuthenticatedVisitsRoute = AuthenticatedVisitsRouteImport.update({
   path: '/visits',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const ApiPublicEnquiryRoute = ApiPublicEnquiryRouteImport.update({
+  id: '/api/public/enquiry',
+  path: '/api/public/enquiry',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicHooksPaymentRemindersRoute =
   ApiPublicHooksPaymentRemindersRouteImport.update({
     id: '/api/public/hooks/payment-reminders',
@@ -87,6 +93,7 @@ export interface FileRoutesByFullPath {
   '/schedule': typeof AuthenticatedScheduleRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/visits': typeof AuthenticatedVisitsRoute
+  '/api/public/enquiry': typeof ApiPublicEnquiryRoute
   '/api/public/hooks/payment-reminders': typeof ApiPublicHooksPaymentRemindersRoute
 }
 export interface FileRoutesByTo {
@@ -99,6 +106,7 @@ export interface FileRoutesByTo {
   '/schedule': typeof AuthenticatedScheduleRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/visits': typeof AuthenticatedVisitsRoute
+  '/api/public/enquiry': typeof ApiPublicEnquiryRoute
   '/api/public/hooks/payment-reminders': typeof ApiPublicHooksPaymentRemindersRoute
 }
 export interface FileRoutesById {
@@ -113,6 +121,7 @@ export interface FileRoutesById {
   '/_authenticated/schedule': typeof AuthenticatedScheduleRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/visits': typeof AuthenticatedVisitsRoute
+  '/api/public/enquiry': typeof ApiPublicEnquiryRoute
   '/api/public/hooks/payment-reminders': typeof ApiPublicHooksPaymentRemindersRoute
 }
 export interface FileRouteTypes {
@@ -127,6 +136,7 @@ export interface FileRouteTypes {
     | '/schedule'
     | '/settings'
     | '/visits'
+    | '/api/public/enquiry'
     | '/api/public/hooks/payment-reminders'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -139,6 +149,7 @@ export interface FileRouteTypes {
     | '/schedule'
     | '/settings'
     | '/visits'
+    | '/api/public/enquiry'
     | '/api/public/hooks/payment-reminders'
   id:
     | '__root__'
@@ -152,6 +163,7 @@ export interface FileRouteTypes {
     | '/_authenticated/schedule'
     | '/_authenticated/settings'
     | '/_authenticated/visits'
+    | '/api/public/enquiry'
     | '/api/public/hooks/payment-reminders'
   fileRoutesById: FileRoutesById
 }
@@ -159,6 +171,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiPublicEnquiryRoute: typeof ApiPublicEnquiryRoute
   ApiPublicHooksPaymentRemindersRoute: typeof ApiPublicHooksPaymentRemindersRoute
 }
 
@@ -234,6 +247,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedVisitsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/public/enquiry': {
+      id: '/api/public/enquiry'
+      path: '/api/public/enquiry'
+      fullPath: '/api/public/enquiry'
+      preLoaderRoute: typeof ApiPublicEnquiryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/payment-reminders': {
       id: '/api/public/hooks/payment-reminders'
       path: '/api/public/hooks/payment-reminders'
@@ -271,6 +291,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiPublicEnquiryRoute: ApiPublicEnquiryRoute,
   ApiPublicHooksPaymentRemindersRoute: ApiPublicHooksPaymentRemindersRoute,
 }
 export const routeTree = rootRouteImport
