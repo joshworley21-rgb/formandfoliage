@@ -31,14 +31,13 @@ export const Route = createFileRoute("/api/public/hooks/payment-reminders")({
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
         const now = Date.now();
-        const cutoff = new Date(now - REMINDER_AFTER_DAYS * 86400000).toISOString();
+        const todayIso = new Date(now).toISOString().slice(0, 10);
 
         const { data: invoices, error } = await supabaseAdmin
           .from("invoices")
           .select("id, user_id, number, total, due_date, sent_at, client_id, clients(name, email)")
           .eq("status", "sent")
-          .not("sent_at", "is", null)
-          .lte("sent_at", cutoff);
+          .not("sent_at", "is", null);
         if (error) throw error;
 
         let sent = 0;
@@ -50,6 +49,25 @@ export const Route = createFileRoute("/api/public/hooks/payment-reminders")({
             skipped++;
             continue;
           }
+
+          // Overdue = past its due date. Otherwise fall back to the "unpaid for
+          // N days since sending" rule for invoices with no due date set.
+          const overdueDays = invoice.due_date
+            ? Math.floor(
+                (new Date(`${todayIso}T00:00:00Z`).getTime() -
+                  new Date(`${invoice.due_date}T00:00:00Z`).getTime()) /
+                  86400000,
+              )
+            : 0;
+          const daysSinceSent = Math.floor(
+            (now - new Date(invoice.sent_at as string).getTime()) / 86400000,
+          );
+          const isOverdue = Boolean(invoice.due_date) && overdueDays > 0;
+          if (!isOverdue && daysSinceSent < REMINDER_AFTER_DAYS) {
+            skipped++;
+            continue;
+          }
+
 
           const { data: lastReminders } = await supabaseAdmin
             .from("invoice_email_events")
@@ -74,19 +92,20 @@ export const Route = createFileRoute("/api/public/hooks/payment-reminders")({
 
           const businessName = settings?.business_name || "JW Garden Services";
           const fromEmail = settings?.email || "onboarding@resend.dev";
-          const daysOutstanding = Math.floor(
-            (now - new Date(invoice.sent_at as string).getTime()) / 86400000,
-          );
+          const statusLine = isOverdue
+            ? `Invoice ${invoice.number} for £${Number(invoice.total).toFixed(2)} was due on ${invoice.due_date} and is now ${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue.`
+            : `Just a friendly reminder that invoice ${invoice.number} for £${Number(invoice.total).toFixed(2)} is still showing as unpaid (sent ${daysSinceSent} days ago).`;
 
           const bodyText = [
             `Hi ${client.name},`,
-            `Just a friendly reminder that invoice ${invoice.number} for £${Number(invoice.total).toFixed(2)} is still showing as unpaid (sent ${daysOutstanding} days ago${invoice.due_date ? `, due ${invoice.due_date}` : ""}).`,
+            statusLine,
             settings?.bank_details ? `Payment details:\n${settings.bank_details}` : "",
             "If you have already paid, please ignore this message — and thank you.",
             `Many thanks,\n${businessName}`,
           ]
             .filter(Boolean)
             .join("\n\n");
+
 
           const html = `<div style="font-family:Arial,sans-serif;font-size:15px;color:#243">
       ${escapeHtml(bodyText)
@@ -105,7 +124,10 @@ export const Route = createFileRoute("/api/public/hooks/payment-reminders")({
             body: JSON.stringify({
               from: `${businessName} <${fromEmail}>`,
               to: client.email,
-              subject: `Payment reminder — invoice ${invoice.number}`,
+              subject: isOverdue
+                ? `Overdue invoice ${invoice.number} — payment reminder`
+                : `Payment reminder — invoice ${invoice.number}`,
+
               html,
             }),
           });
@@ -136,7 +158,7 @@ export const Route = createFileRoute("/api/public/hooks/payment-reminders")({
             status: "sent",
             recipient: client.email,
             provider_message_id: providerMessageId,
-            detail: `${REMINDER_TAG} Payment reminder sent to ${client.email} (${daysOutstanding} days unpaid)`,
+            detail: `${REMINDER_TAG} ${isOverdue ? `Overdue reminder sent to ${client.email} (${overdueDays} days past due)` : `Payment reminder sent to ${client.email} (${daysSinceSent} days unpaid)`}`,
           });
           sent++;
         }
