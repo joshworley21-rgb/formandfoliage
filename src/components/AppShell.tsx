@@ -29,7 +29,7 @@ const NAV = [
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ] as const;
 
-] as const;
+
 
 const STAFF_NAV_PATHS = ["/schedule", "/clients"];
 
