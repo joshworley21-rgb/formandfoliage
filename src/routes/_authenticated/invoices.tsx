@@ -159,12 +159,7 @@ function InvoicesPage() {
     try {
       setBusyId(invoice.id);
       const { client, items } = await loadInvoiceData(invoice);
-      const doc = await buildInvoicePdf({ invoice, items, client, settings: settings ?? null });
-      const url = URL.createObjectURL(doc.output("blob"));
-      setPreview((current) => {
-        if (current?.url) URL.revokeObjectURL(current.url);
-        return { invoice, client, items, url, intent };
-      });
+      setPreview({ invoice, client, items, intent });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not build the preview");
     } finally {
@@ -173,11 +168,9 @@ function InvoicesPage() {
   }
 
   function closePreview() {
-    setPreview((current) => {
-      if (current?.url) URL.revokeObjectURL(current.url);
-      return null;
-    });
+    setPreview(null);
   }
+
 
 
   async function sendOneClick(invoice: Invoice) {
