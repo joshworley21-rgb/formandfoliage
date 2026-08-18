@@ -92,19 +92,20 @@ export const Route = createFileRoute("/api/public/hooks/payment-reminders")({
 
           const businessName = settings?.business_name || "JW Garden Services";
           const fromEmail = settings?.email || "onboarding@resend.dev";
-          const daysOutstanding = Math.floor(
-            (now - new Date(invoice.sent_at as string).getTime()) / 86400000,
-          );
+          const statusLine = isOverdue
+            ? `Invoice ${invoice.number} for £${Number(invoice.total).toFixed(2)} was due on ${invoice.due_date} and is now ${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue.`
+            : `Just a friendly reminder that invoice ${invoice.number} for £${Number(invoice.total).toFixed(2)} is still showing as unpaid (sent ${daysSinceSent} days ago).`;
 
           const bodyText = [
             `Hi ${client.name},`,
-            `Just a friendly reminder that invoice ${invoice.number} for £${Number(invoice.total).toFixed(2)} is still showing as unpaid (sent ${daysOutstanding} days ago${invoice.due_date ? `, due ${invoice.due_date}` : ""}).`,
+            statusLine,
             settings?.bank_details ? `Payment details:\n${settings.bank_details}` : "",
             "If you have already paid, please ignore this message — and thank you.",
             `Many thanks,\n${businessName}`,
           ]
             .filter(Boolean)
             .join("\n\n");
+
 
           const html = `<div style="font-family:Arial,sans-serif;font-size:15px;color:#243">
       ${escapeHtml(bodyText)
