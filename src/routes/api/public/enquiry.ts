@@ -7,6 +7,9 @@ const CORS = {
   "Access-Control-Allow-Headers": "content-type",
 };
 
+const escapeHtml = (value: string) =>
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
 const schema = z.object({
   key: z.string().trim().min(4).max(64),
   name: z.string().trim().min(1).max(120),
@@ -51,7 +54,7 @@ export const Route = createFileRoute("/api/public/enquiry")({
 
         const { data: owner } = await supabaseAdmin
           .from("settings")
-          .select("user_id")
+          .select("user_id, email, business_name")
           .eq("enquiry_key", data.key)
           .maybeSingle();
 
@@ -70,6 +73,51 @@ export const Route = createFileRoute("/api/public/enquiry")({
         });
         if (error) {
           return Response.json({ error: "Could not save enquiry" }, { status: 500, headers: CORS });
+        }
+
+        // Notify the owner by email (best effort — never blocks the enquiry)
+        try {
+          const lovableKey = process.env["LOVABLE_API_KEY"];
+          const resendKey = process.env["RESEND_API_KEY"];
+          const notifyTo = owner.email;
+          if (lovableKey && resendKey && notifyTo) {
+            const businessName = owner.business_name || "JW Garden Services";
+            const rows: [string, string][] = [
+              ["Name", data.name],
+              ["Address", data.address || "—"],
+              ["Email", data.email || "—"],
+              ["Phone", data.phone || "—"],
+              ["Job description", data.message || "—"],
+            ];
+            const html = `<div style="font-family:Arial,sans-serif;font-size:15px;color:#243">
+      <p><strong>New website enquiry</strong></p>
+      ${rows
+        .map(
+          ([label, value]) =>
+            `<p style="margin:4px 0"><strong>${label}:</strong> ${escapeHtml(value).replace(/\n/g, "<br/>")}</p>`,
+        )
+        .join("\n")}
+      <p style="margin-top:16px">Open the Enquiries inbox in your CRM to reply or add them as a client.</p>
+    </div>`;
+
+            await fetch("https://connector-gateway.lovable.dev/resend/emails", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${lovableKey}`,
+                "X-Connection-Api-Key": resendKey,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                from: `${businessName} <${notifyTo}>`,
+                to: notifyTo,
+                ...(data.email ? { reply_to: data.email } : {}),
+                subject: `New enquiry — ${data.name}`,
+                html,
+              }),
+            });
+          }
+        } catch {
+          // ignore notification failures
         }
 
         return Response.json({ ok: true }, { headers: CORS });
