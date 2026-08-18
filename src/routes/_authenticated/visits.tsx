@@ -61,7 +61,7 @@ function VisitsPage() {
   const [hours, setHours] = useState("2");
   const [materials, setMaterials] = useState("0");
   const [description, setDescription] = useState("");
-  const [payMode, setPayMode] = useState<"client" | "hourly" | "day">("client");
+  const [payMode, setPayMode] = useState<"hourly" | "day">("hourly");
   const [rate, setRate] = useState("0");
   const [days, setDays] = useState("1");
 
@@ -70,11 +70,7 @@ function VisitsPage() {
   const computedAmount =
     payMode === "day"
       ? (Number(rate) || 0) * (Number(days) || 0) + materialsNum
-      : payMode === "hourly"
-        ? (Number(rate) || 0) * (Number(hours) || 0) + materialsNum
-        : client
-          ? priceVisit(client, Number(hours) || 0, materialsNum)
-          : 0;
+      : (Number(rate) || 0) * (Number(hours) || 0) + materialsNum;
   const preview = computedAmount;
 
 
@@ -86,9 +82,18 @@ function VisitsPage() {
     };
   }, [visits]);
 
-  function resetRate(c?: { hourly_rate?: number | string } | null) {
-    setPayMode("client");
-    setRate(String(c?.hourly_rate ?? 0));
+  /** Rates come straight from the client record. */
+  function rateFor(
+    c: { hourly_rate?: number | string; fixed_price?: number | string } | null | undefined,
+    mode: "hourly" | "day",
+  ) {
+    return String(Number((mode === "day" ? c?.fixed_price : c?.hourly_rate) ?? 0));
+  }
+
+  function resetRate(c?: { billing_mode?: string; hourly_rate?: number | string; fixed_price?: number | string } | null) {
+    const mode: "hourly" | "day" = c?.billing_mode === "fixed" ? "day" : "hourly";
+    setPayMode(mode);
+    setRate(rateFor(c, mode));
     setDays("1");
   }
 
@@ -114,6 +119,7 @@ function VisitsPage() {
     resetRate(clients.find((c) => c.id === visit.client_id));
     setOpen(true);
   }
+
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
