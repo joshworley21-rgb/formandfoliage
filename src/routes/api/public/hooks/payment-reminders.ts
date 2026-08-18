@@ -124,7 +124,10 @@ export const Route = createFileRoute("/api/public/hooks/payment-reminders")({
             body: JSON.stringify({
               from: `${businessName} <${fromEmail}>`,
               to: client.email,
-              subject: `Payment reminder — invoice ${invoice.number}`,
+              subject: isOverdue
+                ? `Overdue invoice ${invoice.number} — payment reminder`
+                : `Payment reminder — invoice ${invoice.number}`,
+
               html,
             }),
           });
