@@ -31,14 +31,13 @@ export const Route = createFileRoute("/api/public/hooks/payment-reminders")({
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
         const now = Date.now();
-        const cutoff = new Date(now - REMINDER_AFTER_DAYS * 86400000).toISOString();
+        const todayIso = new Date(now).toISOString().slice(0, 10);
 
         const { data: invoices, error } = await supabaseAdmin
           .from("invoices")
           .select("id, user_id, number, total, due_date, sent_at, client_id, clients(name, email)")
           .eq("status", "sent")
-          .not("sent_at", "is", null)
-          .lte("sent_at", cutoff);
+          .not("sent_at", "is", null);
         if (error) throw error;
 
         let sent = 0;
@@ -50,6 +49,25 @@ export const Route = createFileRoute("/api/public/hooks/payment-reminders")({
             skipped++;
             continue;
           }
+
+          // Overdue = past its due date. Otherwise fall back to the "unpaid for
+          // N days since sending" rule for invoices with no due date set.
+          const overdueDays = invoice.due_date
+            ? Math.floor(
+                (new Date(`${todayIso}T00:00:00Z`).getTime() -
+                  new Date(`${invoice.due_date}T00:00:00Z`).getTime()) /
+                  86400000,
+              )
+            : 0;
+          const daysSinceSent = Math.floor(
+            (now - new Date(invoice.sent_at as string).getTime()) / 86400000,
+          );
+          const isOverdue = Boolean(invoice.due_date) && overdueDays > 0;
+          if (!isOverdue && daysSinceSent < REMINDER_AFTER_DAYS) {
+            skipped++;
+            continue;
+          }
+
 
           const { data: lastReminders } = await supabaseAdmin
             .from("invoice_email_events")
