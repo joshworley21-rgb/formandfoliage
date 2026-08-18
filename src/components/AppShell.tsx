@@ -3,6 +3,7 @@ import {
   CalendarDays,
   ClipboardList,
   FileText,
+  Inbox,
   LayoutDashboard,
   LogOut,
   Repeat,
@@ -21,11 +22,14 @@ const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/schedule", label: "Schedule", icon: CalendarDays },
   { to: "/clients", label: "Clients", icon: Users },
+  { to: "/enquiries", label: "Enquiries", icon: Inbox },
   { to: "/visits", label: "Visits", icon: ClipboardList },
   { to: "/invoices", label: "Invoices", icon: FileText },
   { to: "/recurring", label: "Recurring", icon: Repeat },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ] as const;
+
+
 
 const STAFF_NAV_PATHS = ["/schedule", "/clients"];
 

@@ -163,6 +163,59 @@ export type Database = {
         }
         Relationships: []
       }
+      enquiries: {
+        Row: {
+          address: string | null
+          client_id: string | null
+          created_at: string
+          email: string | null
+          id: string
+          message: string | null
+          name: string
+          phone: string | null
+          source: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          address?: string | null
+          client_id?: string | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          message?: string | null
+          name: string
+          phone?: string | null
+          source?: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          address?: string | null
+          client_id?: string | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          message?: string | null
+          name?: string
+          phone?: string | null
+          source?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "enquiries_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoice_email_events: {
         Row: {
           created_at: string
@@ -594,6 +647,7 @@ export type Database = {
           email: string | null
           email_body_template: string
           email_subject_template: string
+          enquiry_key: string | null
           invoice_counter: number
           invoice_prefix: string
           payment_terms: string | null
@@ -612,6 +666,7 @@ export type Database = {
           email?: string | null
           email_body_template?: string
           email_subject_template?: string
+          enquiry_key?: string | null
           invoice_counter?: number
           invoice_prefix?: string
           payment_terms?: string | null
@@ -630,6 +685,7 @@ export type Database = {
           email?: string | null
           email_body_template?: string
           email_subject_template?: string
+          enquiry_key?: string | null
           invoice_counter?: number
           invoice_prefix?: string
           payment_terms?: string | null
