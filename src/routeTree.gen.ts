@@ -16,11 +16,13 @@ import { Route as AuthenticatedClientsRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedEnquiriesRouteImport } from './routes/_authenticated/enquiries'
 import { Route as AuthenticatedInvoicesRouteImport } from './routes/_authenticated/invoices'
+import { Route as AuthenticatedQuotesRouteImport } from './routes/_authenticated/quotes'
 import { Route as AuthenticatedRecurringRouteImport } from './routes/_authenticated/recurring'
 import { Route as AuthenticatedScheduleRouteImport } from './routes/_authenticated/schedule'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedVisitsRouteImport } from './routes/_authenticated/visits'
 import { Route as EnquireKeyRouteImport } from './routes/enquire.$key'
+import { Route as QuoteKeyRouteImport } from './routes/quote.$key'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -56,6 +58,11 @@ const AuthenticatedInvoicesRoute = AuthenticatedInvoicesRouteImport.update({
   path: '/invoices',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedQuotesRoute = AuthenticatedQuotesRouteImport.update({
+  id: '/quotes',
+  path: '/quotes',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedRecurringRoute = AuthenticatedRecurringRouteImport.update({
   id: '/recurring',
   path: '/recurring',
@@ -81,6 +88,11 @@ const EnquireKeyRoute = EnquireKeyRouteImport.update({
   path: '/enquire/$key',
   getParentRoute: () => rootRouteImport,
 } as any)
+const QuoteKeyRoute = QuoteKeyRouteImport.update({
+  id: '/quote/$key',
+  path: '/quote/$key',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -89,11 +101,13 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/enquiries': typeof AuthenticatedEnquiriesRoute
   '/invoices': typeof AuthenticatedInvoicesRoute
+  '/quotes': typeof AuthenticatedQuotesRoute
   '/recurring': typeof AuthenticatedRecurringRoute
   '/schedule': typeof AuthenticatedScheduleRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/visits': typeof AuthenticatedVisitsRoute
   '/enquire/$key': typeof EnquireKeyRoute
+  '/quote/$key': typeof QuoteKeyRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -102,11 +116,13 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/enquiries': typeof AuthenticatedEnquiriesRoute
   '/invoices': typeof AuthenticatedInvoicesRoute
+  '/quotes': typeof AuthenticatedQuotesRoute
   '/recurring': typeof AuthenticatedRecurringRoute
   '/schedule': typeof AuthenticatedScheduleRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/visits': typeof AuthenticatedVisitsRoute
   '/enquire/$key': typeof EnquireKeyRoute
+  '/quote/$key': typeof QuoteKeyRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -117,11 +133,13 @@ export interface FileRoutesById {
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/enquiries': typeof AuthenticatedEnquiriesRoute
   '/_authenticated/invoices': typeof AuthenticatedInvoicesRoute
+  '/_authenticated/quotes': typeof AuthenticatedQuotesRoute
   '/_authenticated/recurring': typeof AuthenticatedRecurringRoute
   '/_authenticated/schedule': typeof AuthenticatedScheduleRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/visits': typeof AuthenticatedVisitsRoute
   '/enquire/$key': typeof EnquireKeyRoute
+  '/quote/$key': typeof QuoteKeyRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -132,11 +150,13 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/enquiries'
     | '/invoices'
+    | '/quotes'
     | '/recurring'
     | '/schedule'
     | '/settings'
     | '/visits'
     | '/enquire/$key'
+    | '/quote/$key'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -145,11 +165,13 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/enquiries'
     | '/invoices'
+    | '/quotes'
     | '/recurring'
     | '/schedule'
     | '/settings'
     | '/visits'
     | '/enquire/$key'
+    | '/quote/$key'
   id:
     | '__root__'
     | '/'
@@ -159,11 +181,13 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard'
     | '/_authenticated/enquiries'
     | '/_authenticated/invoices'
+    | '/_authenticated/quotes'
     | '/_authenticated/recurring'
     | '/_authenticated/schedule'
     | '/_authenticated/settings'
     | '/_authenticated/visits'
     | '/enquire/$key'
+    | '/quote/$key'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -171,6 +195,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   EnquireKeyRoute: typeof EnquireKeyRoute
+  QuoteKeyRoute: typeof QuoteKeyRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -224,6 +249,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedInvoicesRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/quotes': {
+      id: '/_authenticated/quotes'
+      path: '/quotes'
+      fullPath: '/quotes'
+      preLoaderRoute: typeof AuthenticatedQuotesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/recurring': {
       id: '/_authenticated/recurring'
       path: '/recurring'
@@ -259,6 +291,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EnquireKeyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/quote/$key': {
+      id: '/quote/$key'
+      path: '/quote/$key'
+      fullPath: '/quote/$key'
+      preLoaderRoute: typeof QuoteKeyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -267,6 +306,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedEnquiriesRoute: typeof AuthenticatedEnquiriesRoute
   AuthenticatedInvoicesRoute: typeof AuthenticatedInvoicesRoute
+  AuthenticatedQuotesRoute: typeof AuthenticatedQuotesRoute
   AuthenticatedRecurringRoute: typeof AuthenticatedRecurringRoute
   AuthenticatedScheduleRoute: typeof AuthenticatedScheduleRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
@@ -278,6 +318,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedEnquiriesRoute: AuthenticatedEnquiriesRoute,
   AuthenticatedInvoicesRoute: AuthenticatedInvoicesRoute,
+  AuthenticatedQuotesRoute: AuthenticatedQuotesRoute,
   AuthenticatedRecurringRoute: AuthenticatedRecurringRoute,
   AuthenticatedScheduleRoute: AuthenticatedScheduleRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
@@ -292,6 +333,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   EnquireKeyRoute: EnquireKeyRoute,
+  QuoteKeyRoute: QuoteKeyRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

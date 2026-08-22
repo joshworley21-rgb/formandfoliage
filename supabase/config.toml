@@ -18,6 +18,9 @@ verify_jwt = true
 [functions.send-test-email]
 verify_jwt = true
 
+[functions.send-quote-email]
+verify_jwt = true
+
 # Public: the customer-facing enquiry form posts here from any website, so there
 # is no JWT to verify. Protected by the owner's enquiry_key and a honeypot field.
 [functions.public-enquiry]
@@ -26,4 +29,10 @@ verify_jwt = false
 # Scheduled: guarded by the service-role key inside the function rather than by
 # a user JWT, so only the cron job can trigger a reminder run.
 [functions.payment-reminders]
+verify_jwt = false
+
+# Public: the customer opens their quote from an emailed link and accepts or
+# declines it without an account. The quotes table has no anon policy, so this
+# function is the only way that data is reachable.
+[functions.public-quote]
 verify_jwt = false

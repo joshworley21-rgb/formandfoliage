@@ -10,8 +10,14 @@ the phone talks to Supabase directly, and nothing needs a web server.
 | `send-invoice-email` | `sendInvoiceEmail` server fn | signed-in user |
 | `email-status` | `getResendStatus` server fn | signed-in user |
 | `send-test-email` | `sendTestEmail` server fn | signed-in user |
+| `send-quote-email` | new — emails a quote with its accept link | signed-in user |
 | `public-enquiry` | `POST /api/public/enquiry` | anyone (public form) |
+| `public-quote` | new — customer views and answers a quote | anyone with the link |
 | `payment-reminders` | `POST /api/public/hooks/payment-reminders` | scheduler only, via the service-role key |
+
+`public-quote` is how the customer's accept page reaches a quote: the `quotes`
+table has no anon policy, so this function is the only way in and it returns
+only the fields that page needs.
 
 `create-invoice` has to run here rather than on the phone because
 `next_invoice_number()` is granted to `service_role` only — invoice numbers must

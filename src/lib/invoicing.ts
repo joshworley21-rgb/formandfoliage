@@ -96,3 +96,48 @@ export type EnquiryInput = {
 export function submitEnquiry(data: EnquiryInput) {
   return invoke<{ ok: true }>("public-enquiry", data);
 }
+
+export type SendQuoteInput = {
+  quoteId: string;
+  /** Public origin the accept link should point at. */
+  origin: string;
+  message?: string | null;
+};
+
+export function sendQuoteEmail({ data }: { data: SendQuoteInput }) {
+  return invoke<{ sent: boolean; to?: string; reason?: string }>("send-quote-email", data);
+}
+
+export type PublicQuoteView = {
+  number: string;
+  contactName: string;
+  contactAddress: string | null;
+  issueDate: string;
+  validUntil: string | null;
+  subtotal: number;
+  vatAmount: number;
+  total: number;
+  status: "sent" | "accepted" | "declined" | "expired";
+  expired: boolean;
+  notes: string | null;
+  terms: string | null;
+  vatRegistered: boolean;
+  business: { name: string; email: string | null; phone: string | null };
+  items: Array<{ description: string; quantity: number; unitPrice: number; amount: number }>;
+};
+
+/** Public — the customer's accept page, which nobody is signed in on. */
+export function fetchPublicQuote(key: string) {
+  return invoke<{ quote: PublicQuoteView }>("public-quote", { action: "get", key });
+}
+
+export function decidePublicQuote(input: {
+  key: string;
+  decision: "accepted" | "declined";
+  reason?: string | null;
+}) {
+  return invoke<{ ok: true; status: "accepted" | "declined" }>("public-quote", {
+    action: "decide",
+    ...input,
+  });
+}
