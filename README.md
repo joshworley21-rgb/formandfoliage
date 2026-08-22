@@ -47,6 +47,16 @@ Secrets are never kept here. The Resend API key lives only in the Edge Function
 secrets (`supabase secrets set RESEND_API_KEY=...`), and the service-role key
 only in Supabase itself. Nothing in this repo needs either.
 
+## Setting up Supabase from scratch
+
+`supabase/SETUP.md` walks through a new project end to end: schema, auth
+providers, the email key, the reminder schedule, and moving data over.
+
+`scripts/test-migrations.sh` builds a database from `supabase/migrations/` alone
+against a local PostgreSQL and checks it behaves — worth running after any
+schema change, since it catches the case where the live database only works
+because something was once done by hand.
+
 ## Deploying
 
 - **Android app** — `ANDROID-APK.md`. GitHub Actions can build the APK for you.

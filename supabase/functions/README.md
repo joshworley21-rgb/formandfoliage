@@ -26,7 +26,9 @@ because they hold the Resend API key.
 
 ## One-time setup
 
-You need the Supabase CLI and access to the project dashboard.
+Setting up a brand-new Supabase project? Follow `supabase/SETUP.md` instead —
+it covers this along with everything else. These steps are for a project that
+already exists.
 
 ```sh
 # 1. Install the CLI (see supabase.com/docs/guides/cli for other platforms)
@@ -34,7 +36,7 @@ npm install -g supabase
 
 # 2. Sign in and link this repo to the project
 supabase login
-supabase link --project-ref ftngutorudrwuqwdpzrb
+supabase link --project-ref <your-project-ref>
 
 # 3. Give the functions the Resend key (the only secret they need —
 #    SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are
@@ -70,7 +72,7 @@ select cron.schedule(
   '0 8 * * *',  -- 08:00 UTC daily
   $$
   select net.http_post(
-    url     := 'https://ftngutorudrwuqwdpzrb.supabase.co/functions/v1/payment-reminders',
+    url     := 'https://<project-ref>.supabase.co/functions/v1/payment-reminders',
     headers := jsonb_build_object(
       'Content-Type',  'application/json',
       'Authorization', 'Bearer YOUR_SERVICE_ROLE_KEY'
@@ -88,11 +90,11 @@ the schedule is the only thing that can trigger a run.
 
 ```sh
 # Should report {"connected":true} once RESEND_API_KEY is set
-curl -X POST https://ftngutorudrwuqwdpzrb.supabase.co/functions/v1/email-status \
+curl -X POST https://<project-ref>.supabase.co/functions/v1/email-status \
   -H "Authorization: Bearer YOUR_USER_ACCESS_TOKEN"
 
 # Reminder sweep, dry of any effect if nothing is due
-curl -X POST https://ftngutorudrwuqwdpzrb.supabase.co/functions/v1/payment-reminders \
+curl -X POST https://<project-ref>.supabase.co/functions/v1/payment-reminders \
   -H "Authorization: Bearer YOUR_SERVICE_ROLE_KEY"
 ```
 

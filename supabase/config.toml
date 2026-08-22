@@ -1,3 +1,5 @@
+# Change this to the new project ref when moving to a different Supabase
+# project — see supabase/SETUP.md.
 project_id = "ftngutorudrwuqwdpzrb"
 
 # Edge Functions. These replace the TanStack Start server functions and API
