@@ -22,9 +22,8 @@ export const Route = createFileRoute("/api/public/hooks/payment-reminders")({
           return Response.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        const lovableKey = process.env["LOVABLE_API_KEY"];
-        const resendKey = process.env["RESEND_API_KEY"];
-        if (!lovableKey || !resendKey) {
+        const { sendEmail, isEmailConfigured } = await import("@/lib/email.server");
+        if (!isEmailConfigured()) {
           return Response.json({ ok: false, reason: "Email is not connected" }, { status: 200 });
         }
 
@@ -114,43 +113,27 @@ export const Route = createFileRoute("/api/public/hooks/payment-reminders")({
         .join("\n")}
     </div>`;
 
-          const response = await fetch("https://connector-gateway.lovable.dev/resend/emails", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${lovableKey}`,
-              "X-Connection-Api-Key": resendKey,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              from: `${businessName} <${fromEmail}>`,
-              to: client.email,
-              subject: isOverdue
-                ? `Overdue invoice ${invoice.number} — payment reminder`
-                : `Payment reminder — invoice ${invoice.number}`,
-
-              html,
-            }),
+          const result = await sendEmail({
+            from: `${businessName} <${fromEmail}>`,
+            to: client.email,
+            subject: isOverdue
+              ? `Overdue invoice ${invoice.number} — payment reminder`
+              : `Payment reminder — invoice ${invoice.number}`,
+            html,
           });
 
-          if (!response.ok) {
-            const detail = await response.text();
+          if (!result.ok) {
             await supabaseAdmin.from("invoice_email_events").insert({
               user_id: invoice.user_id,
               invoice_id: invoice.id,
               status: "failed",
               recipient: client.email,
-              detail: `${REMINDER_TAG} ${response.status}: ${detail}`.slice(0, 500),
+              detail: `${REMINDER_TAG} ${result.status}: ${result.detail}`.slice(0, 500),
             });
             continue;
           }
 
-          let providerMessageId: string | null = null;
-          try {
-            const payload = (await response.json()) as { id?: string };
-            providerMessageId = payload?.id ?? null;
-          } catch {
-            providerMessageId = null;
-          }
+          const providerMessageId = result.id;
 
           await supabaseAdmin.from("invoice_email_events").insert({
             user_id: invoice.user_id,

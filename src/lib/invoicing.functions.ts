@@ -215,9 +215,8 @@ export const sendInvoiceEmail = createServerFn({ method: "POST" })
       upsert: true,
     });
 
-    const lovableKey = process.env["LOVABLE_API_KEY"];
-    const resendKey = process.env["RESEND_API_KEY"];
-    if (!lovableKey || !resendKey) {
+    const { sendEmail, isEmailConfigured } = await import("@/lib/email.server");
+    if (!isEmailConfigured()) {
       await logEvent("skipped", "Email is not connected — Resend is not set up yet.");
       return {
         sent: false,
@@ -264,42 +263,27 @@ export const sendInvoiceEmail = createServerFn({ method: "POST" })
         .join("\n")}
     </div>`;
 
-    const response = await fetch("https://connector-gateway.lovable.dev/resend/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${lovableKey}`,
-        "X-Connection-Api-Key": resendKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: `${businessName} <${fromEmail}>`,
-        to: client.email,
-        subject,
-        html: htmlBody,
-        attachments: [
-          {
-            filename: `${invoice.number}.pdf`,
-            content: data.pdfBase64,
-            contentType: "application/pdf",
-          },
-        ],
-      }),
+    const result = await sendEmail({
+      from: `${businessName} <${fromEmail}>`,
+      to: client.email,
+      subject,
+      html: htmlBody,
+      attachments: [
+        {
+          filename: `${invoice.number}.pdf`,
+          content: data.pdfBase64,
+          contentType: "application/pdf",
+        },
+      ],
     });
 
-    if (!response.ok) {
-      const detail = await response.text();
-      console.error("Resend send error", response.status, detail);
-      await logEvent("failed", `${response.status}: ${detail}`.slice(0, 500));
-      throw new Error(`Resend could not send the email. ${response.status}: ${detail}`);
+    if (!result.ok) {
+      console.error("Resend send error", result.status, result.detail);
+      await logEvent("failed", `${result.status}: ${result.detail}`.slice(0, 500));
+      throw new Error(`Resend could not send the email. ${result.status}: ${result.detail}`);
     }
 
-    let providerMessageId: string | null = null;
-    try {
-      const payload = (await response.json()) as { id?: string };
-      providerMessageId = payload?.id ?? null;
-    } catch {
-      providerMessageId = null;
-    }
+    const providerMessageId = result.id;
 
     await supabase
       .from("invoices")
@@ -314,28 +298,10 @@ export const sendInvoiceEmail = createServerFn({ method: "POST" })
 export const getResendStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async () => {
-    const lovableKey = process.env["LOVABLE_API_KEY"];
-    const resendKey = process.env["RESEND_API_KEY"];
-    if (!lovableKey || !resendKey) return { connected: false as const };
-
-    const response = await fetch("https://connector-gateway.lovable.dev/api/v1/verify_credentials", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${lovableKey}`,
-        "X-Connection-Api-Key": resendKey,
-      },
-    });
-    if (!response.ok) {
-      const detail = await response.text();
-      console.error("Resend verify error", response.status, detail);
-      return { connected: false as const };
-    }
-
-    const result = (await response.json()) as { outcome?: string };
-    if (result.outcome === "failed") {
-      return { connected: false as const };
-    }
-    return { connected: true as const };
+    const { verifyResendKey } = await import("@/lib/email.server");
+    return (await verifyResendKey())
+      ? { connected: true as const }
+      : { connected: false as const };
   });
 
 type SendTestEmailInput = {
@@ -358,9 +324,8 @@ export const sendTestEmail = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
 
-    const lovableKey = process.env["LOVABLE_API_KEY"];
-    const resendKey = process.env["RESEND_API_KEY"];
-    if (!lovableKey || !resendKey) {
+    const { sendEmail, isEmailConfigured } = await import("@/lib/email.server");
+    if (!isEmailConfigured()) {
       return { sent: false as const, reason: "Resend is not connected yet." };
     }
 
@@ -413,27 +378,18 @@ export const sendTestEmail = createServerFn({ method: "POST" })
       <p style="font-size:12px;color:#777">This is a test email sent from your CRM using sample invoice details. No PDF is attached.</p>
     </div>`;
 
-    const response = await fetch("https://connector-gateway.lovable.dev/resend/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${lovableKey}`,
-        "X-Connection-Api-Key": resendKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: `${businessName} <${fromEmail}>`,
-        to: data.to,
-        subject,
-        html,
-      }),
+    const result = await sendEmail({
+      from: `${businessName} <${fromEmail}>`,
+      to: data.to,
+      subject,
+      html,
     });
 
-    if (!response.ok) {
-      const detail = await response.text();
-      console.error("Resend test send error", response.status, detail);
+    if (!result.ok) {
+      console.error("Resend test send error", result.status, result.detail);
       return {
         sent: false as const,
-        reason: `Resend rejected the test email (${response.status}): ${detail}`.slice(0, 500),
+        reason: `Resend rejected the test email (${result.status}): ${result.detail}`.slice(0, 500),
       };
     }
 

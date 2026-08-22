@@ -77,10 +77,9 @@ export const Route = createFileRoute("/api/public/enquiry")({
 
         // Notify the owner by email (best effort — never blocks the enquiry)
         try {
-          const lovableKey = process.env["LOVABLE_API_KEY"];
-          const resendKey = process.env["RESEND_API_KEY"];
+          const { sendEmail, isEmailConfigured } = await import("@/lib/email.server");
           const notifyTo = owner.email;
-          if (lovableKey && resendKey && notifyTo) {
+          if (isEmailConfigured() && notifyTo) {
             const businessName = owner.business_name || "JW Garden Services";
             const rows: [string, string][] = [
               ["Name", data.name],
@@ -100,20 +99,12 @@ export const Route = createFileRoute("/api/public/enquiry")({
       <p style="margin-top:16px">Open the Enquiries inbox in your CRM to reply or add them as a client.</p>
     </div>`;
 
-            await fetch("https://connector-gateway.lovable.dev/resend/emails", {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${lovableKey}`,
-                "X-Connection-Api-Key": resendKey,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                from: `${businessName} <${notifyTo}>`,
-                to: notifyTo,
-                ...(data.email ? { reply_to: data.email } : {}),
-                subject: `New enquiry — ${data.name}`,
-                html,
-              }),
+            await sendEmail({
+              from: `${businessName} <${notifyTo}>`,
+              to: notifyTo,
+              replyTo: data.email || null,
+              subject: `New enquiry — ${data.name}`,
+              html,
             });
           }
         } catch {
