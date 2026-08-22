@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
@@ -12,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useSaveSettings, useSettings } from "@/hooks/use-crm";
-import { getResendStatus, sendTestEmail } from "@/lib/invoicing.functions";
+import { getResendStatus, sendTestEmail } from "@/lib/invoicing";
 import { EmailTemplatePreview } from "@/components/EmailTemplatePreview";
 import { useInviteMember, useRemoveMember, useTeam } from "@/hooks/use-workspace";
 
@@ -35,8 +34,8 @@ export const Route = createFileRoute("/_authenticated/settings")({
 function SettingsPage() {
   const { data: settings } = useSettings();
   const saveSettings = useSaveSettings();
-  const senderFn = useServerFn(getResendStatus);
-  const testEmailFn = useServerFn(sendTestEmail);
+  const senderFn = getResendStatus;
+  const testEmailFn = sendTestEmail;
   const [testTo, setTestTo] = useState("");
   const [sendingTest, setSendingTest] = useState(false);
   const { data: sender } = useQuery({

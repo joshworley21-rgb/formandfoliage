@@ -21,8 +21,6 @@ import { Route as AuthenticatedScheduleRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedVisitsRouteImport } from './routes/_authenticated/visits'
 import { Route as EnquireKeyRouteImport } from './routes/enquire.$key'
-import { Route as ApiPublicEnquiryRouteImport } from './routes/api/public/enquiry'
-import { Route as ApiPublicHooksPaymentRemindersRouteImport } from './routes/api/public/hooks/payment-reminders'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -83,17 +81,6 @@ const EnquireKeyRoute = EnquireKeyRouteImport.update({
   path: '/enquire/$key',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiPublicEnquiryRoute = ApiPublicEnquiryRouteImport.update({
-  id: '/api/public/enquiry',
-  path: '/api/public/enquiry',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiPublicHooksPaymentRemindersRoute =
-  ApiPublicHooksPaymentRemindersRouteImport.update({
-    id: '/api/public/hooks/payment-reminders',
-    path: '/api/public/hooks/payment-reminders',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -107,8 +94,6 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AuthenticatedSettingsRoute
   '/visits': typeof AuthenticatedVisitsRoute
   '/enquire/$key': typeof EnquireKeyRoute
-  '/api/public/enquiry': typeof ApiPublicEnquiryRoute
-  '/api/public/hooks/payment-reminders': typeof ApiPublicHooksPaymentRemindersRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -122,8 +107,6 @@ export interface FileRoutesByTo {
   '/settings': typeof AuthenticatedSettingsRoute
   '/visits': typeof AuthenticatedVisitsRoute
   '/enquire/$key': typeof EnquireKeyRoute
-  '/api/public/enquiry': typeof ApiPublicEnquiryRoute
-  '/api/public/hooks/payment-reminders': typeof ApiPublicHooksPaymentRemindersRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -139,8 +122,6 @@ export interface FileRoutesById {
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/visits': typeof AuthenticatedVisitsRoute
   '/enquire/$key': typeof EnquireKeyRoute
-  '/api/public/enquiry': typeof ApiPublicEnquiryRoute
-  '/api/public/hooks/payment-reminders': typeof ApiPublicHooksPaymentRemindersRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -156,8 +137,6 @@ export interface FileRouteTypes {
     | '/settings'
     | '/visits'
     | '/enquire/$key'
-    | '/api/public/enquiry'
-    | '/api/public/hooks/payment-reminders'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -171,8 +150,6 @@ export interface FileRouteTypes {
     | '/settings'
     | '/visits'
     | '/enquire/$key'
-    | '/api/public/enquiry'
-    | '/api/public/hooks/payment-reminders'
   id:
     | '__root__'
     | '/'
@@ -187,8 +164,6 @@ export interface FileRouteTypes {
     | '/_authenticated/settings'
     | '/_authenticated/visits'
     | '/enquire/$key'
-    | '/api/public/enquiry'
-    | '/api/public/hooks/payment-reminders'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -196,8 +171,6 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   EnquireKeyRoute: typeof EnquireKeyRoute
-  ApiPublicEnquiryRoute: typeof ApiPublicEnquiryRoute
-  ApiPublicHooksPaymentRemindersRoute: typeof ApiPublicHooksPaymentRemindersRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -286,20 +259,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EnquireKeyRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/enquiry': {
-      id: '/api/public/enquiry'
-      path: '/api/public/enquiry'
-      fullPath: '/api/public/enquiry'
-      preLoaderRoute: typeof ApiPublicEnquiryRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/public/hooks/payment-reminders': {
-      id: '/api/public/hooks/payment-reminders'
-      path: '/api/public/hooks/payment-reminders'
-      fullPath: '/api/public/hooks/payment-reminders'
-      preLoaderRoute: typeof ApiPublicHooksPaymentRemindersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
@@ -333,8 +292,6 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   EnquireKeyRoute: EnquireKeyRoute,
-  ApiPublicEnquiryRoute: ApiPublicEnquiryRoute,
-  ApiPublicHooksPaymentRemindersRoute: ApiPublicHooksPaymentRemindersRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

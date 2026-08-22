@@ -1,13 +1,5 @@
-// Direct Resend transport. Email used to go through Lovable's connector gateway
-// (connector-gateway.lovable.dev) with a LOVABLE_API_KEY alongside the Resend
-// key; it now talks to api.resend.com with your own key and nothing else.
-//
-// SECURITY: server-only — RESEND_API_KEY must never reach the client bundle.
-// Load inside server handlers:
-//   const { sendEmail } = await import("@/lib/email.server");
-//
-// Deliberately dependency-free (fetch + env only) so the same code can be
-// lifted into a Supabase Edge Function unchanged.
+// Direct Resend transport (Deno port of src/lib/email.server.ts).
+// Set the key once with: supabase secrets set RESEND_API_KEY=re_...
 
 const RESEND_API = "https://api.resend.com";
 
@@ -28,13 +20,14 @@ export type SendEmailInput = {
 };
 
 export type SendEmailResult =
-  { ok: true; id: string | null } | { ok: false; status: number; detail: string };
+  | { ok: true; id: string | null }
+  | { ok: false; status: number; detail: string };
 
 function apiKey(): string | undefined {
-  return process.env["RESEND_API_KEY"];
+  return Deno.env.get("RESEND_API_KEY");
 }
 
-/** True when a Resend API key is configured for this deployment. */
+/** True when a Resend API key is configured for this project. */
 export function isEmailConfigured(): boolean {
   return Boolean(apiKey());
 }
@@ -68,18 +61,15 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
   });
 
   if (!response.ok) {
-    const detail = await response.text();
-    return { ok: false, status: response.status, detail };
+    return { ok: false, status: response.status, detail: await response.text() };
   }
 
-  let id: string | null = null;
   try {
     const payload = (await response.json()) as { id?: string };
-    id = payload?.id ?? null;
+    return { ok: true, id: payload?.id ?? null };
   } catch {
-    id = null;
+    return { ok: true, id: null };
   }
-  return { ok: true, id };
 }
 
 /**

@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { submitEnquiry } from "@/lib/invoicing";
 
 export const Route = createFileRoute("/enquire/$key")({
   head: () => ({
@@ -41,15 +42,7 @@ function EnquiryFormPage() {
     setError(null);
     setState("sending");
     try {
-      const response = await fetch("/api/public/enquiry", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...form, key, source: "website form" }),
-      });
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? "Could not send your enquiry");
-      }
+      await submitEnquiry({ ...form, key, source: "website form" });
       setState("sent");
       setForm(EMPTY);
     } catch (err) {
