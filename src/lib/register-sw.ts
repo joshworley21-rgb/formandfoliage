@@ -1,3 +1,5 @@
+import { isNativeApp } from "@/lib/native";
+
 const SW_URL = "/sw.js";
 
 function isRefusedContext(): boolean {
@@ -5,6 +7,9 @@ function isRefusedContext(): boolean {
   if (!import.meta.env.PROD) return true;
   if (window.self !== window.top) return true;
 
+  // Inside the Android app every asset is already on the device; a service
+  // worker would only add a second, staler cache.
+  if (isNativeApp()) return true;
   if (new URLSearchParams(window.location.search).get("sw") === "off") return true;
 
   return false;
@@ -45,4 +50,3 @@ export function registerOfflineSupport() {
   if (document.readyState === "complete") register();
   else window.addEventListener("load", register, { once: true });
 }
-

@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { ClientOnly } from "@tanstack/react-router";
 import { OfflineSupport } from "@/components/OfflineSupport";
+import { NativeAuthListener } from "@/components/NativeAuthListener";
 import { supabase } from "@/integrations/supabase/client";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -197,6 +198,9 @@ function RootComponent() {
       </ClientOnly>
       <ClientOnly fallback={null}>
         <OfflineSupport queryClient={queryClient} />
+      </ClientOnly>
+      <ClientOnly fallback={null}>
+        <NativeAuthListener />
       </ClientOnly>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />

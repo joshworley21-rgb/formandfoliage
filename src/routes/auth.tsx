@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Browser } from "@capacitor/browser";
 import { supabase } from "@/integrations/supabase/client";
+import { isNativeApp, NATIVE_AUTH_REDIRECT } from "@/lib/native";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
@@ -66,8 +68,27 @@ function AuthPage() {
 
   async function googleSignIn() {
     setBusy(true);
-    // Straight to Supabase's own OAuth: the browser is redirected to Google and
-    // comes back to /dashboard with a session.
+
+    // In the Android app there is no page to redirect back to, so sign-in opens
+    // the system browser and returns through the custom scheme, which
+    // NativeAuthListener picks up.
+    if (isNativeApp()) {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: NATIVE_AUTH_REDIRECT, skipBrowserRedirect: true },
+      });
+      if (error || !data?.url) {
+        setBusy(false);
+        toast.error(error?.message || "Google sign-in failed");
+        return;
+      }
+      await Browser.open({ url: data.url });
+      setBusy(false);
+      return;
+    }
+
+    // On the web the browser is redirected to Google and comes back to
+    // /dashboard, where supabase-js completes the sign-in itself.
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: `${window.location.origin}/dashboard` },
@@ -107,7 +128,8 @@ function AuthPage() {
               Continue with Google
             </Button>
             <div className="flex items-center gap-3 text-xs uppercase tracking-wide text-muted-foreground">
-              <span className="h-px flex-1 bg-border" /> or <span className="h-px flex-1 bg-border" />
+              <span className="h-px flex-1 bg-border" /> or{" "}
+              <span className="h-px flex-1 bg-border" />
             </div>
             <form className="space-y-3" onSubmit={handleSubmit}>
               <div className="space-y-1.5">

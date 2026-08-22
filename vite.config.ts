@@ -33,6 +33,10 @@ export default defineConfig(({ mode }) => {
       tsConfigPaths(),
       tailwindcss(),
       tanstackStart({
+        // Client-rendered: the Android app ships the built client inside the
+        // APK and has no server to render on, so the web build is a SPA too and
+        // both run the exact same code.
+        spa: { enabled: true },
         // Redirect TanStack Start's bundled server entry to src/server.ts (our
         // SSR error wrapper). nitro builds from this.
         server: { entry: "server" },
