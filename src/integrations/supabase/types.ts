@@ -789,6 +789,7 @@ export type Database = {
           invoice_prefix: string
           payment_terms: string | null
           phone: string | null
+          public_site_url: string | null
           quote_counter: number
           quote_prefix: string
           quote_terms: string | null
@@ -812,6 +813,7 @@ export type Database = {
           invoice_prefix?: string
           payment_terms?: string | null
           phone?: string | null
+          public_site_url?: string | null
           quote_counter?: number
           quote_prefix?: string
           quote_terms?: string | null
@@ -835,6 +837,7 @@ export type Database = {
           invoice_prefix?: string
           payment_terms?: string | null
           phone?: string | null
+          public_site_url?: string | null
           quote_counter?: number
           quote_prefix?: string
           quote_terms?: string | null

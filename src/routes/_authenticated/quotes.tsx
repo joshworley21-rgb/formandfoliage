@@ -8,7 +8,7 @@ import { QuoteDialog } from "@/components/QuoteDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useClients } from "@/hooks/use-crm";
+import { useClients, useSettings } from "@/hooks/use-crm";
 import {
   useConvertQuoteToClient,
   useDeleteQuote,
@@ -17,6 +17,7 @@ import {
   type SaveQuoteInput,
 } from "@/hooks/use-quotes";
 import { money } from "@/lib/crm";
+import { publicSiteUrl, SITE_URL_MISSING } from "@/lib/site";
 import { sendQuoteEmail } from "@/lib/invoicing";
 import {
   displayStatus,
@@ -66,6 +67,8 @@ const EMPTY_DRAFT: SaveQuoteInput = {
 function QuotesPage() {
   const { data: quotes = [], isLoading } = useQuotes();
   const { data: clients = [] } = useClients();
+  const { data: settings } = useSettings();
+  const siteUrl = publicSiteUrl(settings?.public_site_url);
   const remove = useDeleteQuote();
   const setStatus = useSetQuoteStatus();
   const convert = useConvertQuoteToClient();
@@ -74,10 +77,14 @@ function QuotesPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
 
   async function send(quote: Quote) {
+    if (!siteUrl) {
+      toast.error(SITE_URL_MISSING);
+      return;
+    }
     setBusyId(quote.id);
     try {
       const result = await sendQuoteEmail({
-        data: { quoteId: quote.id, origin: window.location.origin },
+        data: { quoteId: quote.id, origin: siteUrl },
       });
       if (result.sent) toast.success(`Quote emailed to ${result.to}`);
       else toast.warning(result.reason ?? "Email is not set up yet");
@@ -157,9 +164,11 @@ function QuotesPage() {
                       variant="ghost"
                       size="sm"
                       onClick={async () => {
-                        await navigator.clipboard.writeText(
-                          quoteLink(quote.public_key, window.location.origin),
-                        );
+                        if (!siteUrl) {
+                          toast.error(SITE_URL_MISSING);
+                          return;
+                        }
+                        await navigator.clipboard.writeText(quoteLink(quote.public_key, siteUrl));
                         toast.success("Quote link copied");
                       }}
                     >

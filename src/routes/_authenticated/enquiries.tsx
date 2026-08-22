@@ -26,6 +26,8 @@ import {
   type EnquiryStatus,
 } from "@/hooks/use-enquiries";
 import { quoteDraftFromEnquiry, type SaveQuoteInput } from "@/hooks/use-quotes";
+import { useSettings } from "@/hooks/use-crm";
+import { publicSiteUrl } from "@/lib/site";
 
 export const Route = createFileRoute("/_authenticated/enquiries")({
   head: () => ({
@@ -65,8 +67,9 @@ function EnquiriesPage() {
   const navigate = useNavigate();
   const [quoting, setQuoting] = useState<SaveQuoteInput | null>(null);
 
-  const formUrl =
-    key && typeof window !== "undefined" ? `${window.location.origin}/enquire/${key}` : null;
+  const { data: settings } = useSettings();
+  const siteUrl = publicSiteUrl(settings?.public_site_url);
+  const formUrl = key && siteUrl ? `${siteUrl}/enquire/${key}` : null;
 
   return (
     <AppShell
@@ -84,7 +87,7 @@ function EnquiriesPage() {
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <code className="min-w-0 flex-1 truncate rounded-lg border border-border bg-muted px-3 py-2 text-xs">
-              {formUrl ?? "Loading…"}
+              {formUrl ?? "Add your website address in Settings to get your link"}
             </code>
             <Button
               variant="outline"

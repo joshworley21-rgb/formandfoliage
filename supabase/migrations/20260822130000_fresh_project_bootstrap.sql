@@ -22,3 +22,12 @@ ALTER TABLE public.settings
 UPDATE public.settings
   SET enquiry_key = substr(replace(gen_random_uuid()::text, '-', ''), 1, 18)
   WHERE enquiry_key IS NULL;
+
+-- 3. The public website address. Customer-facing links (the enquiry form, quote
+--    accept links) used to be built from window.location.origin, which inside
+--    the Android app is the WebView's own https://localhost — so a quote
+--    emailed from the phone reached the customer as a dead link. Kept in
+--    settings rather than a build variable so it can be changed without
+--    rebuilding the app.
+ALTER TABLE public.settings
+  ADD COLUMN IF NOT EXISTS public_site_url text;
