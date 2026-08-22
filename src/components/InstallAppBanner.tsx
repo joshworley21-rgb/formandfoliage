@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Download, Share, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { isNativeApp } from "@/lib/native";
 
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -16,6 +17,8 @@ export function InstallAppBanner() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    // Already the installed app — do not offer to install it.
+    if (isNativeApp()) return;
     if (localStorage.getItem(DISMISS_KEY) === "1") return;
 
     const standalone =
