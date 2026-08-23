@@ -1,0 +1,88 @@
+// Sends a sample invoice email so templates can be checked from Settings.
+// Ported from the sendTestEmail server function.
+import { requireUser } from "../_shared/supabase.ts";
+import { json, serveJson } from "../_shared/http.ts";
+import { isEmailConfigured, sendEmail } from "../_shared/email.ts";
+import {
+  DEFAULT_BODY_TEMPLATE,
+  DEFAULT_BUSINESS_NAME,
+  DEFAULT_FROM_EMAIL,
+  DEFAULT_SUBJECT_TEMPLATE,
+  fillTemplate,
+  textToHtml,
+} from "../_shared/templates.ts";
+
+type SendTestEmailInput = {
+  to?: string;
+  subjectTemplate?: string | null;
+  bodyTemplate?: string | null;
+};
+
+const TEST_FOOTER = `
+      <hr style="margin-top:24px;border:none;border-top:1px solid #ddd"/>
+      <p style="font-size:12px;color:#777">This is a test email sent from your CRM using sample invoice details. No PDF is attached.</p>`;
+
+Deno.serve(
+  serveJson(async (request) => {
+    const { userId, supabase } = await requireUser(request);
+    const input = (await request.json()) as SendTestEmailInput;
+    const to = input?.to?.trim();
+    if (!to) throw new Error("A recipient address is required");
+
+    if (!isEmailConfigured()) {
+      return json({ sent: false, reason: "Resend is not connected yet." });
+    }
+
+    const { data: settings } = await supabase
+      .from("settings")
+      .select("*")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const businessName = settings?.business_name || DEFAULT_BUSINESS_NAME;
+    const fromEmail = settings?.email || DEFAULT_FROM_EMAIL;
+    const today = new Date();
+    const due = new Date(today.getTime() + 14 * 86400000).toISOString().slice(0, 10);
+
+    const tokens: Record<string, string> = {
+      client_name: "Sample Client",
+      business_name: businessName,
+      invoice_number: `${settings?.invoice_prefix ?? "INV-"}0001`,
+      total: "£120.00",
+      due_date: due,
+      due_clause: ` by ${due}`,
+      issue_date: today.toISOString().slice(0, 10),
+      payment_terms: settings?.payment_terms ?? "",
+      bank_details: settings?.bank_details ?? "",
+    };
+
+    const subject = `[Test] ${fillTemplate(
+      input.subjectTemplate || settings?.email_subject_template || DEFAULT_SUBJECT_TEMPLATE,
+      tokens,
+    )}`;
+    const html = textToHtml(
+      fillTemplate(
+        input.bodyTemplate || settings?.email_body_template || DEFAULT_BODY_TEMPLATE,
+        tokens,
+      ),
+      TEST_FOOTER,
+    );
+
+    const result = await sendEmail({
+      from: `${businessName} <${fromEmail}>`,
+      to,
+      subject,
+      html,
+    });
+
+    if (!result.ok) {
+      console.error("Resend test send error", result.status, result.detail);
+      return json({
+        sent: false,
+        reason: `Resend rejected the test email (${result.status}): ${result.detail}`.slice(0, 500),
+      });
+    }
+
+    return json({ sent: true, to, subject });
+  }),
+);

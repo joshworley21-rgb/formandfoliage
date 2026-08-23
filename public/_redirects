@@ -1,0 +1,4 @@
+# SPA fallback. The client-rendered shell is _shell.html, so every route that is
+# not a real file must serve it and let the app route from there. Understood by
+# Netlify and Cloudflare Pages.
+/*  /_shell.html  200

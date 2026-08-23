@@ -518,6 +518,143 @@ export type Database = {
           },
         ]
       }
+      quote_items: {
+        Row: {
+          amount: number
+          created_at: string
+          description: string
+          id: string
+          quantity: number
+          quote_id: string
+          sort_order: number
+          unit_price: number
+          user_id: string
+        }
+        Insert: {
+          amount?: number
+          created_at?: string
+          description: string
+          id?: string
+          quantity?: number
+          quote_id: string
+          sort_order?: number
+          unit_price?: number
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          description?: string
+          id?: string
+          quantity?: number
+          quote_id?: string
+          sort_order?: number
+          unit_price?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_items_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quotes: {
+        Row: {
+          client_id: string | null
+          contact_address: string | null
+          contact_email: string | null
+          contact_name: string
+          contact_phone: string | null
+          created_at: string
+          decided_at: string | null
+          decline_reason: string | null
+          enquiry_id: string | null
+          id: string
+          issue_date: string
+          notes: string | null
+          number: string
+          public_key: string
+          sent_at: string | null
+          status: Database["public"]["Enums"]["quote_status"]
+          subtotal: number
+          terms: string | null
+          total: number
+          updated_at: string
+          user_id: string
+          valid_until: string | null
+          vat_amount: number
+        }
+        Insert: {
+          client_id?: string | null
+          contact_address?: string | null
+          contact_email?: string | null
+          contact_name: string
+          contact_phone?: string | null
+          created_at?: string
+          decided_at?: string | null
+          decline_reason?: string | null
+          enquiry_id?: string | null
+          id?: string
+          issue_date?: string
+          notes?: string | null
+          number: string
+          public_key?: string
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["quote_status"]
+          subtotal?: number
+          terms?: string | null
+          total?: number
+          updated_at?: string
+          user_id: string
+          valid_until?: string | null
+          vat_amount?: number
+        }
+        Update: {
+          client_id?: string | null
+          contact_address?: string | null
+          contact_email?: string | null
+          contact_name?: string
+          contact_phone?: string | null
+          created_at?: string
+          decided_at?: string | null
+          decline_reason?: string | null
+          enquiry_id?: string | null
+          id?: string
+          issue_date?: string
+          notes?: string | null
+          number?: string
+          public_key?: string
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["quote_status"]
+          subtotal?: number
+          terms?: string | null
+          total?: number
+          updated_at?: string
+          user_id?: string
+          valid_until?: string | null
+          vat_amount?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quotes_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quotes_enquiry_id_fkey"
+            columns: ["enquiry_id"]
+            isOneToOne: false
+            referencedRelation: "enquiries"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       recurring_schedules: {
         Row: {
           active: boolean
@@ -652,6 +789,11 @@ export type Database = {
           invoice_prefix: string
           payment_terms: string | null
           phone: string | null
+          public_site_url: string | null
+          quote_counter: number
+          quote_prefix: string
+          quote_terms: string | null
+          quote_validity_days: number
           updated_at: string
           user_id: string
           vat_number: string | null
@@ -671,6 +813,11 @@ export type Database = {
           invoice_prefix?: string
           payment_terms?: string | null
           phone?: string | null
+          public_site_url?: string | null
+          quote_counter?: number
+          quote_prefix?: string
+          quote_terms?: string | null
+          quote_validity_days?: number
           updated_at?: string
           user_id: string
           vat_number?: string | null
@@ -690,6 +837,11 @@ export type Database = {
           invoice_prefix?: string
           payment_terms?: string | null
           phone?: string | null
+          public_site_url?: string | null
+          quote_counter?: number
+          quote_prefix?: string
+          quote_terms?: string | null
+          quote_validity_days?: number
           updated_at?: string
           user_id?: string
           vat_number?: string | null
@@ -806,6 +958,7 @@ export type Database = {
         }[]
       }
       next_invoice_number: { Args: { _user_id: string }; Returns: string }
+      next_quote_number: { Args: { _user_id: string }; Returns: string }
       owner_for: { Args: { _uid: string }; Returns: string }
       staff_clients: {
         Args: never
@@ -827,6 +980,7 @@ export type Database = {
       email_event_status: "sent" | "failed" | "skipped"
       invoice_status: "draft" | "sent" | "paid"
       job_status: "scheduled" | "done" | "missed" | "cancelled"
+      quote_status: "draft" | "sent" | "accepted" | "declined" | "expired"
       repeat_frequency:
         | "weekly"
         | "fortnightly"

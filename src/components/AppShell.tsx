@@ -2,6 +2,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import {
   CalendarDays,
   ClipboardList,
+  FileSignature,
   FileText,
   Inbox,
   LayoutDashboard,
@@ -23,13 +24,12 @@ const NAV = [
   { to: "/schedule", label: "Schedule", icon: CalendarDays },
   { to: "/clients", label: "Clients", icon: Users },
   { to: "/enquiries", label: "Enquiries", icon: Inbox },
+  { to: "/quotes", label: "Quotes", icon: FileSignature },
   { to: "/visits", label: "Visits", icon: ClipboardList },
   { to: "/invoices", label: "Invoices", icon: FileText },
   { to: "/recurring", label: "Recurring", icon: Repeat },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ] as const;
-
-
 
 const STAFF_NAV_PATHS = ["/schedule", "/clients"];
 
@@ -115,7 +115,18 @@ export function AppShell({
         </main>
 
         <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur lg:hidden">
-          <div className={cn("grid", nav.length <= 2 ? "grid-cols-2" : nav.length === 3 ? "grid-cols-3" : nav.length === 4 ? "grid-cols-4" : "grid-cols-5")}>
+          <div
+            className={cn(
+              "grid",
+              nav.length <= 2
+                ? "grid-cols-2"
+                : nav.length === 3
+                  ? "grid-cols-3"
+                  : nav.length === 4
+                    ? "grid-cols-4"
+                    : "grid-cols-5",
+            )}
+          >
             {nav.slice(0, 5).map((item) => (
               <Link
                 key={item.to}

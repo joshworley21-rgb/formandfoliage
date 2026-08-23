@@ -1,0 +1,79 @@
+name: Android APK
+
+# Builds the installable app in CI so no Android Studio is needed locally.
+# Run it from the Actions tab (Run workflow), then download the APK from the
+# run's Artifacts section and open it on the phone.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Supabase URL and publishable key come from the committed .env. They are
+      # public client values by design — the service-role key lives only in the
+      # Edge Function secrets and must never be added there.
+      - name: Build web assets
+        run: bun run build:app
+
+      - name: Copy assets into the Android project
+        run: bunx cap sync android
+
+      - name: Decode signing keystore
+        if: env.KEYSTORE_B64 != ''
+        run: echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+      # Signed with your own key: the phone will accept later versions as
+      # updates rather than making you uninstall first.
+      - name: Build signed release APK
+        if: env.KEYSTORE_B64 != ''
+        working-directory: android
+        run: |
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/release.jks" \
+            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
+
+      # Fallback so the workflow is useful before any keystore exists. Debug
+      # APKs install fine but are signed with a throwaway key each run, so
+      # updating over a previous install will not work.
+      - name: Build debug APK
+        if: env.KEYSTORE_B64 == ''
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-garden-services-apk
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

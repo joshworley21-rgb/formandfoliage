@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
 import { addDays, addMonths, addWeeks, format, parseISO } from "date-fns";
 import { Plus, Repeat, Trash2, Zap } from "lucide-react";
 import { useState } from "react";
@@ -35,7 +34,7 @@ import {
   useVisits,
 } from "@/hooks/use-crm";
 import { FREQUENCY_LABELS, money, type Frequency, type RecurringSchedule } from "@/lib/crm";
-import { createInvoice } from "@/lib/invoicing.functions";
+import { createInvoice } from "@/lib/invoicing";
 
 export const Route = createFileRoute("/_authenticated/recurring")({
   head: () => ({
@@ -74,7 +73,7 @@ function RecurringPage() {
   const { data: visits = [] } = useVisits();
   const saveRecurring = useSaveRecurring();
   const deleteRecurring = useDeleteRecurring();
-  const createFn = useServerFn(createInvoice);
+  const createFn = createInvoice;
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<RecurringSchedule | null>(null);
   const [busy, setBusy] = useState<string | null>(null);

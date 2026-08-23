@@ -1,1 +1,40 @@
+# Change this to the new project ref when moving to a different Supabase
+# project — see supabase/SETUP.md.
 project_id = "ftngutorudrwuqwdpzrb"
+
+# Edge Functions. These replace the TanStack Start server functions and API
+# routes the app used to depend on, so the CRM can ship as a standalone app with
+# no web server of its own.
+
+# Called by the signed-in app; the caller's JWT is verified by the platform and
+# again inside the function.
+[functions.create-invoice]
+verify_jwt = true
+
+[functions.send-invoice-email]
+verify_jwt = true
+
+[functions.email-status]
+verify_jwt = true
+
+[functions.send-test-email]
+verify_jwt = true
+
+[functions.send-quote-email]
+verify_jwt = true
+
+# Public: the customer-facing enquiry form posts here from any website, so there
+# is no JWT to verify. Protected by the owner's enquiry_key and a honeypot field.
+[functions.public-enquiry]
+verify_jwt = false
+
+# Scheduled: guarded by the service-role key inside the function rather than by
+# a user JWT, so only the cron job can trigger a reminder run.
+[functions.payment-reminders]
+verify_jwt = false
+
+# Public: the customer opens their quote from an emailed link and accepts or
+# declines it without an account. The quotes table has no anon policy, so this
+# function is the only way that data is reachable.
+[functions.public-quote]
+verify_jwt = false

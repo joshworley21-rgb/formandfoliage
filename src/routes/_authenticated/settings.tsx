@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
@@ -12,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useSaveSettings, useSettings } from "@/hooks/use-crm";
-import { getResendStatus, sendTestEmail } from "@/lib/invoicing.functions";
+import { getResendStatus, sendTestEmail } from "@/lib/invoicing";
 import { EmailTemplatePreview } from "@/components/EmailTemplatePreview";
 import { useInviteMember, useRemoveMember, useTeam } from "@/hooks/use-workspace";
 
@@ -20,9 +19,15 @@ export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({
     meta: [
       { title: "Business settings — JW Garden Services CRM" },
-      { name: "description", content: "Business details, VAT, invoice numbering and payment terms." },
+      {
+        name: "description",
+        content: "Business details, VAT, invoice numbering and payment terms.",
+      },
       { property: "og:title", content: "Business settings — JW Garden Services CRM" },
-      { property: "og:description", content: "Business details, VAT, invoice numbering and payment terms." },
+      {
+        property: "og:description",
+        content: "Business details, VAT, invoice numbering and payment terms.",
+      },
     ],
   }),
   component: () => (
@@ -35,8 +40,8 @@ export const Route = createFileRoute("/_authenticated/settings")({
 function SettingsPage() {
   const { data: settings } = useSettings();
   const saveSettings = useSaveSettings();
-  const senderFn = useServerFn(getResendStatus);
-  const testEmailFn = useServerFn(sendTestEmail);
+  const senderFn = getResendStatus;
+  const testEmailFn = sendTestEmail;
   const [testTo, setTestTo] = useState("");
   const [sendingTest, setSendingTest] = useState(false);
   const { data: sender } = useQuery({
@@ -49,6 +54,7 @@ function SettingsPage() {
     address: "24 Portland Close\nBierton\nHP22 7DG",
     phone: "",
     email: "",
+    public_site_url: "",
     vat_registered: false,
     vat_number: "",
     vat_rate: "20",
@@ -67,6 +73,7 @@ function SettingsPage() {
       address: settings.address ?? "",
       phone: settings.phone ?? "",
       email: settings.email ?? "",
+      public_site_url: settings.public_site_url ?? "",
       vat_registered: settings.vat_registered,
       vat_number: settings.vat_number ?? "",
       vat_rate: String(settings.vat_rate ?? 20),
@@ -93,6 +100,7 @@ function SettingsPage() {
             address: form.address || null,
             phone: form.phone || null,
             email: form.email || null,
+            public_site_url: form.public_site_url.trim().replace(/\/+$/, "") || null,
             vat_registered: form.vat_registered,
             vat_number: form.vat_number || null,
             vat_rate: Number(form.vat_rate) || 0,
@@ -131,7 +139,11 @@ function SettingsPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="phone">Phone</Label>
-                <Input id="phone" value={form.phone} onChange={(e) => set("phone", e.target.value)} />
+                <Input
+                  id="phone"
+                  value={form.phone}
+                  onChange={(e) => set("phone", e.target.value)}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="email">Email (reply-to)</Label>
@@ -142,6 +154,21 @@ function SettingsPage() {
                   onChange={(e) => set("email", e.target.value)}
                 />
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="site">Website address</Label>
+              <Input
+                id="site"
+                type="url"
+                inputMode="url"
+                placeholder="https://jwgardenservices.co.uk"
+                value={form.public_site_url}
+                onChange={(e) => set("public_site_url", e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Where the enquiry form and quote links live. Needed for links you send to customers
+                — the app on your phone has no address of its own to use.
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -270,7 +297,6 @@ function SettingsPage() {
           </CardContent>
         </Card>
 
-
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Invoice email template</CardTitle>
@@ -300,7 +326,6 @@ function SettingsPage() {
             </p>
           </CardContent>
         </Card>
-
 
         <EmailTemplatePreview
           subjectTemplate={form.email_subject_template}

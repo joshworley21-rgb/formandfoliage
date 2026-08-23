@@ -1,7 +1,9 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Mail, Phone, Trash2, UserPlus } from "lucide-react";
+import { useState } from "react";
+import { FileSignature, Mail, Phone, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import { QuoteDialog } from "@/components/QuoteDialog";
 import { OwnerOnly } from "@/components/OwnerOnly";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,14 +25,23 @@ import {
   type Enquiry,
   type EnquiryStatus,
 } from "@/hooks/use-enquiries";
+import { quoteDraftFromEnquiry, type SaveQuoteInput } from "@/hooks/use-quotes";
+import { useSettings } from "@/hooks/use-crm";
+import { publicSiteUrl } from "@/lib/site";
 
 export const Route = createFileRoute("/_authenticated/enquiries")({
   head: () => ({
     meta: [
       { title: "Enquiries — JW Garden Services CRM" },
-      { name: "description", content: "Website enquiries inbox: new leads, contact details and job descriptions." },
+      {
+        name: "description",
+        content: "Website enquiries inbox: new leads, contact details and job descriptions.",
+      },
       { property: "og:title", content: "Enquiries — JW Garden Services CRM" },
-      { property: "og:description", content: "Website enquiries inbox: new leads, contact details and job descriptions." },
+      {
+        property: "og:description",
+        content: "Website enquiries inbox: new leads, contact details and job descriptions.",
+      },
     ],
   }),
   component: () => (
@@ -54,9 +65,11 @@ function EnquiriesPage() {
   const remove = useDeleteEnquiry();
   const convert = useConvertEnquiry();
   const navigate = useNavigate();
+  const [quoting, setQuoting] = useState<SaveQuoteInput | null>(null);
 
-  const formUrl =
-    key && typeof window !== "undefined" ? `${window.location.origin}/enquire/${key}` : null;
+  const { data: settings } = useSettings();
+  const siteUrl = publicSiteUrl(settings?.public_site_url);
+  const formUrl = key && siteUrl ? `${siteUrl}/enquire/${key}` : null;
 
   return (
     <AppShell
@@ -74,7 +87,7 @@ function EnquiriesPage() {
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <code className="min-w-0 flex-1 truncate rounded-lg border border-border bg-muted px-3 py-2 text-xs">
-              {formUrl ?? "Loading…"}
+              {formUrl ?? "Add your website address in Settings to get your link"}
             </code>
             <Button
               variant="outline"
@@ -123,6 +136,7 @@ function EnquiriesPage() {
                   toast.error(error instanceof Error ? error.message : "Could not convert");
                 }
               }}
+              onQuote={() => setQuoting(quoteDraftFromEnquiry(enquiry))}
               onDelete={async () => {
                 if (!confirm(`Delete the enquiry from ${enquiry.name}?`)) return;
                 await remove.mutateAsync(enquiry.id);
@@ -132,6 +146,16 @@ function EnquiriesPage() {
           ))}
         </div>
       )}
+
+      <QuoteDialog
+        open={quoting !== null}
+        draft={quoting}
+        onClose={() => setQuoting(null)}
+        onSaved={() => {
+          setQuoting(null);
+          navigate({ to: "/quotes" });
+        }}
+      />
     </AppShell>
   );
 }
@@ -140,11 +164,13 @@ function EnquiryCard({
   enquiry,
   onStatus,
   onConvert,
+  onQuote,
   onDelete,
 }: {
   enquiry: Enquiry;
   onStatus: (status: EnquiryStatus) => void | Promise<void>;
   onConvert: () => void | Promise<void>;
+  onQuote: () => void;
   onDelete: () => void | Promise<void>;
 }) {
   const status = (enquiry.status as EnquiryStatus) ?? "new";
@@ -202,7 +228,16 @@ function EnquiryCard({
               ))}
             </SelectContent>
           </Select>
-          <Button size="sm" onClick={onConvert} disabled={Boolean(enquiry.client_id)}>
+          <Button size="sm" onClick={onQuote}>
+            <FileSignature className="size-4" />
+            Quote this
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onConvert}
+            disabled={Boolean(enquiry.client_id)}
+          >
             <UserPlus className="size-4" />
             {enquiry.client_id ? "Client created" : "Add as client"}
           </Button>

@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
 import { format, parseISO } from "date-fns";
 import {
   AlertCircle,
@@ -75,7 +74,7 @@ import {
 } from "@/lib/crm";
 import { InvoicePreviewDoc } from "@/components/InvoicePreviewDoc";
 import { buildInvoicePdf, pdfToBase64 } from "@/lib/invoice-pdf";
-import { createInvoice, sendInvoiceEmail } from "@/lib/invoicing.functions";
+import { createInvoice, sendInvoiceEmail } from "@/lib/invoicing";
 
 export const Route = createFileRoute("/_authenticated/invoices")({
   head: () => ({
@@ -121,8 +120,8 @@ function InvoicesPage() {
 
   const queryClient = useQueryClient();
 
-  const sendFn = useServerFn(sendInvoiceEmail);
-  const createFn = useServerFn(createInvoice);
+  const sendFn = sendInvoiceEmail;
+  const createFn = createInvoice;
 
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name ?? "Client";
 
