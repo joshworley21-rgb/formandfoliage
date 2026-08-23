@@ -1,7 +1,14 @@
-import logoAsset from "@/assets/jw-logo.png.asset.json";
 import { cn } from "@/lib/utils";
 
-export const LOGO_URL = logoAsset.url;
+/**
+ * The logo was a pointer to a Lovable-hosted asset (/__l5e/assets-v1/...),
+ * which 404s anywhere but that hosting — the app header, the enquiry and quote
+ * pages customers see, and every invoice PDF, which fetches this to embed it.
+ *
+ * Same artwork, but the copy in public/ that ships with the build, so it works
+ * offline and inside the Android app too.
+ */
+export const LOGO_URL = "/icon-512.png";
 
 export function Logo({
   className,
