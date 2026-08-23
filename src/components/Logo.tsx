@@ -5,10 +5,11 @@ import { cn } from "@/lib/utils";
  * which 404s anywhere but that hosting — the app header, the enquiry and quote
  * pages customers see, and every invoice PDF, which fetches this to embed it.
  *
- * Same artwork, but the copy in public/ that ships with the build, so it works
- * offline and inside the Android app too.
+ * public/logo.png is the same artwork cropped out of the app icon, without the
+ * icon's white square, so it keeps its real proportions and sits on any
+ * background. It ships with the build, so it works offline and in the app too.
  */
-export const LOGO_URL = "/icon-512.png";
+export const LOGO_URL = "/logo.png";
 
 export function Logo({
   className,
