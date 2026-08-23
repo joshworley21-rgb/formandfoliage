@@ -1,6 +1,7 @@
-# Change this to the new project ref when moving to a different Supabase
-# project — see supabase/SETUP.md.
-project_id = "ftngutorudrwuqwdpzrb"
+# The "Set up Supabase" GitHub Action rewrites this from the
+# SUPABASE_PROJECT_REF secret at run time, so the two cannot drift apart.
+# It matters here for anyone running the CLI locally.
+project_id = "ugbjwgfmsrkclrzpfwgz"
 
 # Edge Functions. These replace the TanStack Start server functions and API
 # routes the app used to depend on, so the CRM can ship as a standalone app with
