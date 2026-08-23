@@ -38,6 +38,36 @@ BEGIN
   END IF;
 END $$;
 
+-- The business details are pre-filled, so Settings is not an empty form.
+DO $$
+DECLARE _s record;
+BEGIN
+  SELECT business_name, address, email, invoice_prefix, payment_terms, bank_details
+    INTO _s FROM public.settings
+    WHERE user_id = '11111111-1111-1111-1111-111111111111';
+  IF _s.business_name IS DISTINCT FROM 'JW Garden Services' THEN
+    RAISE EXCEPTION 'business name not pre-filled: %', _s.business_name;
+  END IF;
+  IF _s.address IS NULL OR _s.address NOT LIKE '%HP22 7DG%' THEN
+    RAISE EXCEPTION 'address not pre-filled: %', _s.address;
+  END IF;
+  IF _s.email IS DISTINCT FROM 'info@jw-gardenservices.co.uk' THEN
+    RAISE EXCEPTION 'invoice email not pre-filled: %', _s.email;
+  END IF;
+  IF _s.invoice_prefix IS DISTINCT FROM 'JW-' THEN
+    RAISE EXCEPTION 'invoice prefix wrong: %', _s.invoice_prefix;
+  END IF;
+  IF _s.payment_terms IS NULL THEN RAISE EXCEPTION 'payment terms not pre-filled'; END IF;
+  -- The invoice PDF splits these on ":" to build the payment block, so every
+  -- line has to be labelled or the invoice shows bare numbers.
+  IF _s.bank_details IS NULL
+     OR _s.bank_details NOT LIKE '%Sort code: %'
+     OR _s.bank_details NOT LIKE '%Account number: %'
+     OR _s.bank_details NOT LIKE '%Account name: %' THEN
+    RAISE EXCEPTION 'bank details missing or not labelled: %', _s.bank_details;
+  END IF;
+END $$;
+
 -- Quote numbers run in sequence.
 DO $$
 DECLARE _a text; _b text;
