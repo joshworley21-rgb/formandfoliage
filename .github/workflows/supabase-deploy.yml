@@ -1,16 +1,16 @@
-name: Deploy Supabase functions
+name: Set up Supabase
 
 # Runs the Supabase CLI on GitHub's machines so it does not have to be run on
-# yours. Start it from the Actions tab (Run workflow) — that works from a phone.
+# yours. Start it from the Actions tab (Run workflow) — that works from a phone,
+# and it builds the database without pasting anything into the SQL Editor.
 #
 # Repository secrets it needs (Settings → Secrets and variables → Actions):
 #
 #   SUPABASE_ACCESS_TOKEN   from supabase.com/dashboard/account/tokens
 #   SUPABASE_PROJECT_REF    the ref from your project's dashboard URL
-#
-# Optional, only for pushing new migrations later:
-#
-#   SUPABASE_DB_PASSWORD    the database password from when you made the project
+#   SUPABASE_DB_PASSWORD    the database password you set when creating the
+#                           project (reset it under Project Settings → Database
+#                           if you no longer have it)
 #
 # The Resend key is NOT set here. It goes in the Supabase dashboard under
 # Edge Functions → Secrets, so it never passes through GitHub.
@@ -18,10 +18,14 @@ name: Deploy Supabase functions
 on:
   workflow_dispatch:
     inputs:
-      push_migrations:
-        description: "Also apply any new database migrations"
+      migrations:
+        description: "Apply database migrations"
         type: boolean
-        default: false
+        default: true
+      functions:
+        description: "Deploy the Edge Functions"
+        type: boolean
+        default: true
   push:
     branches: [main]
     paths:
@@ -35,6 +39,9 @@ jobs:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
       DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      # A push event deploys functions only; migrations stay a deliberate act.
+      DO_MIGRATIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.migrations }}
+      DO_FUNCTIONS: ${{ github.event_name != 'workflow_dispatch' || inputs.functions }}
 
     steps:
       - uses: actions/checkout@v4
@@ -44,9 +51,12 @@ jobs:
           missing=""
           [ -z "$SUPABASE_ACCESS_TOKEN" ] && missing="$missing SUPABASE_ACCESS_TOKEN"
           [ -z "$PROJECT_REF" ] && missing="$missing SUPABASE_PROJECT_REF"
+          if [ "$DO_MIGRATIONS" = "true" ] && [ -z "$DB_PASSWORD" ]; then
+            missing="$missing SUPABASE_DB_PASSWORD"
+          fi
           if [ -n "$missing" ]; then
             echo "Missing repository secret(s):$missing" >&2
-            echo "Add them under Settings → Secrets and variables → Actions." >&2
+            echo "Add them under Settings → Secrets and variables → Actions, then run this again." >&2
             exit 1
           fi
 
@@ -54,25 +64,31 @@ jobs:
         with:
           version: latest
 
+      - name: Connect to the project
+        run: supabase link --project-ref "$PROJECT_REF" --password "$DB_PASSWORD"
+
+      # Builds the database on a new project, and applies anything new later.
+      # Already-applied migrations are skipped, so running this twice is safe.
+      - name: Apply database migrations
+        if: ${{ env.DO_MIGRATIONS == 'true' }}
+        run: supabase db push --password "$DB_PASSWORD"
+
       - name: Deploy the Edge Functions
+        if: ${{ env.DO_FUNCTIONS == 'true' }}
         run: supabase functions deploy --project-ref "$PROJECT_REF"
 
-      # Off by default: the first build of the database is done by pasting
-      # supabase/schema.sql into the SQL Editor. This is for migrations added
-      # after that.
-      - name: Apply new migrations
-        if: ${{ inputs.push_migrations }}
+      - name: Summary
         run: |
-          if [ -z "$DB_PASSWORD" ]; then
-            echo "SUPABASE_DB_PASSWORD is not set, so migrations cannot be applied." >&2
-            exit 1
-          fi
-          supabase link --project-ref "$PROJECT_REF" --password "$DB_PASSWORD"
-          supabase db push --password "$DB_PASSWORD"
-
-      - name: What was deployed
-        run: |
-          echo "Functions deployed to project $PROJECT_REF:"
-          ls -1 supabase/functions | grep -v '^_' | grep -v '\.md$' | sed 's/^/  - /'
-          echo ""
-          echo "Set RESEND_API_KEY in the dashboard (Edge Functions → Secrets) if you have not yet."
+          {
+            echo "### Supabase"
+            echo ""
+            if [ "$DO_MIGRATIONS" = "true" ]; then
+              echo "- Database migrations applied"
+            fi
+            if [ "$DO_FUNCTIONS" = "true" ]; then
+              echo "- Functions deployed:"
+              ls -1 supabase/functions | grep -v '^_' | grep -v '\.md$' | sed 's/^/  - /'
+            fi
+            echo ""
+            echo "Next: set \`RESEND_API_KEY\` in the dashboard under Edge Functions → Secrets."
+          } >> "$GITHUB_STEP_SUMMARY"
