@@ -16,7 +16,9 @@ name: Set up Supabase
 #   SUPABASE_DB_URL         the SESSION POOLER connection string, from Project
 #                           Settings → Database → Connection string → Session
 #                           pooler, with your database password filled in. It
-#                           contains "pooler.supabase.com".
+#                           contains "pooler.supabase.com". Special characters
+#                           in the password are escaped automatically, so paste
+#                           it exactly as the dashboard gives it.
 #
 #                           The pooler is needed because Supabase's direct
 #                           database connections are IPv6-only and GitHub's
@@ -87,13 +89,26 @@ jobs:
       - name: Connect to the project
         run: supabase link --project-ref "$PROJECT_REF"
 
+      # A password copied from the dashboard is plain text, but it lives in a
+      # URL, where @ : / ? # and spaces mean something. Unescaped, the client
+      # cannot parse the URL and blames the whole string rather than the
+      # password. Fix it here instead of asking anyone to escape it by hand.
+      - name: Check the database URL
+        if: ${{ env.DO_MIGRATIONS == 'true' }}
+        run: |
+          if ! printf '%s' "$DB_URL" | python3 scripts/normalise-db-url.py > /tmp/db-url; then
+            exit 1
+          fi
+          echo "::add-mask::$(cat /tmp/db-url)"
+          echo "DB_URL_READY=$(cat /tmp/db-url)" >> "$GITHUB_ENV"
+
       # Builds the database on a new project, and applies anything new later.
       # Already-applied migrations are skipped, so running this twice is safe.
       # Goes through the pooler rather than the linked project's direct
       # connection, which is IPv6-only and unreachable from a GitHub runner.
       - name: Apply database migrations
         if: ${{ env.DO_MIGRATIONS == 'true' }}
-        run: supabase db push --db-url "$DB_URL"
+        run: supabase db push --db-url "$DB_URL_READY"
 
       - name: Deploy the Edge Functions
         if: ${{ env.DO_FUNCTIONS == 'true' }}
