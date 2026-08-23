@@ -791,6 +791,7 @@ export type Database = {
           phone: string | null
           public_site_url: string | null
           quote_counter: number
+          reply_to_email: string | null
           quote_prefix: string
           quote_terms: string | null
           quote_validity_days: number
@@ -815,6 +816,7 @@ export type Database = {
           phone?: string | null
           public_site_url?: string | null
           quote_counter?: number
+          reply_to_email?: string | null
           quote_prefix?: string
           quote_terms?: string | null
           quote_validity_days?: number
@@ -839,6 +841,7 @@ export type Database = {
           phone?: string | null
           public_site_url?: string | null
           quote_counter?: number
+          reply_to_email?: string | null
           quote_prefix?: string
           quote_terms?: string | null
           quote_validity_days?: number

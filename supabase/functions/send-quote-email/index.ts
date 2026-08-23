@@ -46,12 +46,15 @@ Deno.serve(
 
     const { data: settings } = await supabase
       .from("settings")
-      .select("business_name, email, vat_registered")
+      .select("business_name, email, reply_to_email, vat_registered")
       .eq("user_id", userId)
       .maybeSingle();
 
     const businessName = settings?.business_name || DEFAULT_BUSINESS_NAME;
     const fromEmail = settings?.email || DEFAULT_FROM_EMAIL;
+    // Replies go wherever the inbox is; the From address only has to be on a
+    // domain Resend has verified.
+    const replyTo = settings?.reply_to_email || null;
     const link = `${origin}/quote/${quote.public_key}`;
 
     type ItemRow = { description: string; quantity: number; unit_price: number; amount: number };
@@ -102,6 +105,7 @@ Deno.serve(
 
     const result = await sendEmail({
       from: `${businessName} <${fromEmail}>`,
+      replyTo,
       to: quote.contact_email,
       subject: `Quote ${quote.number} from ${businessName}`,
       html,

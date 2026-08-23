@@ -62,7 +62,7 @@ Deno.serve(
 
     const { data: owner } = await supabaseAdmin
       .from("settings")
-      .select("user_id, email, business_name")
+      .select("user_id, email, reply_to_email, business_name")
       .eq("enquiry_key", data.key)
       .maybeSingle();
 
@@ -81,7 +81,10 @@ Deno.serve(
 
     // Notify the owner by email (best effort — never blocks the enquiry).
     try {
-      const notifyTo = owner.email;
+      // A new enquiry belongs in the inbox that is actually read, which is
+      // the reply-to address — not the send-only address invoices go out from.
+      const notifyTo = owner.reply_to_email || owner.email;
+      const notifyFrom = owner.email || notifyTo;
       if (isEmailConfigured() && notifyTo) {
         const businessName = owner.business_name || DEFAULT_BUSINESS_NAME;
         const rows: [string, string][] = [
@@ -103,7 +106,7 @@ Deno.serve(
     </div>`;
 
         await sendEmail({
-          from: `${businessName} <${notifyTo}>`,
+          from: `${businessName} <${notifyFrom}>`,
           to: notifyTo,
           replyTo: data.email || null,
           subject: `New enquiry — ${data.name}`,

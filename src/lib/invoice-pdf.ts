@@ -144,9 +144,12 @@ export async function buildInvoicePdf({
     doc.text(settings.phone, rightColX, rightY);
     rightY += 13;
   }
-  if (settings?.email) {
+  // The contact address on the invoice is where a customer should write, which
+  // is the reply-to inbox rather than the address the email was sent from.
+  const contactEmail = settings?.reply_to_email || settings?.email;
+  if (contactEmail) {
     rightY += 6;
-    doc.text(settings.email, rightColX, rightY);
+    doc.text(contactEmail, rightColX, rightY);
     rightY += 13;
   }
 

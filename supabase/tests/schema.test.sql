@@ -23,6 +23,26 @@ BEGIN
   END IF;
 END $$;
 
+-- An address typed into Settings survives a later migration run: the business
+-- details backfill only fills blanks. A migration quietly rewriting the address
+-- invoices are sent from would be hard to notice and expensive to discover.
+INSERT INTO public.settings (user_id, email, business_name)
+  VALUES ('22222222-2222-2222-2222-222222222222', 'billing@example.com', 'Someone Else Ltd');
+DO $$
+DECLARE _e text; _n text;
+BEGIN
+  UPDATE public.settings SET
+    business_name = COALESCE(NULLIF(btrim(business_name), ''), 'JW Garden Services'),
+    email         = COALESCE(NULLIF(btrim(email), ''), 'info@jw-gardenservices.co.uk');
+
+  SELECT email, business_name INTO _e, _n FROM public.settings
+    WHERE user_id = '22222222-2222-2222-2222-222222222222';
+  IF _e <> 'billing@example.com' OR _n <> 'Someone Else Ltd' THEN
+    RAISE EXCEPTION 'the backfill overwrote hand-typed details: % / %', _e, _n;
+  END IF;
+END $$;
+DELETE FROM public.settings WHERE user_id = '22222222-2222-2222-2222-222222222222';
+
 SET ROLE authenticated;
 DO $$ BEGIN PERFORM set_config('request.jwt.claim.sub','11111111-1111-1111-1111-111111111111', false); END $$;
 
@@ -35,6 +55,42 @@ BEGIN
     WHERE user_id = '11111111-1111-1111-1111-111111111111';
   IF _key IS NULL OR length(_key) < 12 THEN
     RAISE EXCEPTION 'new settings row has no usable enquiry_key (got %)', _key;
+  END IF;
+END $$;
+
+-- The business details are pre-filled, so Settings is not an empty form.
+DO $$
+DECLARE _s record;
+BEGIN
+  SELECT business_name, address, email, reply_to_email, invoice_prefix,
+         payment_terms, bank_details
+    INTO _s FROM public.settings
+    WHERE user_id = '11111111-1111-1111-1111-111111111111';
+  IF _s.business_name IS DISTINCT FROM 'JW Garden Services' THEN
+    RAISE EXCEPTION 'business name not pre-filled: %', _s.business_name;
+  END IF;
+  IF _s.address IS NULL OR _s.address NOT LIKE '%HP22 7DG%' THEN
+    RAISE EXCEPTION 'address not pre-filled: %', _s.address;
+  END IF;
+  IF _s.email IS DISTINCT FROM 'info@jw-gardenservices.co.uk' THEN
+    RAISE EXCEPTION 'invoice email not pre-filled: %', _s.email;
+  END IF;
+  -- One mailbox, so the reply address stays empty and everything falls back to
+  -- the address above. A default here would send replies somewhere unread.
+  IF _s.reply_to_email IS NOT NULL THEN
+    RAISE EXCEPTION 'reply-to should default to empty, got %', _s.reply_to_email;
+  END IF;
+  IF _s.invoice_prefix IS DISTINCT FROM 'JW-' THEN
+    RAISE EXCEPTION 'invoice prefix wrong: %', _s.invoice_prefix;
+  END IF;
+  IF _s.payment_terms IS NULL THEN RAISE EXCEPTION 'payment terms not pre-filled'; END IF;
+  -- The invoice PDF splits these on ":" to build the payment block, so every
+  -- line has to be labelled or the invoice shows bare numbers.
+  IF _s.bank_details IS NULL
+     OR _s.bank_details NOT LIKE '%Sort code: %'
+     OR _s.bank_details NOT LIKE '%Account number: %'
+     OR _s.bank_details NOT LIKE '%Account name: %' THEN
+    RAISE EXCEPTION 'bank details missing or not labelled: %', _s.bank_details;
   END IF;
 END $$;
 
