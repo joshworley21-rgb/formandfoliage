@@ -6,7 +6,12 @@ name: Set up Supabase
 #
 # Repository secrets it needs (Settings → Secrets and variables → Actions):
 #
-#   SUPABASE_ACCESS_TOKEN   from supabase.com/dashboard/account/tokens
+#   SUPABASE_ACCESS_TOKEN   a personal access token for your Supabase ACCOUNT,
+#                           made at supabase.com/dashboard/account/tokens. It
+#                           starts sbp_. This is not any of the project keys —
+#                           not the publishable/anon key, not the service role
+#                           key, not the JWT secret. Those are under Project
+#                           Settings → API and do a different job.
 #   SUPABASE_PROJECT_REF    the ref from your project's dashboard URL
 #   SUPABASE_DB_PASSWORD    the database password you set when creating the
 #                           project (reset it under Project Settings → Database
