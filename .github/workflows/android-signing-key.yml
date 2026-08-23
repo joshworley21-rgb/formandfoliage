@@ -1,0 +1,123 @@
+name: Create the app signing key
+
+# Android will only install a new APK over an old one when both were signed
+# with the same key. CI has no key of its own, so every debug build is signed
+# with a fresh throwaway one and the phone rejects it as an update — the app
+# has to be uninstalled first, taking nothing with it but the annoyance.
+#
+# This makes one key, once, and commits it so every later build is signed with
+# it. Run it from the Actions tab; it needs no computer.
+#
+# Before running, add ONE repository secret under
+# Settings -> Secrets and variables -> Actions:
+#
+#   ANDROID_KEYSTORE_PASSWORD   any password you invent, at least 6 characters.
+#                               Save it somewhere you will still have it in a
+#                               year. Lose it and you cannot sign an update —
+#                               the app has to be uninstalled and reinstalled.
+#
+# The key file lands in the repository and the password stays a secret, so the
+# file on its own is not enough to sign anything. Keep the repository private.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  KEYSTORE_PATH: android/keystore/release.jks
+  KEY_ALIAS: jwgardenservices
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the password secret is set
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "ANDROID_KEYSTORE_PASSWORD is not set." >&2
+            echo "Add it under Settings -> Secrets and variables -> Actions, then run this again." >&2
+            exit 1
+          fi
+          if [ "${#KEYSTORE_PASSWORD}" -lt 6 ]; then
+            echo "ANDROID_KEYSTORE_PASSWORD must be at least 6 characters." >&2
+            exit 1
+          fi
+
+      # Replacing the key is not an update, it is a different app as far as the
+      # phone is concerned. Refuse rather than do that by accident.
+      - name: Refuse to replace an existing key
+        run: |
+          if [ -f "$KEYSTORE_PATH" ]; then
+            {
+              echo "### Nothing to do"
+              echo ""
+              echo "A signing key already exists at \`$KEYSTORE_PATH\`, and it was left alone."
+              echo ""
+              echo "Every APK is already signed with it. Replacing it would break updates for"
+              echo "anyone who has the app installed — they would have to uninstall first. If"
+              echo "that is genuinely what you want, delete the file from the repository and"
+              echo "run this again."
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Create the key
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          mkdir -p "$(dirname "$KEYSTORE_PATH")"
+          keytool -genkeypair \
+            -keystore "$KEYSTORE_PATH" \
+            -alias "$KEY_ALIAS" \
+            -keyalg RSA -keysize 2048 \
+            -validity 10000 \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -keypass "$KEYSTORE_PASSWORD" \
+            -dname "CN=JW Garden Services, O=JW Garden Services, L=Aylesbury, C=GB"
+
+      # Proves the file is a keystore the password opens, rather than trusting
+      # that keytool exited 0.
+      - name: Check the key opens
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          keytool -list -keystore "$KEYSTORE_PATH" -storepass "$KEYSTORE_PASSWORD" \
+            -alias "$KEY_ALIAS" | sed 's/^/    /'
+
+      - name: Commit it
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f "$KEYSTORE_PATH"
+          git commit \
+            -m "Add the Android signing key" \
+            -m "Made by the Create the app signing key workflow. The password is the ANDROID_KEYSTORE_PASSWORD repository secret and is not stored here."
+          git push
+
+      - name: Summary
+        run: |
+          {
+            echo "### Signing key created"
+            echo ""
+            echo "Committed to \`$KEYSTORE_PATH\`, alias \`$KEY_ALIAS\`, valid for 27 years."
+            echo ""
+            echo "Every **Android APK** run from now on is signed with it, so the phone will"
+            echo "accept later builds as updates."
+            echo ""
+            echo "One catch: the app you already have was signed with a throwaway key, so"
+            echo "**uninstall it once** before installing the next build. After that,"
+            echo "installing straight over the top works."
+            echo ""
+            echo "Keep the password safe. Without it no future build can be signed."
+          } >> "$GITHUB_STEP_SUMMARY"

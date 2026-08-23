@@ -42,3 +42,6 @@ android/app/src/main/assets/capacitor.config.json
 android/app/src/main/assets/capacitor.plugins.json
 android/local.properties
 *.keystore
+# android/keystore/release.jks is deliberately NOT ignored. It is how every APK
+# gets signed with the same key, which is what lets the phone install a new
+# build over an old one. The password for it is a repository secret.

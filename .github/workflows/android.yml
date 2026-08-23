@@ -3,6 +3,11 @@ name: Android APK
 # Builds the installable app in CI so no Android Studio is needed locally.
 # Run it from the Actions tab (Run workflow), then download the APK from the
 # run's Artifacts section and open it on the phone.
+#
+# Signing: run "Create the app signing key" once and this builds a signed
+# release APK that the phone will accept as an update over the previous one.
+# Without a key it falls back to a debug build, which installs fine but is
+# signed with a throwaway key each run, so updating in place will not work.
 
 on:
   workflow_dispatch:
@@ -16,8 +21,11 @@ jobs:
     env:
       KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      # Both optional: the key the workflow makes uses one password and a
+      # known alias, so these only matter for a key made somewhere else.
       KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      COMMITTED_KEYSTORE: android/keystore/release.jks
 
     steps:
       - uses: actions/checkout@v4
@@ -45,29 +53,54 @@ jobs:
       - name: Copy assets into the Android project
         run: bunx cap sync android
 
-      - name: Decode signing keystore
-        if: env.KEYSTORE_B64 != ''
-        run: echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+      # Two ways to arrive at a key: the one "Create the app signing key" put in
+      # the repository, or a base64 secret for a key made elsewhere. Decide
+      # once here so the build steps have a single question to ask.
+      - name: Find the signing key
+        run: |
+          if [ -f "$COMMITTED_KEYSTORE" ]; then
+            cp "$COMMITTED_KEYSTORE" "$RUNNER_TEMP/release.jks"
+            echo "Signing with the key in the repository."
+          elif [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "Signing with the key from ANDROID_KEYSTORE_BASE64."
+          else
+            echo "No signing key — building a debug APK."
+            echo "Run \"Create the app signing key\" once to get updatable builds."
+            exit 0
+          fi
+          if [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "A signing key is present but ANDROID_KEYSTORE_PASSWORD is not set." >&2
+            echo "Without it the key cannot be opened. Add the secret and run this again." >&2
+            exit 1
+          fi
+          echo "SIGNED=true" >> "$GITHUB_ENV"
 
       # Signed with your own key: the phone will accept later versions as
-      # updates rather than making you uninstall first.
+      # updates rather than making you uninstall first. The version number
+      # comes from the run number, so every build outranks the one before it.
       - name: Build signed release APK
-        if: env.KEYSTORE_B64 != ''
+        if: env.SIGNED == 'true'
         working-directory: android
         run: |
           ./gradlew assembleRelease \
+            -PappVersionCode=${{ github.run_number }} \
+            -PappVersionName=1.0.${{ github.run_number }} \
             -Pandroid.injected.signing.store.file="$RUNNER_TEMP/release.jks" \
             -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
-            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
-            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
+            -Pandroid.injected.signing.key.alias="${KEY_ALIAS:-jwgardenservices}" \
+            -Pandroid.injected.signing.key.password="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
 
-      # Fallback so the workflow is useful before any keystore exists. Debug
-      # APKs install fine but are signed with a throwaway key each run, so
-      # updating over a previous install will not work.
+      # Fallback so the workflow is useful before any key exists. Debug APKs
+      # install fine but are signed with a throwaway key each run, so updating
+      # over a previous install will not work.
       - name: Build debug APK
-        if: env.KEYSTORE_B64 == ''
+        if: env.SIGNED != 'true'
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: |
+          ./gradlew assembleDebug \
+            -PappVersionCode=${{ github.run_number }} \
+            -PappVersionName=1.0.${{ github.run_number }}
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -77,3 +110,24 @@ jobs:
             android/app/build/outputs/apk/release/*.apk
             android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Summary
+        run: |
+          {
+            echo "### APK"
+            echo ""
+            if [ "$SIGNED" = "true" ]; then
+              echo "Signed release build, version 1.0.${{ github.run_number }}."
+              echo ""
+              echo "Download it from **Artifacts** below and open it on the phone. It installs"
+              echo "straight over the version you already have."
+            else
+              echo "Debug build, version 1.0.${{ github.run_number }} — **not signed with your key**."
+              echo ""
+              echo "Download it from **Artifacts** below. It installs, but updating over a"
+              echo "previous build will not work: each run is signed differently, so the phone"
+              echo "sees a different app."
+              echo ""
+              echo "Run **Create the app signing key** once to fix that for good."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
