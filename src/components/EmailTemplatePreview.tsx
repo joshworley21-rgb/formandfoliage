@@ -21,6 +21,7 @@ type Props = {
   bodyTemplate: string;
   businessName: string;
   fromEmail: string;
+  replyToEmail: string;
   paymentTerms: string;
   bankDetails: string;
   invoicePrefix: string;
@@ -31,6 +32,7 @@ export function EmailTemplatePreview({
   bodyTemplate,
   businessName,
   fromEmail,
+  replyToEmail,
   paymentTerms,
   bankDetails,
   invoicePrefix,
@@ -92,6 +94,12 @@ export function EmailTemplatePreview({
               <span className="text-muted-foreground">From: </span>
               {(businessName || "JW Garden Services") + ` <${fromEmail || "onboarding@resend.dev"}>`}
             </p>
+            {replyToEmail && replyToEmail !== fromEmail ? (
+              <p>
+                <span className="text-muted-foreground">Reply-To: </span>
+                {replyToEmail}
+              </p>
+            ) : null}
             <p>
               <span className="text-muted-foreground">To: </span>
               {selected?.email || "no email saved for this client"}

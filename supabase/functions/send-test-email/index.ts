@@ -41,6 +41,9 @@ Deno.serve(
 
     const businessName = settings?.business_name || DEFAULT_BUSINESS_NAME;
     const fromEmail = settings?.email || DEFAULT_FROM_EMAIL;
+    // Replies go wherever the inbox is; the From address only has to be on a
+    // domain Resend has verified.
+    const replyTo = settings?.reply_to_email || null;
     const today = new Date();
     const due = new Date(today.getTime() + 14 * 86400000).toISOString().slice(0, 10);
 
@@ -70,6 +73,7 @@ Deno.serve(
 
     const result = await sendEmail({
       from: `${businessName} <${fromEmail}>`,
+      replyTo,
       to,
       subject,
       html,

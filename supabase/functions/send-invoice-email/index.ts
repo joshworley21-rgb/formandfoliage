@@ -70,6 +70,9 @@ Deno.serve(
 
     const businessName = settings?.business_name || DEFAULT_BUSINESS_NAME;
     const fromEmail = settings?.email || DEFAULT_FROM_EMAIL;
+    // Replies go wherever the inbox is; the From address only has to be on a
+    // domain Resend has verified.
+    const replyTo = settings?.reply_to_email || null;
     const path = `${userId}/${invoice.id}.pdf`;
     const bytes = Uint8Array.from(atob(data.pdfBase64), (c) => c.charCodeAt(0));
 
@@ -108,6 +111,7 @@ Deno.serve(
 
     const result = await sendEmail({
       from: `${businessName} <${fromEmail}>`,
+      replyTo,
       to: client.email,
       subject,
       html: htmlBody,

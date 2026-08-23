@@ -51,7 +51,7 @@ Deno.serve(
 
     const { data: settings } = await supabaseAdmin
       .from("settings")
-      .select("business_name, email, phone, vat_registered")
+      .select("business_name, email, reply_to_email, phone, vat_registered")
       .eq("user_id", quote.user_id)
       .maybeSingle();
 
@@ -110,7 +110,9 @@ Deno.serve(
 
     // Tell the owner (best effort — the customer's answer is already saved).
     try {
-      if (isEmailConfigured() && settings?.email) {
+      // As with enquiries, the answer goes to the inbox being watched.
+      const notifyTo = settings?.reply_to_email || settings?.email;
+      if (isEmailConfigured() && notifyTo) {
         const heading =
           decision === "accepted"
             ? `${quote.contact_name} accepted quote ${quote.number}`
@@ -126,8 +128,8 @@ Deno.serve(
         ].filter(Boolean);
 
         await sendEmail({
-          from: `${businessName} <${settings.email}>`,
-          to: settings.email,
+          from: `${businessName} <${settings?.email || notifyTo}>`,
+          to: notifyTo,
           subject: heading,
           html: textToHtml(lines.join("\n\n")),
         });

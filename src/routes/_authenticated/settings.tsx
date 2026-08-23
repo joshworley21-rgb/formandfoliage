@@ -53,7 +53,8 @@ function SettingsPage() {
     business_name: "JW Garden Services",
     address: "24 Portland Close\nBierton\nHP22 7DG",
     phone: "",
-    email: "",
+    email: "invoices@jw-gardenservices.co.uk",
+    reply_to_email: "info@jw-gardenservices.co.uk",
     public_site_url: "",
     vat_registered: false,
     vat_number: "",
@@ -73,6 +74,7 @@ function SettingsPage() {
       address: settings.address ?? "",
       phone: settings.phone ?? "",
       email: settings.email ?? "",
+      reply_to_email: settings.reply_to_email ?? "",
       public_site_url: settings.public_site_url ?? "",
       vat_registered: settings.vat_registered,
       vat_number: settings.vat_number ?? "",
@@ -100,6 +102,7 @@ function SettingsPage() {
             address: form.address || null,
             phone: form.phone || null,
             email: form.email || null,
+            reply_to_email: form.reply_to_email || null,
             public_site_url: form.public_site_url.trim().replace(/\/+$/, "") || null,
             vat_registered: form.vat_registered,
             vat_number: form.vat_number || null,
@@ -146,7 +149,7 @@ function SettingsPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="email">Email (reply-to)</Label>
+                <Label htmlFor="email">Emails are sent from</Label>
                 <Input
                   id="email"
                   type="email"
@@ -154,6 +157,20 @@ function SettingsPage() {
                   onChange={(e) => set("email", e.target.value)}
                 />
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="replyTo">Replies go to</Label>
+              <Input
+                id="replyTo"
+                type="email"
+                value={form.reply_to_email}
+                onChange={(e) => set("reply_to_email", e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                The inbox you actually read. Customer replies, website enquiries and quote answers
+                all land here, and it is the address printed on your invoices. The sending address
+                above only has to be on a domain verified with Resend — it does not need a mailbox.
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="site">Website address</Label>
@@ -332,6 +349,7 @@ function SettingsPage() {
           bodyTemplate={form.email_body_template}
           businessName={form.business_name}
           fromEmail={form.email}
+          replyToEmail={form.reply_to_email}
           paymentTerms={form.payment_terms}
           bankDetails={form.bank_details}
           invoicePrefix={form.invoice_prefix}

@@ -85,12 +85,15 @@ Deno.serve(
 
       const { data: settings } = await supabaseAdmin
         .from("settings")
-        .select("business_name, email, payment_terms, bank_details")
+        .select("business_name, email, reply_to_email, payment_terms, bank_details")
         .eq("user_id", invoice.user_id)
         .maybeSingle();
 
       const businessName = settings?.business_name || DEFAULT_BUSINESS_NAME;
       const fromEmail = settings?.email || DEFAULT_FROM_EMAIL;
+      // Replies go wherever the inbox is; the From address only has to be on a
+      // domain Resend has verified.
+      const replyTo = settings?.reply_to_email || null;
       const statusLine = isOverdue
         ? `Invoice ${invoice.number} for £${Number(invoice.total).toFixed(2)} was due on ${invoice.due_date} and is now ${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue.`
         : `Just a friendly reminder that invoice ${invoice.number} for £${Number(invoice.total).toFixed(2)} is still showing as unpaid (sent ${daysSinceSent} days ago).`;
@@ -107,6 +110,7 @@ Deno.serve(
 
       const result = await sendEmail({
         from: `${businessName} <${fromEmail}>`,
+        replyTo,
         to: client.email,
         subject: isOverdue
           ? `Overdue invoice ${invoice.number} — payment reminder`

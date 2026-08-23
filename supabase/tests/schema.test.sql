@@ -23,6 +23,27 @@ BEGIN
   END IF;
 END $$;
 
+-- An address typed into Settings survives a later migration run. The backfill
+-- has to leave anything hand-edited alone, or a redeploy silently rewrites the
+-- address invoices are sent from.
+INSERT INTO public.settings (user_id, email, reply_to_email)
+  VALUES ('22222222-2222-2222-2222-222222222222', 'billing@example.com', 'me@example.com');
+DO $$
+DECLARE _e text; _r text;
+BEGIN
+  UPDATE public.settings SET
+    email          = 'invoices@jw-gardenservices.co.uk',
+    reply_to_email = 'info@jw-gardenservices.co.uk'
+  WHERE btrim(COALESCE(email, '')) IN ('', 'info@jw-gardenservices.co.uk');
+
+  SELECT email, reply_to_email INTO _e, _r FROM public.settings
+    WHERE user_id = '22222222-2222-2222-2222-222222222222';
+  IF _e <> 'billing@example.com' OR _r <> 'me@example.com' THEN
+    RAISE EXCEPTION 'the backfill overwrote a hand-typed address: % / %', _e, _r;
+  END IF;
+END $$;
+DELETE FROM public.settings WHERE user_id = '22222222-2222-2222-2222-222222222222';
+
 SET ROLE authenticated;
 DO $$ BEGIN PERFORM set_config('request.jwt.claim.sub','11111111-1111-1111-1111-111111111111', false); END $$;
 
@@ -42,7 +63,8 @@ END $$;
 DO $$
 DECLARE _s record;
 BEGIN
-  SELECT business_name, address, email, invoice_prefix, payment_terms, bank_details
+  SELECT business_name, address, email, reply_to_email, invoice_prefix,
+         payment_terms, bank_details
     INTO _s FROM public.settings
     WHERE user_id = '11111111-1111-1111-1111-111111111111';
   IF _s.business_name IS DISTINCT FROM 'JW Garden Services' THEN
@@ -51,8 +73,13 @@ BEGIN
   IF _s.address IS NULL OR _s.address NOT LIKE '%HP22 7DG%' THEN
     RAISE EXCEPTION 'address not pre-filled: %', _s.address;
   END IF;
-  IF _s.email IS DISTINCT FROM 'info@jw-gardenservices.co.uk' THEN
-    RAISE EXCEPTION 'invoice email not pre-filled: %', _s.email;
+  IF _s.email IS DISTINCT FROM 'invoices@jw-gardenservices.co.uk' THEN
+    RAISE EXCEPTION 'sending address not pre-filled: %', _s.email;
+  END IF;
+  -- Sending from invoices@ is only safe if replies are steered somewhere that
+  -- is read; otherwise every customer reply falls on the floor.
+  IF _s.reply_to_email IS DISTINCT FROM 'info@jw-gardenservices.co.uk' THEN
+    RAISE EXCEPTION 'reply-to address not pre-filled: %', _s.reply_to_email;
   END IF;
   IF _s.invoice_prefix IS DISTINCT FROM 'JW-' THEN
     RAISE EXCEPTION 'invoice prefix wrong: %', _s.invoice_prefix;
