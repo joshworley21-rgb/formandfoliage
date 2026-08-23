@@ -110,6 +110,32 @@ jobs:
         if: ${{ env.DO_MIGRATIONS == 'true' }}
         run: supabase db push --db-url "$DB_URL_READY"
 
+      # Reports what is actually in the database afterwards. "db push" saying it
+      # applied everything only proves it reached *a* database; this shows which
+      # one, and what is now in it.
+      - name: Verify the database
+        if: ${{ env.DO_MIGRATIONS == 'true' }}
+        run: |
+          {
+            echo "### Database contents"
+            echo ""
+            echo "Connected to: \`$(printf '%s' "$DB_URL_READY" | sed -E 's|.*@||')\`"
+            echo ""
+            echo "**Tables in \`public\`**"
+            echo ""
+            psql "$DB_URL_READY" -tAc \
+              "select '- ' || table_name from information_schema.tables
+               where table_schema = 'public' order by table_name;"
+            echo ""
+            echo "**Storage buckets**"
+            echo ""
+            psql "$DB_URL_READY" -tAc \
+              "select '- ' || id from storage.buckets order by id;"
+            echo ""
+            echo "**Migrations recorded:** $(psql "$DB_URL_READY" -tAc \
+              "select count(*) from supabase_migrations.schema_migrations;")"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Deploy the Edge Functions
         if: ${{ env.DO_FUNCTIONS == 'true' }}
         run: supabase functions deploy --project-ref "$PROJECT_REF"
