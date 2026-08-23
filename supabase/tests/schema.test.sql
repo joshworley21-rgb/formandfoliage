@@ -23,23 +23,22 @@ BEGIN
   END IF;
 END $$;
 
--- An address typed into Settings survives a later migration run. The backfill
--- has to leave anything hand-edited alone, or a redeploy silently rewrites the
--- address invoices are sent from.
-INSERT INTO public.settings (user_id, email, reply_to_email)
-  VALUES ('22222222-2222-2222-2222-222222222222', 'billing@example.com', 'me@example.com');
+-- An address typed into Settings survives a later migration run: the business
+-- details backfill only fills blanks. A migration quietly rewriting the address
+-- invoices are sent from would be hard to notice and expensive to discover.
+INSERT INTO public.settings (user_id, email, business_name)
+  VALUES ('22222222-2222-2222-2222-222222222222', 'billing@example.com', 'Someone Else Ltd');
 DO $$
-DECLARE _e text; _r text;
+DECLARE _e text; _n text;
 BEGIN
   UPDATE public.settings SET
-    email          = 'invoices@jw-gardenservices.co.uk',
-    reply_to_email = 'info@jw-gardenservices.co.uk'
-  WHERE btrim(COALESCE(email, '')) IN ('', 'info@jw-gardenservices.co.uk');
+    business_name = COALESCE(NULLIF(btrim(business_name), ''), 'JW Garden Services'),
+    email         = COALESCE(NULLIF(btrim(email), ''), 'info@jw-gardenservices.co.uk');
 
-  SELECT email, reply_to_email INTO _e, _r FROM public.settings
+  SELECT email, business_name INTO _e, _n FROM public.settings
     WHERE user_id = '22222222-2222-2222-2222-222222222222';
-  IF _e <> 'billing@example.com' OR _r <> 'me@example.com' THEN
-    RAISE EXCEPTION 'the backfill overwrote a hand-typed address: % / %', _e, _r;
+  IF _e <> 'billing@example.com' OR _n <> 'Someone Else Ltd' THEN
+    RAISE EXCEPTION 'the backfill overwrote hand-typed details: % / %', _e, _n;
   END IF;
 END $$;
 DELETE FROM public.settings WHERE user_id = '22222222-2222-2222-2222-222222222222';
@@ -73,13 +72,13 @@ BEGIN
   IF _s.address IS NULL OR _s.address NOT LIKE '%HP22 7DG%' THEN
     RAISE EXCEPTION 'address not pre-filled: %', _s.address;
   END IF;
-  IF _s.email IS DISTINCT FROM 'invoices@jw-gardenservices.co.uk' THEN
-    RAISE EXCEPTION 'sending address not pre-filled: %', _s.email;
+  IF _s.email IS DISTINCT FROM 'info@jw-gardenservices.co.uk' THEN
+    RAISE EXCEPTION 'invoice email not pre-filled: %', _s.email;
   END IF;
-  -- Sending from invoices@ is only safe if replies are steered somewhere that
-  -- is read; otherwise every customer reply falls on the floor.
-  IF _s.reply_to_email IS DISTINCT FROM 'info@jw-gardenservices.co.uk' THEN
-    RAISE EXCEPTION 'reply-to address not pre-filled: %', _s.reply_to_email;
+  -- One mailbox, so the reply address stays empty and everything falls back to
+  -- the address above. A default here would send replies somewhere unread.
+  IF _s.reply_to_email IS NOT NULL THEN
+    RAISE EXCEPTION 'reply-to should default to empty, got %', _s.reply_to_email;
   END IF;
   IF _s.invoice_prefix IS DISTINCT FROM 'JW-' THEN
     RAISE EXCEPTION 'invoice prefix wrong: %', _s.invoice_prefix;

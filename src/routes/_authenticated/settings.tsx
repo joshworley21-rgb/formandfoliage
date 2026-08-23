@@ -53,8 +53,8 @@ function SettingsPage() {
     business_name: "JW Garden Services",
     address: "24 Portland Close\nBierton\nHP22 7DG",
     phone: "",
-    email: "invoices@jw-gardenservices.co.uk",
-    reply_to_email: "info@jw-gardenservices.co.uk",
+    email: "info@jw-gardenservices.co.uk",
+    reply_to_email: "",
     public_site_url: "",
     vat_registered: false,
     vat_number: "",
@@ -159,7 +159,7 @@ function SettingsPage() {
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="replyTo">Replies go to</Label>
+              <Label htmlFor="replyTo">Replies go to (optional)</Label>
               <Input
                 id="replyTo"
                 type="email"
@@ -167,9 +167,9 @@ function SettingsPage() {
                 onChange={(e) => set("reply_to_email", e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                The inbox you actually read. Customer replies, website enquiries and quote answers
-                all land here, and it is the address printed on your invoices. The sending address
-                above only has to be on a domain verified with Resend — it does not need a mailbox.
+                Leave blank and replies come back to the sending address, which is what you want
+                with one mailbox. Fill it in only if you start sending from an address you do not
+                read — a separate invoices@, say — and want replies to land somewhere else.
               </p>
             </div>
             <div className="space-y-1.5">
