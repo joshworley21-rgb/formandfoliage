@@ -7,12 +7,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { isNativeApp } from "@/lib/native";
 
 /**
- * Completes Google sign-in inside the Android app.
+ * Completes Google sign-in and password resets inside the Android app.
  *
  * On the web, Supabase redirects back to the site and supabase-js picks the code
  * out of the URL by itself. The app has no URL to return to, so sign-in opens
  * the system browser and Android reopens the app on the custom scheme instead.
- * This listens for that and finishes the exchange by hand.
+ * This listens for that and finishes the exchange by hand. A password reset
+ * link comes back the same way, on its own host, and ends at the page for
+ * choosing a new password rather than at the dashboard.
  *
  * Renders nothing, and does nothing at all on the web.
  */
@@ -24,7 +26,8 @@ export function NativeAuthListener() {
 
     let cancelled = false;
     const handle = App.addListener("appUrlOpen", async ({ url }) => {
-      if (!url.includes("auth-callback")) return;
+      const recovery = url.includes("password-reset");
+      if (!recovery && !url.includes("auth-callback")) return;
 
       try {
         // The scheme is not a real origin, so URL() needs a stand-in host
@@ -49,10 +52,11 @@ export function NativeAuthListener() {
         }
 
         if (cancelled) return;
-        navigate({ to: "/dashboard" });
+        navigate({ to: recovery ? "/reset-password" : "/dashboard" });
       } catch (error) {
         if (cancelled) return;
-        toast.error(error instanceof Error ? error.message : "Google sign-in failed");
+        const fallback = recovery ? "That reset link did not work" : "Google sign-in failed";
+        toast.error(error instanceof Error ? error.message : fallback);
       } finally {
         // Close the browser tab whether or not the exchange worked, so the user
         // is never left staring at a blank page.
