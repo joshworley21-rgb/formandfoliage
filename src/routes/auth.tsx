@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Browser } from "@capacitor/browser";
 import { supabase } from "@/integrations/supabase/client";
-import { isNativeApp, NATIVE_AUTH_REDIRECT } from "@/lib/native";
+import { isNativeApp, NATIVE_AUTH_REDIRECT, passwordResetRedirect } from "@/lib/native";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
@@ -30,7 +30,7 @@ export const Route = createFileRoute("/auth")({
 
 function AuthPage() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -43,6 +43,10 @@ function AuthPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (mode === "forgot") {
+      await sendResetLink();
+      return;
+    }
     setBusy(true);
     try {
       if (mode === "signup") {
@@ -61,6 +65,24 @@ function AuthPage() {
       if (data.session) navigate({ to: "/dashboard" });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Sign in failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendResetLink() {
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: passwordResetRedirect(),
+      });
+      if (error) throw error;
+      // Deliberately the same message whether or not the address has an
+      // account, so this cannot be used to find out who has one.
+      toast.success("If that address has an account, a reset link is on its way.");
+      setMode("signin");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not send the reset link");
     } finally {
       setBusy(false);
     }
@@ -113,24 +135,36 @@ function AuthPage() {
         <Card className="border-border/80 bg-card/95 shadow-sm backdrop-blur">
           <CardHeader className="space-y-1">
             <CardTitle className="font-display text-2xl">
-              {mode === "signin" ? "Sign in" : "Create your account"}
+              {mode === "signin"
+                ? "Sign in"
+                : mode === "signup"
+                  ? "Create your account"
+                  : "Reset your password"}
             </CardTitle>
-            <CardDescription>Your private garden business workspace.</CardDescription>
+            <CardDescription>
+              {mode === "forgot"
+                ? "We will email you a link to set a new one."
+                : "Your private garden business workspace."}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full"
-              disabled={busy}
-              onClick={googleSignIn}
-            >
-              Continue with Google
-            </Button>
-            <div className="flex items-center gap-3 text-xs uppercase tracking-wide text-muted-foreground">
-              <span className="h-px flex-1 bg-border" /> or{" "}
-              <span className="h-px flex-1 bg-border" />
-            </div>
+            {mode !== "forgot" ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  disabled={busy}
+                  onClick={googleSignIn}
+                >
+                  Continue with Google
+                </Button>
+                <div className="flex items-center gap-3 text-xs uppercase tracking-wide text-muted-foreground">
+                  <span className="h-px flex-1 bg-border" /> or{" "}
+                  <span className="h-px flex-1 bg-border" />
+                </div>
+              </>
+            ) : null}
             <form className="space-y-3" onSubmit={handleSubmit}>
               <div className="space-y-1.5">
                 <Label htmlFor="email">Email</Label>
@@ -143,30 +177,49 @@ function AuthPage() {
                   onChange={(e) => setEmail(e.target.value)}
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  autoComplete={mode === "signin" ? "current-password" : "new-password"}
-                  required
-                  minLength={6}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
+              {mode !== "forgot" ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                    required
+                    minLength={6}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
+              ) : null}
               <Button type="submit" className="w-full" disabled={busy}>
-                {mode === "signin" ? "Sign in" : "Create account"}
+                {mode === "signin"
+                  ? "Sign in"
+                  : mode === "signup"
+                    ? "Create account"
+                    : busy
+                      ? "Sending…"
+                      : "Email me a reset link"}
               </Button>
             </form>
+            {mode === "signin" ? (
+              <button
+                type="button"
+                className="w-full text-center text-sm text-muted-foreground underline-offset-4 hover:underline"
+                onClick={() => setMode("forgot")}
+              >
+                Forgotten your password?
+              </button>
+            ) : null}
             <button
               type="button"
               className="w-full text-center text-sm text-muted-foreground underline-offset-4 hover:underline"
-              onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
+              onClick={() => setMode(mode === "signup" ? "signin" : mode === "forgot" ? "signin" : "signup")}
             >
               {mode === "signin"
                 ? "Need an account? Create one"
-                : "Already have an account? Sign in"}
+                : mode === "signup"
+                  ? "Already have an account? Sign in"
+                  : "Back to sign in"}
             </button>
           </CardContent>
         </Card>
