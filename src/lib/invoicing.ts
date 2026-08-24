@@ -141,3 +141,29 @@ export function decidePublicQuote(input: {
     ...input,
   });
 }
+
+// --------------------------------------------------------------- Address ---
+
+export type AddressSuggestion = {
+  /** Pass back to resolveAddress when address is null. */
+  id: string | null;
+  label: string;
+  address: string | null;
+};
+
+export type AddressSearchResult = {
+  provider: "getaddress" | "photon";
+  suggestions: AddressSuggestion[];
+};
+
+export function searchAddresses(query: string) {
+  return invoke<AddressSearchResult>("address-lookup", { query });
+}
+
+/** Only needed for suggestions that arrive without an address of their own. */
+export function resolveAddress(id: string, postcode?: string) {
+  return invoke<{ provider: string; address: string }>("address-lookup", {
+    resolve: id,
+    ...(postcode ? { postcode } : {}),
+  });
+}

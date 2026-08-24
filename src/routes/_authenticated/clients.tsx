@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { AddressSearch } from "@/components/AddressSearch";
 import { AppShell } from "@/components/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -149,9 +150,23 @@ function ClientsPage() {
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="address">Address</Label>
+                {/*
+                  Search fills the field; the field stays editable underneath.
+                  A garden the lookup has never heard of, or no signal at all,
+                  must never be a reason you cannot add a client.
+                */}
+                <AddressSearch
+                  // Functional update: a tap resolves over the network, and the
+                  // name may have been typed since, so the form must not be
+                  // rebuilt from a snapshot taken before the lookup started.
+                  onPick={(address) => setForm((current) => ({ ...current, address }))}
+                />
                 <Textarea
                   id="address"
-                  rows={2}
+                  // Five lines: a full UK address is house, street, village,
+                  // town, county, postcode, and clipping the postcode is the
+                  // one line worth seeing.
+                  rows={5}
                   value={form.address}
                   onChange={(e) => setForm({ ...form, address: e.target.value })}
                 />
