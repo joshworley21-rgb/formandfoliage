@@ -15,6 +15,12 @@ export type SendEmailInput = {
   to: string;
   subject: string;
   html: string;
+  /**
+   * Plain-text alternative. Worth setting on anything sent to a customer:
+   * an HTML-only email is a small but real spam signal, and some clients
+   * show this instead.
+   */
+  text?: string;
   replyTo?: string | null;
   attachments?: EmailAttachment[];
 };
@@ -92,6 +98,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
       to: input.to,
       subject: input.subject,
       html: input.html,
+      ...(input.text ? { text: input.text } : {}),
       ...(input.replyTo ? { reply_to: input.replyTo } : {}),
       ...(input.attachments?.length
         ? {

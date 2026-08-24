@@ -980,7 +980,16 @@ export type Database = {
     Enums: {
       app_role: "owner" | "staff"
       billing_mode: "hourly" | "fixed"
-      email_event_status: "sent" | "failed" | "skipped"
+      email_event_status:
+        | "sent"
+        | "failed"
+        | "skipped"
+        | "delivered"
+        | "opened"
+        | "clicked"
+        | "bounced"
+        | "complained"
+        | "delivery_delayed"
       invoice_status: "draft" | "sent" | "paid"
       job_status: "scheduled" | "done" | "missed" | "cancelled"
       quote_status: "draft" | "sent" | "accepted" | "declined" | "expired"
@@ -1119,7 +1128,17 @@ export const Constants = {
     Enums: {
       app_role: ["owner", "staff"],
       billing_mode: ["hourly", "fixed"],
-      email_event_status: ["sent", "failed", "skipped"],
+      email_event_status: [
+        "sent",
+        "failed",
+        "skipped",
+        "delivered",
+        "opened",
+        "clicked",
+        "bounced",
+        "complained",
+        "delivery_delayed",
+      ],
       invoice_status: ["draft", "sent", "paid"],
       job_status: ["scheduled", "done", "missed", "cancelled"],
       repeat_frequency: [

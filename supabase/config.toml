@@ -39,3 +39,8 @@ verify_jwt = false
 # function is the only way that data is reachable.
 [functions.public-quote]
 verify_jwt = false
+
+# Public: Resend posts delivery reports here and has no JWT to present. Every
+# request is checked against RESEND_WEBHOOK_SECRET before anything is written.
+[functions.resend-webhook]
+verify_jwt = false
