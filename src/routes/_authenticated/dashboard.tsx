@@ -8,6 +8,7 @@ import {
   parseISO,
   startOfDay,
   startOfMonth,
+  startOfWeek,
 } from "date-fns";
 import {
   CalendarDays,
@@ -22,7 +23,6 @@ import {
 import { AppShell } from "@/components/AppShell";
 import { InvoiceReminders } from "@/components/InvoiceReminders";
 import { OwnerOnly } from "@/components/OwnerOnly";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useClients, useInvoices, useJobs, useVisits } from "@/hooks/use-crm";
@@ -65,6 +65,48 @@ const STATUS_STYLES = {
   },
 } as const;
 
+/**
+ * The week at a glance. A dot means that day carries work — enough to answer
+ * "is tomorrow busy?" without opening the calendar, which is the only question
+ * the dashboard is ever asked about the week.
+ */
+function WeekStrip({ today, busyDays }: { today: Date; busyDays: Set<string> }) {
+  const monday = startOfWeek(today, { weekStartsOn: 1 });
+  const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+
+  return (
+    <div className="mt-4 grid grid-cols-7 gap-1">
+      {days.map((day) => {
+        const isToday = isSameDay(day, today);
+        const busy = busyDays.has(format(day, "yyyy-MM-dd"));
+        return (
+          <div
+            key={day.toISOString()}
+            className={
+              isToday
+                ? "rounded-lg bg-band-foreground py-1.5 text-center text-band"
+                : "rounded-lg py-1.5 text-center"
+            }
+          >
+            <p className="figure text-[0.55rem] uppercase tracking-[0.1em] opacity-70">
+              {format(day, "EEEEE")}
+            </p>
+            <p className="figure text-sm font-semibold leading-tight">{format(day, "d")}</p>
+            <span
+              aria-hidden
+              className={
+                busy
+                  ? "mx-auto mt-0.5 block size-1 rounded-full bg-current opacity-90"
+                  : "mx-auto mt-0.5 block size-1 rounded-full bg-current opacity-0"
+              }
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function DashboardPage() {
   const today = startOfDay(new Date());
   const monthStart = startOfMonth(today);
@@ -88,6 +130,11 @@ function DashboardPage() {
   const overdue = scheduled.filter((j) => isBefore(parseISO(j.starts_at), today));
 
   const todayMinutes = todayJobs.reduce((s, j) => s + Number(j.duration_minutes ?? 0), 0);
+
+  // Which days this week carry work, for the dots under the band.
+  const busyDays = new Set(
+    scheduled.map((j) => format(parseISO(j.starts_at), "yyyy-MM-dd")),
+  );
 
   const monthVisits = visits.filter((v) => {
     const d = parseISO(v.visit_date);
@@ -116,49 +163,77 @@ function DashboardPage() {
 
   return (
     <AppShell title="Dashboard" description="Today's round first, then hours and billing.">
-      {/* 1. Today's jobs */}
-      <section className="overflow-hidden rounded-3xl border border-border bg-card">
-        <div className="flex flex-wrap items-center justify-between gap-3 p-6 pb-4 sm:p-8 sm:pb-5">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
-              {format(today, "EEEE d MMMM")}
+      {/*
+        1. Today. This is the question actually being asked at 7am, so it leads
+        the page as a solid block — countable at arm's length, in daylight.
+      */}
+      <section className="rounded-3xl bg-band p-5 text-band-foreground">
+        <div className="flex items-baseline justify-between gap-3">
+          <p className="figure text-[0.65rem] uppercase tracking-[0.14em] opacity-75">
+            {format(today, "EEE d MMMM")}
+          </p>
+          {todayMinutes > 0 ? (
+            <p className="figure text-[0.65rem] tracking-[0.14em] opacity-75">
+              {hoursLabel(todayMinutes / 60)}
             </p>
-            <h2 className="mt-2 font-display text-4xl leading-tight sm:text-5xl">
-              {todayJobs.length === 0 ? (
-                <span className="italic text-primary">Nothing booked today</span>
-              ) : (
-                <>
-                  {todayJobs.length} {todayJobs.length === 1 ? "job" : "jobs"}{" "}
-                  <span className="italic text-primary">today</span>
-                </>
-              )}
-            </h2>
-            {todayMinutes > 0 ? (
-              <p className="mt-2 text-muted-foreground">
-                {hoursLabel(todayMinutes / 60)} scheduled on the round.
-              </p>
-            ) : null}
-          </div>
-          <Button asChild size="lg">
+          ) : null}
+        </div>
+
+        <h2 className="mt-2 font-display text-4xl font-extrabold leading-none">
+          {todayJobs.length === 0 ? (
+            "Nothing booked"
+          ) : (
+            <>
+              {todayJobs.length}{" "}
+              <span className="text-xl font-semibold opacity-85">
+                {todayJobs.length === 1 ? "job" : "jobs"} today
+              </span>
+            </>
+          )}
+        </h2>
+
+        <WeekStrip today={today} busyDays={busyDays} />
+      </section>
+
+      {/* Money that needs doing, before anything else competes for attention. */}
+      <div className="mt-3">
+        <InvoiceReminders />
+      </div>
+
+      {/* Today's jobs, in order, straight under the band. */}
+      <section className="mt-3 overflow-hidden rounded-2xl border border-border bg-card">
+        <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+          <p className="figure text-[0.65rem] uppercase tracking-[0.14em] text-muted-foreground">
+            Next up
+          </p>
+          <Button asChild size="sm" variant="ghost" className="-mr-2 h-8">
             <Link to="/visits">
               <Plus className="size-4" /> Log a visit
             </Link>
           </Button>
         </div>
-
         <div className="divide-y divide-border border-t border-border">
           {todayJobs.length === 0 ? (
-            <p className="px-6 py-5 text-sm text-muted-foreground sm:px-8">
+            <p className="px-4 py-4 text-sm text-muted-foreground">
               Your day is clear — book something from the calendar.
             </p>
           ) : (
-            todayJobs.map((job) => (
-              <div key={job.id} className="flex items-center gap-4 px-6 py-3 sm:px-8">
-                <p className="w-16 shrink-0 font-display text-xl leading-none">
+            todayJobs.map((job, index) => (
+              <div
+                key={job.id}
+                className="stripe flex items-center gap-3 py-3 pl-4 pr-3"
+                style={{
+                  ["--stripe" as string]:
+                    index === 0 ? "var(--color-lime)" : "var(--color-border)",
+                }}
+              >
+                <p className="figure w-12 shrink-0 text-base font-semibold leading-none">
                   {format(parseISO(job.starts_at), "HH:mm")}
                 </p>
                 <p className="min-w-0 flex-1 truncate font-medium">{clientName(job.client_id)}</p>
-                <Badge variant="secondary">{job.duration_minutes} min</Badge>
+                <span className="figure shrink-0 text-xs text-muted-foreground">
+                  {job.duration_minutes} min
+                </span>
               </div>
             ))
           )}
@@ -182,7 +257,7 @@ function DashboardPage() {
       {/* 2. Next 7 days */}
       <Card className="mt-4">
         <CardHeader className="flex-row items-center justify-between">
-          <CardTitle className="font-display text-2xl font-normal">Next 7 days</CardTitle>
+          <CardTitle className="font-display text-xl font-bold tracking-tight">Next 7 days</CardTitle>
           <Button asChild size="sm" variant="ghost">
             <Link to="/schedule">Open calendar</Link>
           </Button>
@@ -193,38 +268,35 @@ function DashboardPage() {
           ) : (
             upcoming.map((job) => (
               <div key={job.id} className="flex items-center gap-4 px-5 py-3">
-                <div className="w-14 shrink-0 text-center">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                <div className="w-12 shrink-0 text-center">
+                  <p className="figure text-[0.6rem] uppercase tracking-[0.12em] text-muted-foreground">
                     {format(parseISO(job.starts_at), "EEE")}
                   </p>
-                  <p className="font-display text-xl leading-none">
+                  <p className="figure text-lg font-semibold leading-none">
                     {format(parseISO(job.starts_at), "d")}
                   </p>
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium">{clientName(job.client_id)}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {format(parseISO(job.starts_at), "HH:mm")}
+                  <p className="figure text-xs text-muted-foreground">
+                    {format(parseISO(job.starts_at), "HH:mm")} · {job.duration_minutes} min
                   </p>
                 </div>
-                <Badge variant="secondary">{job.duration_minutes} min</Badge>
               </div>
             ))
           )}
         </CardContent>
       </Card>
 
-      <div className="mt-4">
-        <InvoiceReminders />
-      </div>
-
       {/* 3. Hours and billing summary */}
       <div className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-border lg:grid-cols-4">
         {stats.map((s) => (
-          <div key={s.label} className="bg-card p-5">
-            <s.icon className="size-5 text-primary" />
-            <p className="mt-3 font-display text-2xl">{s.value}</p>
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">{s.label}</p>
+          <div key={s.label} className="bg-card p-4">
+            <s.icon className="size-4 text-primary" />
+            <p className="figure mt-3 text-xl font-semibold">{s.value}</p>
+            <p className="figure text-[0.6rem] uppercase tracking-[0.12em] text-muted-foreground">
+              {s.label}
+            </p>
           </div>
         ))}
       </div>
@@ -232,7 +304,7 @@ function DashboardPage() {
       {/* 4. Recent invoices with status */}
       <Card className="mt-4">
         <CardHeader className="flex-row items-center justify-between">
-          <CardTitle className="font-display text-2xl font-normal">Billing</CardTitle>
+          <CardTitle className="font-display text-xl font-bold tracking-tight">Billing</CardTitle>
           <Button asChild size="sm" variant="ghost">
             <Link to="/invoices">All invoices</Link>
           </Button>
@@ -248,17 +320,19 @@ function DashboardPage() {
                 <div key={inv.id} className="flex items-center gap-3 px-5 py-3">
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">{clientName(inv.client_id)}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {inv.number} · {format(parseISO(inv.issue_date), "d MMM yyyy")}
+                    <p className="figure truncate text-xs text-muted-foreground">
+                      {/* No year: it never fits beside the chip, and a
+                          truncated one reads worse than none. */}
+                      {inv.number} · {format(parseISO(inv.issue_date), "d MMM")}
                     </p>
                   </div>
                   <span
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide ${s.className}`}
+                    className={`figure inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[0.6rem] uppercase tracking-[0.08em] ${s.className}`}
                   >
                     <StatusIcon className="size-3.5" />
                     {s.label}
                   </span>
-                  <p className="w-24 shrink-0 text-right font-display text-lg">
+                  <p className="figure w-24 shrink-0 text-right text-base font-semibold">
                     {money(inv.total)}
                   </p>
                 </div>

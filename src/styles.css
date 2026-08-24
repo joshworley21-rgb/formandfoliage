@@ -3,8 +3,10 @@
 @import "tw-animate-css";
 
 @theme {
-  --font-sans: "Figtree", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  /* Figures only. Tabular by default, so money columns line up. */
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
 }
 
 
@@ -68,6 +70,10 @@
   --color-brown: var(--brown);
   --color-brown-foreground: var(--brown-foreground);
   --color-leaf: var(--leaf);
+  --color-lime: var(--lime);
+  --color-lime-foreground: var(--lime-foreground);
+  --color-band: var(--band);
+  --color-band-foreground: var(--band-foreground);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
@@ -75,86 +81,98 @@
 
 :root {
   --radius: 0.875rem;
-  --background: oklch(0.99 0.01 95);
-  --foreground: oklch(0.22 0.03 145);
-  --card: oklch(0.995 0.005 100);
-  --card-foreground: oklch(0.22 0.03 145);
-  --popover: oklch(0.995 0.005 100);
-  --popover-foreground: oklch(0.22 0.03 145);
-  --primary: oklch(0.35 0.04 145);
-  --primary-foreground: oklch(0.98 0.005 95);
-  --secondary: oklch(0.92 0.03 140);
-  --secondary-foreground: oklch(0.25 0.04 145);
-  --muted: oklch(0.94 0.02 140);
-  --muted-foreground: oklch(0.48 0.03 140);
-  --accent: oklch(0.62 0.08 145);
-  --accent-foreground: oklch(0.98 0.005 95);
-  --destructive: oklch(0.55 0.19 27);
-  --destructive-foreground: oklch(0.99 0.01 95);
-  --border: oklch(0.90 0.02 130);
-  --input: oklch(0.90 0.02 130);
-  --ring: oklch(0.46 0.06 145);
+  --background: oklch(0.979 0.007 124.4);
+  --foreground: oklch(0.240 0.026 160.3);
+  --card: oklch(1.000 0.000 90);
+  --card-foreground: oklch(0.240 0.026 160.3);
+  --popover: oklch(1.000 0.000 90);
+  --popover-foreground: oklch(0.240 0.026 160.3);
+  --primary: oklch(0.476 0.092 151.2);
+  --primary-foreground: oklch(0.970 0.012 133.4);
+  --secondary: oklch(0.956 0.011 128.6);
+  --secondary-foreground: oklch(0.240 0.026 160.3);
+  --muted: oklch(0.956 0.011 128.6);
+  --muted-foreground: oklch(0.536 0.023 164.0);
+  --accent: oklch(0.956 0.011 128.6);
+  --accent-foreground: oklch(0.240 0.026 160.3);
+  --destructive: oklch(0.493 0.157 31.8);
+  --destructive-foreground: oklch(0.970 0.012 133.4);
+  --border: oklch(0.921 0.014 128.6);
+  --input: oklch(0.921 0.014 128.6);
+  --ring: oklch(0.476 0.092 151.2);
   --brown: oklch(0.30 0.04 45);
-  --brown-foreground: oklch(0.98 0.005 95);
-  --leaf: oklch(0.55 0.07 145);
-  --success: oklch(0.55 0.08 145);
-  --warning: oklch(0.72 0.12 70);
-  --warning-foreground: oklch(0.25 0.05 60);
+  --brown-foreground: oklch(0.970 0.012 133.4);
+  --leaf: oklch(0.693 0.158 128.2);
+  /* Live state — the next job, the selected day. Never decoration. */
+  --lime: oklch(0.693 0.158 128.2);
+  --lime-foreground: oklch(0.240 0.026 160.3);
+  --success: oklch(0.476 0.092 151.2);
+  /* Money that is late, and nothing else. */
+  --warning: oklch(0.598 0.135 60.6);
+  --warning-foreground: oklch(0.970 0.012 133.4);
+  /* The solid block that leads a page. */
+  --band: oklch(0.476 0.092 151.2);
+  --band-foreground: oklch(0.970 0.012 133.4);
   --chart-1: oklch(0.35 0.04 145);
   --chart-2: oklch(0.46 0.06 145);
   --chart-3: oklch(0.62 0.08 145);
   --chart-4: oklch(0.78 0.10 145);
   --chart-5: oklch(0.55 0.07 100);
-  --sidebar: oklch(0.25 0.03 145);
-  --sidebar-foreground: oklch(0.95 0.015 95);
-  --sidebar-primary: oklch(0.46 0.06 145);
-  --sidebar-primary-foreground: oklch(0.99 0.01 95);
-  --sidebar-accent: oklch(0.34 0.04 145);
-  --sidebar-accent-foreground: oklch(0.97 0.012 95);
-  --sidebar-border: oklch(0.34 0.03 145);
-  --sidebar-ring: oklch(0.46 0.06 145);
+  --sidebar: oklch(0.240 0.026 160.3);
+  --sidebar-foreground: oklch(0.942 0.012 137.8);
+  --sidebar-primary: oklch(0.476 0.092 151.2);
+  --sidebar-primary-foreground: oklch(0.970 0.012 133.4);
+  --sidebar-accent: oklch(0.306 0.024 154.6);
+  --sidebar-accent-foreground: oklch(0.942 0.012 137.8);
+  --sidebar-border: oklch(0.306 0.024 154.6);
+  --sidebar-ring: oklch(0.693 0.158 128.2);
 }
 
 
 .dark {
-  --background: oklch(0.19 0.02 60);
-  --foreground: oklch(0.95 0.015 95);
-  --card: oklch(0.24 0.025 55);
-  --card-foreground: oklch(0.95 0.015 95);
-  --popover: oklch(0.24 0.025 55);
-  --popover-foreground: oklch(0.95 0.015 95);
-  --primary: oklch(0.62 0.14 145);
-  --primary-foreground: oklch(0.16 0.02 60);
-  --secondary: oklch(0.3 0.03 55);
-  --secondary-foreground: oklch(0.95 0.015 95);
-  --muted: oklch(0.3 0.03 55);
-  --muted-foreground: oklch(0.72 0.025 90);
-  --accent: oklch(0.33 0.05 130);
-  --accent-foreground: oklch(0.95 0.015 95);
-  --destructive: oklch(0.66 0.18 25);
-  --destructive-foreground: oklch(0.98 0.01 95);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 16%);
-  --ring: oklch(0.62 0.14 145);
+  --background: oklch(0.186 0.016 157.1);
+  --foreground: oklch(0.942 0.012 137.8);
+  --card: oklch(0.235 0.021 156.5);
+  --card-foreground: oklch(0.942 0.012 137.8);
+  --popover: oklch(0.235 0.021 156.5);
+  --popover-foreground: oklch(0.942 0.012 137.8);
+  --primary: oklch(0.748 0.102 150.8);
+  --primary-foreground: oklch(0.186 0.016 157.1);
+  --secondary: oklch(0.294 0.023 162.9);
+  --secondary-foreground: oklch(0.942 0.012 137.8);
+  --muted: oklch(0.294 0.023 162.9);
+  --muted-foreground: oklch(0.702 0.024 160.0);
+  --accent: oklch(0.294 0.023 162.9);
+  --accent-foreground: oklch(0.942 0.012 137.8);
+  --destructive: oklch(0.674 0.147 32.4);
+  --destructive-foreground: oklch(0.186 0.016 157.1);
+  --border: oklch(0.306 0.024 154.6);
+  --input: oklch(0.306 0.024 154.6);
+  --ring: oklch(0.748 0.102 150.8);
   --brown: oklch(0.32 0.06 40);
-  --brown-foreground: oklch(0.96 0.012 95);
-  --leaf: oklch(0.55 0.12 148);
-  --success: oklch(0.65 0.13 150);
-  --warning: oklch(0.75 0.15 70);
-  --warning-foreground: oklch(0.2 0.04 60);
+  --brown-foreground: oklch(0.942 0.012 137.8);
+  --leaf: oklch(0.810 0.160 126.1);
+  --lime: oklch(0.810 0.160 126.1);
+  --lime-foreground: oklch(0.186 0.016 157.1);
+  --success: oklch(0.748 0.102 150.8);
+  --warning: oklch(0.753 0.116 66.9);
+  --warning-foreground: oklch(0.186 0.016 157.1);
+  /* Not an inverted band — a deep leaf the white text still sits on. */
+  --band: oklch(0.365 0.070 152.0);
+  --band-foreground: oklch(0.942 0.012 137.8);
   --chart-1: oklch(0.62 0.14 145);
   --chart-2: oklch(0.55 0.08 45);
   --chart-3: oklch(0.75 0.15 70);
   --chart-4: oklch(0.5 0.1 148);
   --chart-5: oklch(0.68 0.09 120);
-  --sidebar: oklch(0.22 0.03 45);
-  --sidebar-foreground: oklch(0.95 0.015 95);
-  --sidebar-primary: oklch(0.62 0.14 145);
-  --sidebar-primary-foreground: oklch(0.16 0.02 60);
-  --sidebar-accent: oklch(0.3 0.04 45);
-  --sidebar-accent-foreground: oklch(0.96 0.012 95);
-  --sidebar-border: oklch(1 0 0 / 12%);
-  --sidebar-ring: oklch(0.62 0.14 145);
+  --sidebar: oklch(0.150 0.014 157.1);
+  --sidebar-foreground: oklch(0.942 0.012 137.8);
+  --sidebar-primary: oklch(0.365 0.070 152.0);
+  --sidebar-primary-foreground: oklch(0.942 0.012 137.8);
+  --sidebar-accent: oklch(0.235 0.021 156.5);
+  --sidebar-accent-foreground: oklch(0.942 0.012 137.8);
+  --sidebar-border: oklch(0.306 0.024 154.6);
+  --sidebar-ring: oklch(0.810 0.160 126.1);
 }
 
 
@@ -168,6 +186,34 @@
     color: var(--color-foreground);
     /* Keeps the browser's own overscroll out of the way of pull-to-refresh. */
     overscroll-behavior-y: contain;
+  }
+}
+
+/*
+ * Figures. Every number the eye has to compare down a column — money, times,
+ * durations — goes through this, so a £280 can never hide beside a £28.
+ */
+@utility figure {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/*
+ * Status as an edge stripe. A card's state is legible before any word on it
+ * is read, which is the whole point when the phone is at arm's length in
+ * daylight. Set --stripe on the element to colour it.
+ */
+@utility stripe {
+  position: relative;
+  overflow: hidden;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 4px;
+    background: var(--stripe, var(--color-border));
   }
 }
 
