@@ -129,6 +129,7 @@ Deno.serve(
           ? `Overdue invoice ${invoice.number} — payment reminder`
           : `Payment reminder — invoice ${invoice.number}`,
         html: textToHtml(bodyText),
+        text: bodyText,
       });
 
       if (!result.ok) {

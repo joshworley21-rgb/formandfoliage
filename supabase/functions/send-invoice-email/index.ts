@@ -109,9 +109,11 @@ Deno.serve(
       settings?.email_subject_template || DEFAULT_SUBJECT_TEMPLATE,
       tokens,
     );
-    const htmlBody = textToHtml(
-      fillTemplate(data.message || settings?.email_body_template || DEFAULT_BODY_TEMPLATE, tokens),
+    const textBody = fillTemplate(
+      data.message || settings?.email_body_template || DEFAULT_BODY_TEMPLATE,
+      tokens,
     );
+    const htmlBody = textToHtml(textBody);
 
     const result = await sendEmail({
       from: `${businessName} <${fromEmail}>`,
@@ -119,6 +121,7 @@ Deno.serve(
       to: client.email,
       subject,
       html: htmlBody,
+      text: textBody,
       attachments: [
         {
           filename: `${invoice.number}.pdf`,

@@ -64,13 +64,11 @@ Deno.serve(
       input.subjectTemplate || settings?.email_subject_template || DEFAULT_SUBJECT_TEMPLATE,
       tokens,
     )}`;
-    const html = textToHtml(
-      fillTemplate(
-        input.bodyTemplate || settings?.email_body_template || DEFAULT_BODY_TEMPLATE,
-        tokens,
-      ),
-      TEST_FOOTER,
+    const textBody = fillTemplate(
+      input.bodyTemplate || settings?.email_body_template || DEFAULT_BODY_TEMPLATE,
+      tokens,
     );
+    const html = textToHtml(textBody, TEST_FOOTER);
 
     const result = await sendEmail({
       from: `${businessName} <${fromEmail}>`,
@@ -78,6 +76,7 @@ Deno.serve(
       to,
       subject,
       html,
+      text: `${textBody}\n\n---\nThis was a test from the JW Garden Services CRM.`,
     });
 
     if (!result.ok) {
