@@ -2,19 +2,17 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { toast } from "sonner";
 import { App } from "@capacitor/app";
-import { Browser } from "@capacitor/browser";
 import { supabase } from "@/integrations/supabase/client";
 import { isNativeApp } from "@/lib/native";
 
 /**
- * Completes Google sign-in and password resets inside the Android app.
+ * Completes a password reset inside the Android app.
  *
- * On the web, Supabase redirects back to the site and supabase-js picks the code
- * out of the URL by itself. The app has no URL to return to, so sign-in opens
- * the system browser and Android reopens the app on the custom scheme instead.
- * This listens for that and finishes the exchange by hand. A password reset
- * link comes back the same way, on its own host, and ends at the page for
- * choosing a new password rather than at the dashboard.
+ * On the web, Supabase redirects back to the site and supabase-js picks the
+ * code out of the URL by itself. The app has no URL to return to, so the reset
+ * link comes back on a custom scheme and Android reopens the app on it. This
+ * listens for that, finishes the exchange by hand, and sends the app to the
+ * page for choosing a new password.
  *
  * Renders nothing, and does nothing at all on the web.
  */
@@ -26,8 +24,7 @@ export function NativeAuthListener() {
 
     let cancelled = false;
     const handle = App.addListener("appUrlOpen", async ({ url }) => {
-      const recovery = url.includes("password-reset");
-      if (!recovery && !url.includes("auth-callback")) return;
+      if (!url.includes("password-reset")) return;
 
       try {
         // The scheme is not a real origin, so URL() needs a stand-in host
@@ -52,15 +49,10 @@ export function NativeAuthListener() {
         }
 
         if (cancelled) return;
-        navigate({ to: recovery ? "/reset-password" : "/dashboard" });
+        navigate({ to: "/reset-password" });
       } catch (error) {
         if (cancelled) return;
-        const fallback = recovery ? "That reset link did not work" : "Google sign-in failed";
-        toast.error(error instanceof Error ? error.message : fallback);
-      } finally {
-        // Close the browser tab whether or not the exchange worked, so the user
-        // is never left staring at a blank page.
-        await Browser.close().catch(() => {});
+        toast.error(error instanceof Error ? error.message : "That reset link did not work");
       }
     });
 

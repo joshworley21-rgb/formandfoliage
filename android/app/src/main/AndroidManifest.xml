@@ -22,18 +22,8 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Brings Google sign-in back into the app once the browser has
-                 finished. Must match the redirect URL allowed in Supabase. -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="uk.co.jwgardenservices.crm" android:host="auth-callback" />
-            </intent-filter>
-
-            <!-- Brings a password reset link back into the app. Separate from
-                 the sign-in host so the app can tell the two apart. Must also
-                 be allowed as a redirect URL in Supabase. -->
+            <!-- Brings a password reset link back into the app. Must be
+                 allowed as a redirect URL in Supabase. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

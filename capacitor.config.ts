@@ -11,13 +11,6 @@ const config: CapacitorConfig = {
     // behave the same as they do on the web.
     androidScheme: "https",
   },
-  plugins: {
-    App: {
-      // Deep link used to bring Google sign-in back into the app.
-      // Must match the redirect URL allowed in the Supabase dashboard.
-      launchUrl: "uk.co.jwgardenservices.crm://auth-callback",
-    },
-  },
 };
 
 export default config;

@@ -6,9 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Browser } from "@capacitor/browser";
 import { supabase } from "@/integrations/supabase/client";
-import { isNativeApp, NATIVE_AUTH_REDIRECT, passwordResetRedirect } from "@/lib/native";
+import { passwordResetRedirect } from "@/lib/native";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
@@ -88,39 +87,6 @@ function AuthPage() {
     }
   }
 
-  async function googleSignIn() {
-    setBusy(true);
-
-    // In the Android app there is no page to redirect back to, so sign-in opens
-    // the system browser and returns through the custom scheme, which
-    // NativeAuthListener picks up.
-    if (isNativeApp()) {
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: { redirectTo: NATIVE_AUTH_REDIRECT, skipBrowserRedirect: true },
-      });
-      if (error || !data?.url) {
-        setBusy(false);
-        toast.error(error?.message || "Google sign-in failed");
-        return;
-      }
-      await Browser.open({ url: data.url });
-      setBusy(false);
-      return;
-    }
-
-    // On the web the browser is redirected to Google and comes back to
-    // /dashboard, where supabase-js completes the sign-in itself.
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: `${window.location.origin}/dashboard` },
-    });
-    if (error) {
-      setBusy(false);
-      toast.error(error.message || "Google sign-in failed");
-    }
-  }
-
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10">
       {/* Organic background shapes */}
@@ -148,23 +114,6 @@ function AuthPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {mode !== "forgot" ? (
-              <>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  disabled={busy}
-                  onClick={googleSignIn}
-                >
-                  Continue with Google
-                </Button>
-                <div className="flex items-center gap-3 text-xs uppercase tracking-wide text-muted-foreground">
-                  <span className="h-px flex-1 bg-border" /> or{" "}
-                  <span className="h-px flex-1 bg-border" />
-                </div>
-              </>
-            ) : null}
             <form className="space-y-3" onSubmit={handleSubmit}>
               <div className="space-y-1.5">
                 <Label htmlFor="email">Email</Label>
