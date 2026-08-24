@@ -32,6 +32,51 @@ export function isEmailConfigured(): boolean {
   return Boolean(apiKey());
 }
 
+/**
+ * Turn a Resend error body into a sentence worth showing someone.
+ *
+ * Resend answers with a JSON blob. Handing that to whoever is trying to send
+ * an invoice tells them nothing they can act on, and on a phone it fills the
+ * screen twice over. The raw body still goes to the function logs, where it
+ * belongs.
+ */
+export function explainResendError(status: number, body: string): string {
+  let message = "";
+  try {
+    const parsed = JSON.parse(body) as { message?: unknown };
+    if (typeof parsed?.message === "string") message = parsed.message;
+  } catch {
+    message = body.slice(0, 300);
+  }
+
+  // Resend says this about its shared test sender, onboarding@resend.dev,
+  // which may only write to the account's own address. Reaching it means no
+  // sending address was saved — not that the domain is unverified. A verified
+  // domain and an empty Settings field produce exactly this error, so blaming
+  // DNS here sends people to fix something that is not broken.
+  if (/only send testing emails to your own email address/i.test(message)) {
+    return (
+      "No sending address is saved, so this went out from Resend's shared test address, " +
+      "which can only write to your own Resend account. Put your address in Settings " +
+      "under \u201cEmails are sent from\u201d and send again."
+    );
+  }
+
+  if (status === 401 || /api key is invalid/i.test(message)) {
+    return "Resend rejected the API key. Check RESEND_API_KEY in Supabase under Edge Functions → Secrets.";
+  }
+
+  if (/domain is not verified/i.test(message)) {
+    return "The domain in your sending address is not verified with Resend. Verify it at resend.com/domains, then send again.";
+  }
+
+  if (status === 429) {
+    return "Resend is rate limiting — too many emails at once. Wait a minute and send again.";
+  }
+
+  return message || `Resend refused the email (${status}).`;
+}
+
 export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
   const key = apiKey();
   if (!key) return { ok: false, status: 0, detail: "RESEND_API_KEY is not set" };
@@ -61,7 +106,10 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
   });
 
   if (!response.ok) {
-    return { ok: false, status: response.status, detail: await response.text() };
+    const body = await response.text();
+    // The blob goes to the logs; the caller gets something a person can act on.
+    console.error("Resend rejected the send", response.status, body);
+    return { ok: false, status: response.status, detail: explainResendError(response.status, body) };
   }
 
   try {
