@@ -159,5 +159,21 @@ EXCEPTION WHEN insufficient_privilege THEN
   NULL;
 END $$;
 
+-- The delivery statuses the Resend webhook writes have to exist, or every
+-- report it receives fails on insert and the log silently stops at "sent".
+DO $$
+DECLARE _missing text;
+BEGIN
+  SELECT string_agg(want, ', ') INTO _missing
+  FROM unnest(ARRAY['sent','failed','skipped','delivered','opened','clicked',
+                    'bounced','complained','delivery_delayed']) AS want
+  WHERE want NOT IN (
+    SELECT unnest(enum_range(NULL::public.email_event_status))::text
+  );
+  IF _missing IS NOT NULL THEN
+    RAISE EXCEPTION 'email_event_status is missing: %', _missing;
+  END IF;
+END $$;
+
 RESET ROLE;
 \echo 'All schema checks passed.'

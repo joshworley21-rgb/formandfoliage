@@ -12,7 +12,9 @@ import {
   FilePlus2,
   History,
   Mail,
+  MailCheck,
   MinusCircle,
+  MousePointerClick,
   Plus,
   Trash2,
 } from "lucide-react";
@@ -436,7 +438,17 @@ const EVENT_META: Record<
   sent: { label: "Sent", icon: CheckCircle2, className: "text-primary" },
   failed: { label: "Failed", icon: AlertCircle, className: "text-destructive" },
   skipped: { label: "Not sent", icon: MinusCircle, className: "text-muted-foreground" },
+  // Reported by Resend after the fact, through the webhook.
+  delivered: { label: "Delivered", icon: MailCheck, className: "text-primary" },
+  opened: { label: "Opened", icon: Eye, className: "text-primary" },
+  clicked: { label: "Link clicked", icon: MousePointerClick, className: "text-primary" },
+  bounced: { label: "Bounced", icon: AlertCircle, className: "text-destructive" },
+  complained: { label: "Marked as spam", icon: AlertCircle, className: "text-destructive" },
+  delivery_delayed: { label: "Delayed", icon: Clock, className: "text-muted-foreground" },
 };
+
+/** The statuses whose detail line is worth showing next to the label. */
+const DETAIL_WORTH_SHOWING = new Set(["failed", "skipped", "bounced", "complained"]);
 
 function LastAttempt({ event }: { event: InvoiceEmailEvent | null }) {
   if (!event) {
@@ -455,7 +467,7 @@ function LastAttempt({ event }: { event: InvoiceEmailEvent | null }) {
       {event.recipient ? <span>to {event.recipient}</span> : null}
       <span>·</span>
       <span>{format(parseISO(event.created_at), "d MMM yyyy, HH:mm")}</span>
-      {event.detail && event.status !== "sent" ? <span>· {event.detail}</span> : null}
+      {event.detail && DETAIL_WORTH_SHOWING.has(event.status) ? <span>· {event.detail}</span> : null}
     </p>
   );
 }
