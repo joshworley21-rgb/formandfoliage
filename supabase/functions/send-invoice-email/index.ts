@@ -9,7 +9,7 @@ import { isEmailConfigured, sendEmail } from "../_shared/email.ts";
 import {
   DEFAULT_BODY_TEMPLATE,
   DEFAULT_BUSINESS_NAME,
-  DEFAULT_FROM_EMAIL,
+  NO_SENDER_MESSAGE,
   DEFAULT_SUBJECT_TEMPLATE,
   fillTemplate,
   textToHtml,
@@ -69,7 +69,11 @@ Deno.serve(
       .maybeSingle();
 
     const businessName = settings?.business_name || DEFAULT_BUSINESS_NAME;
-    const fromEmail = settings?.email || DEFAULT_FROM_EMAIL;
+    const fromEmail = settings?.email?.trim();
+    if (!fromEmail) {
+      await logEvent("failed", NO_SENDER_MESSAGE);
+      throw new Error(NO_SENDER_MESSAGE);
+    }
     // Replies go wherever the inbox is; the From address only has to be on a
     // domain Resend has verified.
     const replyTo = settings?.reply_to_email || null;

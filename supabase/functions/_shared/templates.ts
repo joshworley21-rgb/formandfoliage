@@ -26,4 +26,15 @@ export const DEFAULT_BODY_TEMPLATE =
   "Hi {{client_name}},\n\nPlease find attached invoice {{invoice_number}} for recent garden work.\n\nTotal due: {{total}}{{due_clause}}.\n\nMany thanks,\n{{business_name}}";
 
 export const DEFAULT_BUSINESS_NAME = "JW Garden Services";
-export const DEFAULT_FROM_EMAIL = "onboarding@resend.dev";
+/**
+ * Resend's shared test sender. It can only deliver to the Resend account's own
+ * address, so it is never a usable fallback for a real invoice — falling back
+ * to it turns "no sending address saved" into a 403 about testing emails.
+ * Exported only so a message can name it.
+ */
+export const RESEND_TEST_SENDER = "onboarding@resend.dev";
+
+/** Raised when nothing is saved in Settings to send from. */
+export const NO_SENDER_MESSAGE =
+  "No sending address is saved. Open Settings and fill in \u201cEmails are sent from\u201d " +
+  "with an address on a domain you have verified with Resend, then try again.";

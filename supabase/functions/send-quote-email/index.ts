@@ -5,7 +5,7 @@
 import { requireUser } from "../_shared/supabase.ts";
 import { json, serveJson } from "../_shared/http.ts";
 import { isEmailConfigured, sendEmail } from "../_shared/email.ts";
-import { DEFAULT_BUSINESS_NAME, DEFAULT_FROM_EMAIL, escapeHtml } from "../_shared/templates.ts";
+import { DEFAULT_BUSINESS_NAME, NO_SENDER_MESSAGE, escapeHtml } from "../_shared/templates.ts";
 
 type SendQuoteInput = {
   quoteId?: string;
@@ -51,7 +51,8 @@ Deno.serve(
       .maybeSingle();
 
     const businessName = settings?.business_name || DEFAULT_BUSINESS_NAME;
-    const fromEmail = settings?.email || DEFAULT_FROM_EMAIL;
+    const fromEmail = settings?.email?.trim();
+    if (!fromEmail) throw new Error(NO_SENDER_MESSAGE);
     // Replies go wherever the inbox is; the From address only has to be on a
     // domain Resend has verified.
     const replyTo = settings?.reply_to_email || null;

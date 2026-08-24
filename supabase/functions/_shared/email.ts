@@ -49,15 +49,16 @@ export function explainResendError(status: number, body: string): string {
     message = body.slice(0, 300);
   }
 
-  // The one almost everyone meets first. Until a domain is verified Resend
-  // delivers only to the address the account was opened with, and says so by
-  // naming that address in brackets.
+  // Resend says this about its shared test sender, onboarding@resend.dev,
+  // which may only write to the account's own address. Reaching it means no
+  // sending address was saved — not that the domain is unverified. A verified
+  // domain and an empty Settings field produce exactly this error, so blaming
+  // DNS here sends people to fix something that is not broken.
   if (/only send testing emails to your own email address/i.test(message)) {
-    const own = /\(([^()\s]+@[^()\s]+)\)/.exec(message)?.[1];
     return (
-      "Your sending domain is not verified with Resend yet, so it will only deliver to " +
-      (own ?? "the address the Resend account was opened with") +
-      ". Verify the domain at resend.com/domains — until then, send test invoices to that address."
+      "No sending address is saved, so this went out from Resend's shared test address, " +
+      "which can only write to your own Resend account. Put your address in Settings " +
+      "under \u201cEmails are sent from\u201d and send again."
     );
   }
 

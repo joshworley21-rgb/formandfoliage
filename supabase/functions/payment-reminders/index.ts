@@ -6,7 +6,7 @@
 import { adminClient, requireServiceRole } from "../_shared/supabase.ts";
 import { json, serveJson } from "../_shared/http.ts";
 import { isEmailConfigured, sendEmail } from "../_shared/email.ts";
-import { DEFAULT_BUSINESS_NAME, DEFAULT_FROM_EMAIL, textToHtml } from "../_shared/templates.ts";
+import { DEFAULT_BUSINESS_NAME, NO_SENDER_MESSAGE, textToHtml } from "../_shared/templates.ts";
 
 const REMINDER_AFTER_DAYS = 14;
 const REPEAT_EVERY_DAYS = 7;
@@ -90,7 +90,20 @@ Deno.serve(
         .maybeSingle();
 
       const businessName = settings?.business_name || DEFAULT_BUSINESS_NAME;
-      const fromEmail = settings?.email || DEFAULT_FROM_EMAIL;
+      const fromEmail = settings?.email?.trim();
+      // A scheduled run has nobody to tell, so it records why and moves on
+      // rather than sending from an address that cannot reach the client.
+      if (!fromEmail) {
+        await supabaseAdmin.from("invoice_email_events").insert({
+          user_id: invoice.user_id,
+          invoice_id: invoice.id,
+          status: "skipped",
+          recipient: client.email,
+          detail: `${REMINDER_TAG} ${NO_SENDER_MESSAGE}`.slice(0, 500),
+        });
+        skipped++;
+        continue;
+      }
       // Replies go wherever the inbox is; the From address only has to be on a
       // domain Resend has verified.
       const replyTo = settings?.reply_to_email || null;
