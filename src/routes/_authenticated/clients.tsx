@@ -227,12 +227,22 @@ function ClientsPage() {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {clients.map((client) => (
-            <Card key={client.id}>
+            /*
+              min-w-0 is load-bearing. A grid item defaults to min-width:auto,
+              and "truncate" sets white-space:nowrap, which makes the address
+              line's min-content width the whole address — so the track grew to
+              fit it and the card ran off the side of the phone.
+            */
+            <Card key={client.id} className="min-w-0">
               <CardContent className="flex items-start justify-between gap-3 py-5">
                 <div className="min-w-0">
                   <p className="truncate font-semibold text-foreground">{client.name}</p>
                   {client.address ? (
-                    <p className="mt-0.5 truncate text-sm text-muted-foreground">{client.address}</p>
+                    // Wrapped, not truncated: one line cuts off the postcode,
+                    // which is the half of an address worth having.
+                    <p className="mt-0.5 line-clamp-2 break-words text-sm text-muted-foreground">
+                      {client.address}
+                    </p>
                   ) : null}
                   {client.notes ? (
                     <p className="mt-1 line-clamp-2 text-sm text-foreground/80">{client.notes}</p>
@@ -245,7 +255,9 @@ function ClientsPage() {
                         : `${money(client.hourly_rate)} / hour`}
                     </Badge>
                     {client.email ? (
-                      <span className="truncate text-xs text-muted-foreground">{client.email}</span>
+                      <span className="min-w-0 truncate text-xs text-muted-foreground">
+                        {client.email}
+                      </span>
                     ) : (
                       <span className="text-xs text-warning-foreground">No email for invoices</span>
                     )}
