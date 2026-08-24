@@ -51,9 +51,9 @@ function createSupabaseClient() {
       storage: typeof window !== 'undefined' ? localStorage : undefined,
       persistSession: true,
       autoRefreshToken: true,
-      // PKCE rather than the implicit default: the Android app finishes Google
-      // sign-in by exchanging a code after the system browser hands control
-      // back, and PKCE is what makes that exchange safe.
+      // PKCE rather than the implicit default: the Android app finishes a
+      // password reset by exchanging a code after the system browser hands
+      // control back, and PKCE is what makes that exchange safe.
       flowType: 'pkce',
     }
   });

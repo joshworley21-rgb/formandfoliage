@@ -13,14 +13,6 @@ export function isNativeApp(): boolean {
   }
 }
 
-/**
- * Where Supabase should send the browser back to after Google sign-in.
- *
- * On the web that is just the app's own origin. In the Android app there is no
- * origin to come back to, so we use the custom scheme registered in
- * AndroidManifest.xml, which reopens the app.
- */
-export const NATIVE_AUTH_REDIRECT = "uk.co.jwgardenservices.crm://auth-callback";
 
 /**
  * Where Supabase should send someone back to after they follow a password
