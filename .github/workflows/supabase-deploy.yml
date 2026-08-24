@@ -58,7 +58,7 @@ jobs:
       DO_FUNCTIONS: ${{ github.event_name != 'workflow_dispatch' || inputs.functions }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Check the secrets are set
         run: |
