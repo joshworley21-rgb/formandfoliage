@@ -14,8 +14,16 @@ import {
   startOfMonth,
   startOfWeek,
 } from "date-fns";
-import { CalendarCheck, ChevronLeft, ChevronRight, ClipboardList, Plus, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import {
+  CalendarCheck,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { useIsStaff } from "@/hooks/use-workspace";
@@ -107,6 +115,7 @@ function SchedulePage() {
   });
   const saveJob = useSaveJob();
   const deleteJob = useDeleteJob();
+  const [editingJob, setEditingJob] = useState<ScheduledJob | null>(null);
   const saveVisit = useSaveVisit();
 
   const [bookingOpen, setBookingOpen] = useState(false);
@@ -244,7 +253,9 @@ function SchedulePage() {
                 <div className="space-y-2">
                   {dayJobs.map((job) => (
                     <Card key={job.id}>
-                      <CardContent className="flex items-center justify-between gap-3 py-3">
+                      {/* Stacked on a phone: four actions in a row leave the
+                          client name and time nothing to sit in. */}
+                      <CardContent className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="font-semibold">{clientName(job.client_id)}</p>
@@ -259,7 +270,7 @@ function SchedulePage() {
                             <p className="mt-0.5 line-clamp-2 text-sm text-foreground/80">{job.notes}</p>
                           ) : null}
                         </div>
-                        <div className="flex shrink-0 items-center gap-1">
+                        <div className="flex flex-wrap items-center gap-1 sm:shrink-0">
                           <Button
                             variant="outline"
                             size="sm"
@@ -272,6 +283,16 @@ function SchedulePage() {
                               <CalendarCheck className="size-4" /> Complete
                             </Button>
                           ) : null}
+                          {isStaff ? null : (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Edit job"
+                            onClick={() => setEditingJob(job)}
+                          >
+                            <Pencil className="size-4" />
+                          </Button>
+                          )}
                           {isStaff ? null : (
                           <Button
                             variant="ghost"
@@ -300,11 +321,20 @@ function SchedulePage() {
         })}
       </div>
 
-      <BookingDialog
-        open={bookingOpen}
-        onOpenChange={setBookingOpen}
+      <JobDialog
+        open={bookingOpen || editingJob !== null}
+        job={editingJob}
+        onOpenChange={(v) => {
+          if (!v) {
+            setBookingOpen(false);
+            setEditingJob(null);
+          }
+        }}
         defaultDate={view === "month" ? selectedDay : cursor}
-        onSaved={() => setBookingOpen(false)}
+        onSaved={() => {
+          setBookingOpen(false);
+          setEditingJob(null);
+        }}
         saveJob={saveJob.mutateAsync}
       />
 
@@ -371,18 +401,21 @@ function SchedulePage() {
   );
 }
 
-function BookingDialog({
+/** Books a new job, or edits one that already exists. */
+function JobDialog({
   open,
+  job,
   onOpenChange,
   defaultDate,
   onSaved,
   saveJob,
 }: {
   open: boolean;
+  job: ScheduledJob | null;
   onOpenChange: (v: boolean) => void;
   defaultDate: Date;
   onSaved: () => void;
-  saveJob: (input: { client_id: string; starts_at: string; duration_minutes?: number; notes?: string | null; series_id?: string | null }) => Promise<unknown>;
+  saveJob: (input: { id?: string; client_id: string; starts_at: string; duration_minutes?: number; notes?: string | null; series_id?: string | null }) => Promise<unknown>;
 }) {
   const { data: clients = [] } = useClients();
   const [clientId, setClientId] = useState("");
@@ -394,6 +427,37 @@ function BookingDialog({
   const [frequency, setFrequency] = useState<Frequency>("fortnightly");
   const [occurrences, setOccurrences] = useState("12");
   const [busy, setBusy] = useState(false);
+
+  // The dialog stays mounted between openings, so its fields have to be put
+  // back deliberately. Without this an edit would leave its values behind for
+  // the next booking, and a booking would open on whichever day was picked
+  // first rather than the one being looked at.
+  useEffect(() => {
+    if (!open) return;
+    if (job) {
+      const starts = parseISO(job.starts_at);
+      const mins = starts.getHours() * 60 + starts.getMinutes() + (job.duration_minutes ?? 60);
+      setClientId(job.client_id);
+      setDate(format(starts, "yyyy-MM-dd"));
+      setTime(format(starts, "HH:mm"));
+      setEndTime(
+        `${String(Math.floor(Math.min(mins, 23 * 60 + 59) / 60)).padStart(2, "0")}:${String(
+          Math.min(mins, 23 * 60 + 59) % 60,
+        ).padStart(2, "0")}`,
+      );
+      setNotes(job.notes ?? "");
+    } else {
+      setClientId("");
+      setDate(format(defaultDate, "yyyy-MM-dd"));
+      setTime("09:00");
+      setEndTime("10:00");
+      setNotes("");
+    }
+    // Repeating is a booking-time decision; editing never re-creates a series.
+    setRepeats(false);
+    setFrequency("fortnightly");
+    setOccurrences("12");
+  }, [open, job, defaultDate]);
 
   const toMinutes = (t: string) => {
     const [h, m] = t.split(":").map(Number);
@@ -423,6 +487,20 @@ function BookingDialog({
     setBusy(true);
     try {
       const first = new Date(`${date}T${time}`);
+
+      if (job) {
+        await saveJob({
+          id: job.id,
+          client_id: client.id,
+          starts_at: first.toISOString(),
+          duration_minutes: duration,
+          notes: notes || null,
+        });
+        toast.success("Job updated");
+        onSaved();
+        return;
+      }
+
       let seriesId: string | null = null;
 
       if (repeats) {
@@ -458,7 +536,8 @@ function BookingDialog({
       toast.success(repeats ? `${count} jobs booked` : "Job booked");
       onSaved();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not book job");
+      const fallback = job ? "Could not update the job" : "Could not book job";
+      toast.error(error instanceof Error ? error.message : fallback);
     } finally {
       setBusy(false);
     }
@@ -468,7 +547,7 @@ function BookingDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Book a job</DialogTitle>
+          <DialogTitle>{job ? "Edit job" : "Book a job"}</DialogTitle>
         </DialogHeader>
         <form className="space-y-3" onSubmit={submit}>
           <div className="space-y-1.5">
@@ -531,11 +610,20 @@ function BookingDialog({
               placeholder="Mow, edge, hedge front"
             />
           </div>
-          <label className="flex items-center gap-2 text-sm font-medium">
-            <Checkbox checked={repeats} onCheckedChange={(v) => setRepeats(Boolean(v))} />
-            Repeats
-          </label>
-          {repeats ? (
+          {job ? (
+            job.series_id ? (
+              <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                This visit is part of a repeating series. Changes here apply to this visit only —
+                the rest of the series is left as it is.
+              </p>
+            ) : null
+          ) : (
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <Checkbox checked={repeats} onCheckedChange={(v) => setRepeats(Boolean(v))} />
+              Repeats
+            </label>
+          )}
+          {!job && repeats ? (
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label>Frequency</Label>
@@ -567,7 +655,7 @@ function BookingDialog({
           ) : null}
           <DialogFooter>
             <Button type="submit" disabled={busy}>
-              Book
+              {job ? "Save changes" : "Book"}
             </Button>
           </DialogFooter>
         </form>
