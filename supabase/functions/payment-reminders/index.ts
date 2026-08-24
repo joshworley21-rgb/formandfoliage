@@ -124,7 +124,7 @@ Deno.serve(
           invoice_id: invoice.id,
           status: "failed",
           recipient: client.email,
-          detail: `${REMINDER_TAG} ${result.status}: ${result.detail}`.slice(0, 500),
+          detail: `${REMINDER_TAG} ${result.detail}`.slice(0, 500),
         });
         continue;
       }

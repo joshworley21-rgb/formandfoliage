@@ -126,8 +126,8 @@ Deno.serve(
 
     if (!result.ok) {
       console.error("Resend send error", result.status, result.detail);
-      await logEvent("failed", `${result.status}: ${result.detail}`.slice(0, 500));
-      throw new Error(`Resend could not send the email. ${result.status}: ${result.detail}`);
+      await logEvent("failed", result.detail.slice(0, 500));
+      throw new Error(result.detail);
     }
 
     await supabase

@@ -113,7 +113,7 @@ Deno.serve(
 
     if (!result.ok) {
       console.error("Quote send error", result.status, result.detail);
-      throw new Error(`Resend could not send the quote. ${result.status}: ${result.detail}`);
+      throw new Error(result.detail);
     }
 
     // Sending is what moves a draft along; a quote already decided stays put.
