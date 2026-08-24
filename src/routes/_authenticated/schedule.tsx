@@ -65,6 +65,7 @@ import {
   type Frequency,
   type ScheduledJob,
 } from "@/lib/crm";
+import { currentUser } from "@/lib/session";
 
 export const Route = createFileRoute("/_authenticated/schedule")({
   head: () => ({
@@ -504,11 +505,11 @@ function JobDialog({
       let seriesId: string | null = null;
 
       if (repeats) {
-        const { data: userData } = await supabase.auth.getUser();
+        const authUser = await currentUser();
         const { data, error } = await supabase
           .from("job_series")
           .insert({
-            user_id: userData.user!.id,
+            user_id: authUser!.id,
             client_id: client.id,
             frequency,
             start_date: date,

@@ -166,6 +166,8 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+    /* Keeps the browser's own overscroll out of the way of pull-to-refresh. */
+    overscroll-behavior-y: contain;
   }
 }
 

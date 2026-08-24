@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { currentUser } from "@/lib/session";
 
 export type TeamMember = Database["public"]["Tables"]["team_members"]["Row"];
 export type WorkspaceRole = "owner" | "staff";
@@ -16,9 +17,9 @@ export function useWorkspace() {
       const { data, error } = await supabase.rpc("my_workspace");
       if (error) throw error;
       const row = Array.isArray(data) ? data[0] : data;
-      const { data: auth } = await supabase.auth.getUser();
+      const authUser = await currentUser();
       return {
-        ownerId: (row?.owner_id as string) ?? auth.user?.id ?? "",
+        ownerId: (row?.owner_id as string) ?? authUser?.id ?? "",
         role: ((row?.role as WorkspaceRole) ?? "owner") satisfies WorkspaceRole,
       };
     },
@@ -50,10 +51,10 @@ export function useInviteMember() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ email, name }: { email: string; name?: string }) => {
-      const { data: auth } = await supabase.auth.getUser();
-      if (!auth.user) throw new Error("Not signed in");
+      const authUser = await currentUser();
+      if (!authUser) throw new Error("Not signed in");
       const { error } = await supabase.from("team_members").insert({
-        owner_id: auth.user.id,
+        owner_id: authUser.id,
         email: email.trim().toLowerCase(),
         name: name?.trim() || null,
       });
