@@ -20,6 +20,11 @@ name: Set up Supabase
 #                           in the password are escaped automatically, so paste
 #                           it exactly as the dashboard gives it.
 #
+#                           Also used, when migrations are not being applied,
+#                           to check the database is not behind the code. A
+#                           deploy that leaves the two out of step now fails
+#                           rather than passing quietly.
+#
 #                           The pooler is needed because Supabase's direct
 #                           database connections are IPv6-only and GitHub's
 #                           runners have no IPv6 — a direct connection fails
@@ -94,7 +99,7 @@ jobs:
       # cannot parse the URL and blames the whole string rather than the
       # password. Fix it here instead of asking anyone to escape it by hand.
       - name: Check the database URL
-        if: ${{ env.DO_MIGRATIONS == 'true' }}
+        if: ${{ env.DB_URL != '' }}
         run: |
           if ! printf '%s' "$DB_URL" | python3 scripts/normalise-db-url.py > /tmp/db-url; then
             exit 1
@@ -135,6 +140,26 @@ jobs:
             echo "**Migrations recorded:** $(psql "$DB_URL_READY" -tAc \
               "select count(*) from supabase_migrations.schema_migrations;")"
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # A merge deploys functions but deliberately leaves the database alone,
+      # so the code can move ahead of it without a word being said. That
+      # happened: a settings column stayed unapplied for two weeks and turned
+      # up as an email failure that looked like three unrelated problems.
+      # Say it out loud instead.
+      - name: Check the database is up to date
+        if: ${{ env.DO_MIGRATIONS != 'true' && env.DB_URL != '' }}
+        run: |
+          # Read the ledger separately: piping psql straight in would turn a
+          # connection failure into "every migration is missing", which reads
+          # like a catastrophe rather than a network problem.
+          if ! psql "$DB_URL_READY" -tAc \
+            "select version from supabase_migrations.schema_migrations" > /tmp/applied.txt
+          then
+            echo "Could not read the migration ledger from the database." >&2
+            echo "That is a connection or permissions problem, not drift." >&2
+            exit 1
+          fi
+          python3 scripts/check-migrations-applied.py supabase/migrations < /tmp/applied.txt
 
       - name: Deploy the Edge Functions
         if: ${{ env.DO_FUNCTIONS == 'true' }}
