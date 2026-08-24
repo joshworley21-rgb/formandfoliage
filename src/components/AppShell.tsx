@@ -7,14 +7,22 @@ import {
   Inbox,
   LayoutDashboard,
   LogOut,
+  MoreHorizontal,
   Repeat,
   Settings as SettingsIcon,
   Users,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { InstallAppBanner } from "@/components/InstallAppBanner";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { useIsStaff } from "@/hooks/use-workspace";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -33,6 +41,17 @@ const NAV = [
 
 const STAFF_NAV_PATHS = ["/schedule", "/clients"];
 
+// The phone has room for five things along the bottom, and there are nine.
+// These four are the ones wanted mid-job; everything else lives behind More,
+// which is what stops the rest — Settings and Invoices among them — from being
+// silently unreachable on a phone.
+const PHONE_BAR_PATHS: readonly string[] = [
+  "/dashboard",
+  "/schedule",
+  "/clients",
+  "/invoices",
+];
+
 export function AppShell({
   title,
   description,
@@ -46,7 +65,12 @@ export function AppShell({
 }) {
   const navigate = useNavigate();
   const isStaff = useIsStaff();
+  const [moreOpen, setMoreOpen] = useState(false);
   const nav = isStaff ? NAV.filter((item) => STAFF_NAV_PATHS.includes(item.to)) : NAV;
+
+  const barItems = nav.filter((item) => PHONE_BAR_PATHS.includes(item.to));
+  const moreItems = nav.filter((item) => !PHONE_BAR_PATHS.includes(item.to));
+  const barSlots = barItems.length + (moreItems.length > 0 ? 1 : 0);
 
   async function signOut() {
     await supabase.auth.signOut();
@@ -90,9 +114,18 @@ export function AppShell({
         <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur lg:hidden">
           <div className="flex items-center justify-between px-4 py-3">
             <Logo />
-            <Button variant="ghost" size="icon" onClick={signOut} aria-label="Sign out">
-              <LogOut className="size-4" />
-            </Button>
+            <div className="flex items-center gap-1">
+              {isStaff ? null : (
+                <Button variant="ghost" size="icon" asChild aria-label="Settings">
+                  <Link to="/settings">
+                    <SettingsIcon className="size-4" />
+                  </Link>
+                </Button>
+              )}
+              <Button variant="ghost" size="icon" onClick={signOut} aria-label="Sign out">
+                <LogOut className="size-4" />
+              </Button>
+            </div>
           </div>
         </header>
 
@@ -118,16 +151,16 @@ export function AppShell({
           <div
             className={cn(
               "grid",
-              nav.length <= 2
+              barSlots <= 2
                 ? "grid-cols-2"
-                : nav.length === 3
+                : barSlots === 3
                   ? "grid-cols-3"
-                  : nav.length === 4
+                  : barSlots === 4
                     ? "grid-cols-4"
                     : "grid-cols-5",
             )}
           >
-            {nav.slice(0, 5).map((item) => (
+            {barItems.map((item) => (
               <Link
                 key={item.to}
                 to={item.to}
@@ -143,8 +176,53 @@ export function AppShell({
                 {item.label}
               </Link>
             ))}
+            {moreItems.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setMoreOpen(true)}
+                className="flex flex-col items-center gap-1 py-2.5 text-[0.65rem] font-medium text-muted-foreground"
+              >
+                <MoreHorizontal className="size-5" />
+                More
+              </button>
+            ) : null}
           </div>
         </nav>
+
+        <Sheet open={moreOpen} onOpenChange={setMoreOpen}>
+          <SheetContent side="bottom" className="lg:hidden">
+            <SheetHeader className="text-left">
+              <SheetTitle className="font-display">Everything else</SheetTitle>
+            </SheetHeader>
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              {moreItems.map((item) => (
+                <SheetClose asChild key={item.to}>
+                  <Link
+                    to={item.to}
+                    className="flex flex-col items-center gap-2 rounded-xl border border-border bg-card px-2 py-4 text-xs font-medium text-foreground"
+                    activeProps={{
+                      className:
+                        "flex flex-col items-center gap-2 rounded-xl border border-primary bg-primary/10 px-2 py-4 text-xs font-semibold text-primary",
+                    }}
+                  >
+                    <item.icon className="size-5" />
+                    {item.label}
+                  </Link>
+                </SheetClose>
+              ))}
+            </div>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setMoreOpen(false);
+                void signOut();
+              }}
+              className="mt-4 w-full justify-start text-muted-foreground"
+            >
+              <LogOut className="size-4" /> Sign out
+            </Button>
+          </SheetContent>
+        </Sheet>
       </div>
     </div>
   );
