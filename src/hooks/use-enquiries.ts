@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { currentUser } from "@/lib/session";
 
 export type Enquiry = Database["public"]["Tables"]["enquiries"]["Row"];
 export type EnquiryStatus = "new" | "contacted" | "converted" | "closed";
@@ -53,12 +54,12 @@ export function useConvertEnquiry() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (enquiry: Enquiry) => {
-      const { data: auth } = await supabase.auth.getUser();
-      if (!auth.user) throw new Error("Not signed in");
+      const authUser = await currentUser();
+      if (!authUser) throw new Error("Not signed in");
       const { data: client, error } = await supabase
         .from("clients")
         .insert({
-          user_id: auth.user.id,
+          user_id: authUser.id,
           name: enquiry.name,
           email: enquiry.email,
           phone: enquiry.phone,

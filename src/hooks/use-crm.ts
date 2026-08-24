@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { requireUserId } from "@/lib/session";
 import { runOrQueue } from "@/lib/offline-queue";
 import type {
   Client,
@@ -16,9 +17,7 @@ import type {
 } from "@/lib/crm";
 
 async function currentUserId(): Promise<string> {
-  const { data, error } = await supabase.auth.getUser();
-  if (error || !data.user) throw new Error("Not signed in");
-  return data.user.id;
+  return requireUserId();
 }
 
 /** Owner of the workspace the signed-in user belongs to (themselves, or their employer). */

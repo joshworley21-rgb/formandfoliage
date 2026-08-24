@@ -8,6 +8,7 @@ import {
   type QuoteItemDraft,
 } from "@/lib/quotes";
 import type { Enquiry } from "@/hooks/use-enquiries";
+import { currentUser } from "@/lib/session";
 
 export function useQuotes() {
   return useQuery({
@@ -64,8 +65,8 @@ export function useSaveQuote() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: SaveQuoteInput): Promise<string> => {
-      const { data: auth } = await supabase.auth.getUser();
-      const userId = auth.user?.id;
+      const authUser = await currentUser();
+      const userId = authUser?.id;
       if (!userId) throw new Error("Not signed in");
 
       const { data: settings } = await supabase
@@ -192,8 +193,8 @@ export function useConvertQuoteToClient() {
     mutationFn: async (quote: Quote): Promise<string> => {
       if (quote.client_id) return quote.client_id;
 
-      const { data: auth } = await supabase.auth.getUser();
-      const userId = auth.user?.id;
+      const authUser = await currentUser();
+      const userId = authUser?.id;
       if (!userId) throw new Error("Not signed in");
 
       const { data: client, error } = await supabase
