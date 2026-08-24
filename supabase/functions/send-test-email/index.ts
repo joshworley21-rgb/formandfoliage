@@ -84,7 +84,7 @@ Deno.serve(
       console.error("Resend test send error", result.status, result.detail);
       return json({
         sent: false,
-        reason: result.detail.slice(0, 500),
+        reason: `${result.detail} (tried to send from ${fromEmail})`.slice(0, 500),
       });
     }
 
