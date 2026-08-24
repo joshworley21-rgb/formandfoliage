@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import {
@@ -16,7 +16,7 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { InvoiceReminders } from "@/components/InvoiceReminders";
@@ -77,6 +77,12 @@ import { buildInvoicePdf, pdfToBase64 } from "@/lib/invoice-pdf";
 import { createInvoice, sendInvoiceEmail } from "@/lib/invoicing";
 
 export const Route = createFileRoute("/_authenticated/invoices")({
+  // "Create invoice" on a reminder names the client it is nagging about, so
+  // the dialog can open on them instead of asking again.
+  validateSearch: (search: Record<string, unknown>): { client?: string | undefined } => {
+    const client = search["client"];
+    return typeof client === "string" && client ? { client } : {};
+  },
   head: () => ({
     meta: [
       { title: "Invoices — JW Garden Services CRM" },
@@ -106,7 +112,20 @@ function InvoicesPage() {
   const { data: settings } = useSettings();
   const updateInvoice = useUpdateInvoice();
   const deleteInvoice = useDeleteInvoice();
+  const { client: clientFromLink } = Route.useSearch();
+  const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
+  const [presetClient, setPresetClient] = useState<string | null>(null);
+
+  // Arriving with a client in the URL opens the dialog on them. The parameter
+  // is cleared straight away so closing the dialog and reopening it later does
+  // not silently reuse a client picked minutes ago.
+  useEffect(() => {
+    if (!clientFromLink) return;
+    setPresetClient(clientFromLink);
+    setCreating(true);
+    navigate({ to: "/invoices", search: {}, replace: true });
+  }, [clientFromLink, navigate]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [openHistory, setOpenHistory] = useState<string | null>(null);
   const [preview, setPreview] = useState<
@@ -339,7 +358,11 @@ function InvoicesPage() {
 
       <NewInvoiceDialog
         open={creating}
-        onOpenChange={setCreating}
+        initialClientId={presetClient}
+        onOpenChange={(v) => {
+          setCreating(v);
+          if (!v) setPresetClient(null);
+        }}
         unbilledVisits={visits.filter((v) => !v.billed)}
         create={async (input) => {
           const result = (await createFn({ data: input })) as { number: string };
@@ -535,11 +558,13 @@ function EmailHistory({ invoiceId }: { invoiceId: string }) {
 
 function NewInvoiceDialog({
   open,
+  initialClientId,
   onOpenChange,
   unbilledVisits,
   create,
 }: {
   open: boolean;
+  initialClientId?: string | null;
   onOpenChange: (v: boolean) => void;
   unbilledVisits: Array<{
     id: string;
@@ -567,6 +592,24 @@ function NewInvoiceDialog({
     new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
   );
 
+
+  // The dialog stays mounted between openings, so its fields are put back
+  // deliberately each time — otherwise the last invoice's notes and retainer
+  // would be waiting in the next one.
+  useEffect(() => {
+    if (!open) return;
+    const client = initialClientId ?? "";
+    setClientId(client);
+    setSelected(client ? unbilledVisits.filter((v) => v.client_id === client).map((v) => v.id) : []);
+    setRetainer("0");
+    setRetainerDescription("");
+    setNotes("");
+    setDueDate(new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10));
+    // unbilledVisits is deliberately not a dependency: it changes identity on
+    // every refetch, and re-ticking the boxes underneath someone mid-edit
+    // would be worse than starting from a slightly stale list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialClientId]);
 
   const clientVisits = useMemo(
     () => unbilledVisits.filter((v) => v.client_id === clientId),
