@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { format, parseISO } from "date-fns";
 import { BellRing } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -101,21 +102,29 @@ export function InvoiceReminders({ compact = false }: { compact?: boolean }) {
           </div>
         </div>
 
+        {/* Each name and its detail line take the full width on a phone:
+            sharing a row with the amount and the button left them about two
+            words wide. */}
         <ul className="divide-y divide-border rounded-xl border border-border bg-card">
           {reminders.map((r) => (
-            <li key={r.clientId} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
-              <div className="min-w-0 flex-1">
+            <li key={r.clientId} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
+              <div className="w-full min-w-0 sm:flex-1">
                 <p className="truncate font-medium">{r.clientName}</p>
                 <p className="text-xs text-muted-foreground">
                   {r.visits} unbilled {r.visits === 1 ? "visit" : "visits"}
                   {r.frequency ? ` · ${FREQUENCY_LABEL[r.frequency]} (bill every ${r.threshold})` : ""} · oldest{" "}
-                  {r.oldest}
+                  {format(parseISO(r.oldest), "d MMM")}
                 </p>
               </div>
               <p className="font-display text-lg">{money(r.value)}</p>
               {compact ? null : (
                 <Button asChild size="sm" variant="outline">
-                  <Link to="/invoices">Create invoice</Link>
+                  {/* Naming the client means the invoice opens on them with
+                      their visits already ticked, rather than landing on the
+                      list and asking again. */}
+                  <Link to="/invoices" search={{ client: r.clientId }}>
+                    Create invoice
+                  </Link>
                 </Button>
               )}
             </li>
