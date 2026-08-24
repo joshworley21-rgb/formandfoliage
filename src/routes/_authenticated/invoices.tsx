@@ -67,6 +67,7 @@ import {
   useVisits,
 } from "@/hooks/use-crm";
 import { supabase } from "@/integrations/supabase/client";
+import { savePdf } from "@/lib/save-pdf";
 import {
   money,
   type Client,
@@ -167,8 +168,12 @@ function InvoicesPage() {
     try {
       setBusyId(invoice.id);
       const doc = await buildPdf(invoice);
-      doc.save(`${invoice.number}.pdf`);
+      const how = await savePdf(doc, `${invoice.number}.pdf`);
+      if (how === "shared") toast.success(`${invoice.number}.pdf ready to save or send`);
     } catch (error) {
+      // Dismissing the Android share sheet reports itself as an error; there
+      // is nothing wrong and nothing to say about it.
+      if (error instanceof Error && /cancel/i.test(error.message)) return;
       toast.error(error instanceof Error ? error.message : "Could not build the PDF");
     } finally {
       setBusyId(null);
@@ -216,6 +221,7 @@ function InvoicesPage() {
     <AppShell
       title="Invoices"
       description="Build an invoice from unbilled visits, then send it with one click."
+      onRefresh={() => queryClient.refetchQueries({ type: "active" })}
       actions={
         <Button onClick={() => setCreating(true)} disabled={clients.length === 0}>
           <Plus className="size-4" /> New invoice

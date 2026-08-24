@@ -1,4 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router";
+import { PullToRefresh } from "@/components/PullToRefresh";
 import {
   CalendarDays,
   ClipboardList,
@@ -56,11 +57,17 @@ export function AppShell({
   title,
   description,
   actions,
+  onRefresh,
   children,
 }: {
   title: string;
   description?: string;
   actions?: ReactNode;
+  /**
+   * Supply this and the page can be dragged down to reload. Opt-in per page:
+   * a pull that refreshes nothing is worse than no pull at all.
+   */
+  onRefresh?: () => Promise<unknown>;
   children: ReactNode;
 }) {
   const navigate = useNavigate();
@@ -130,6 +137,7 @@ export function AppShell({
         </header>
 
         <main className="flex-1 px-4 pb-28 pt-6 lg:px-8 lg:pb-12">
+          <MaybePullToRefresh onRefresh={onRefresh}>
           <div className="mx-auto w-full max-w-5xl">
             <InstallAppBanner />
             <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
@@ -145,6 +153,7 @@ export function AppShell({
             </div>
             {children}
           </div>
+          </MaybePullToRefresh>
         </main>
 
         <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur lg:hidden">
@@ -226,4 +235,17 @@ export function AppShell({
       </div>
     </div>
   );
+}
+
+
+/** Keeps the markup identical on pages that have not opted in. */
+function MaybePullToRefresh({
+  onRefresh,
+  children,
+}: {
+  onRefresh?: (() => Promise<unknown>) | undefined;
+  children: ReactNode;
+}) {
+  if (!onRefresh) return <>{children}</>;
+  return <PullToRefresh onRefresh={onRefresh}>{children}</PullToRefresh>;
 }
