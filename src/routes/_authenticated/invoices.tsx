@@ -168,13 +168,13 @@ function InvoicesPage() {
     try {
       setBusyId(invoice.id);
       const doc = await buildPdf(invoice);
-      const how = await savePdf(doc, `${invoice.number}.pdf`);
-      if (how === "shared") toast.success(`${invoice.number}.pdf ready to save or send`);
+      const outcome = await savePdf(doc, `${invoice.number}.pdf`);
+      if (outcome.kind === "shared") toast.success(`${invoice.number}.pdf ready to save or send`);
+      if (outcome.kind === "saved") toast.success(`Saved to ${outcome.where}`);
     } catch (error) {
-      // Dismissing the Android share sheet reports itself as an error; there
-      // is nothing wrong and nothing to say about it.
-      if (error instanceof Error && /cancel/i.test(error.message)) return;
-      toast.error(error instanceof Error ? error.message : "Could not build the PDF");
+      // Whatever goes wrong, say so. This button used to fail in silence,
+      // which is how it went unnoticed that it never worked on the phone.
+      toast.error(error instanceof Error ? error.message : "Could not save the PDF");
     } finally {
       setBusyId(null);
     }

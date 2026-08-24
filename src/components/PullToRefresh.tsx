@@ -46,6 +46,12 @@ export function PullToRefresh({
     function onTouchMove(event: TouchEvent) {
       const from = start.current;
       if (!from || refreshing) return;
+      // Once this is a pull, the browser must be told to keep its hands off.
+      // Android's WebView otherwise claims the gesture for its own overscroll
+      // and fires touchcancel, which ends the drag before it ever reaches the
+      // threshold — the reason a passive listener worked in a desktop browser
+      // and did nothing at all on the phone.
+      if (active.current && event.cancelable) event.preventDefault();
       const touch = event.touches[0]!;
       const dy = touch.clientY - from.y;
       const dx = Math.abs(touch.clientX - from.x);
@@ -85,15 +91,23 @@ export function PullToRefresh({
       }
     }
 
+    function onTouchCancel() {
+      // The gesture was taken away rather than let go, so put the indicator
+      // back without refreshing.
+      start.current = null;
+      active.current = false;
+      setPull(0);
+    }
+
     window.addEventListener("touchstart", onTouchStart, { passive: true });
-    window.addEventListener("touchmove", onTouchMove, { passive: true });
+    window.addEventListener("touchmove", onTouchMove, { passive: false });
     window.addEventListener("touchend", onTouchEnd);
-    window.addEventListener("touchcancel", onTouchEnd);
+    window.addEventListener("touchcancel", onTouchCancel);
     return () => {
       window.removeEventListener("touchstart", onTouchStart);
       window.removeEventListener("touchmove", onTouchMove);
       window.removeEventListener("touchend", onTouchEnd);
-      window.removeEventListener("touchcancel", onTouchEnd);
+      window.removeEventListener("touchcancel", onTouchCancel);
     };
   }, [onRefresh, refreshing]);
 
