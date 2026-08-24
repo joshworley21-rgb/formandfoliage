@@ -203,7 +203,12 @@ export async function buildInvoicePdf({
     y += rowHeight;
   }
 
-  // Payment details (left) + totals (right)
+  // Totals first, then payment details beneath them.
+  //
+  // These used to sit side by side, which only worked while the bank
+  // details stayed narrow. A trading name long enough to wrap runs under
+  // the totals column and collides with the Total line, so the two blocks
+  // are stacked and the payment details get the full width.
   const sectionTop = y + 14;
   let totalsY = sectionTop;
   doc.setDrawColor(...RULE);
@@ -224,7 +229,7 @@ export async function buildInvoicePdf({
   doc.text(gbp(invoice.total), colAmount - 12, totalsY, { align: "right" });
   totalsY += 20;
 
-  let payY = sectionTop + 6;
+  let payY = totalsY + 16;
   const bankRows = parseBankDetails(settings?.bank_details);
   if (bankRows.length) {
     doc.setFont("helvetica", "bold");
@@ -237,7 +242,7 @@ export async function buildInvoicePdf({
       doc.setFont("helvetica", "bold");
       if (label) doc.text(`${label}:`, left, payY);
       doc.setFont("helvetica", "normal");
-      const valueLines = doc.splitTextToSize(value, 170) as string[];
+      const valueLines = doc.splitTextToSize(value, right - (left + 110)) as string[];
       doc.text(valueLines, left + 110, payY);
       payY += valueLines.length * 13 + 2;
     }
