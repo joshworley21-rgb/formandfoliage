@@ -240,14 +240,39 @@ function DashboardPage() {
         </div>
       </section>
 
+      {/*
+        Names them. "1 scheduled job is past its date" says nothing about which
+        one, so a job finished this morning and a job forgotten last week read
+        identically — and the natural assumption is that the app has failed to
+        notice the one you just did.
+      */}
       {overdue.length > 0 ? (
         <Card className="mt-4 border-destructive/40">
-          <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+          <CardContent className="space-y-3 py-4">
             <p className="text-sm font-medium">
-              {overdue.length} scheduled {overdue.length === 1 ? "job is" : "jobs are"} past their
-              date and not marked complete.
+              {overdue.length === 1
+                ? "This job is past its date"
+                : `These ${overdue.length} jobs are past their date`}{" "}
+              and not marked complete:
             </p>
-            <Button asChild size="sm" variant="outline">
+            <ul className="space-y-1">
+              {overdue.slice(0, 5).map((job) => (
+                <li key={job.id} className="flex items-baseline justify-between gap-3 text-sm">
+                  <span className="min-w-0 truncate font-medium">
+                    {clientName(job.client_id)}
+                  </span>
+                  <span className="figure shrink-0 text-xs text-muted-foreground">
+                    {format(parseISO(job.starts_at), "EEE d MMM")}
+                  </span>
+                </li>
+              ))}
+              {overdue.length > 5 ? (
+                <li className="figure text-xs text-muted-foreground">
+                  and {overdue.length - 5} more
+                </li>
+              ) : null}
+            </ul>
+            <Button asChild size="sm" variant="outline" className="h-10 w-full">
               <Link to="/schedule">Review schedule</Link>
             </Button>
           </CardContent>
