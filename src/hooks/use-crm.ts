@@ -112,17 +112,35 @@ export function useVisits(clientId?: string) {
 export function useSaveVisit() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: Partial<Visit> & { client_id: string }) => {
+    mutationFn: async ({
+      completesJobId,
+      ...input
+    }: Partial<Visit> & { client_id: string; completesJobId?: string | null }) => {
       const user_id = await currentUserId();
       // Generate the id client-side so the visit can be linked (and queued) offline.
       const id = input.id ?? crypto.randomUUID();
       const payload = { ...input, id, user_id };
-      await runOrQueue(input.id ? "Visit update" : "New visit", [
+
+      // The job and the visit are the same afternoon in the garden. Both writes
+      // go in one batch so that offline they queue together and replay in
+      // order — a completed job pointing at a visit that never arrived would be
+      // worse than neither.
+      const ops: Parameters<typeof runOrQueue>[1] = [
         input.id
           ? { kind: "update", table: "visits", payload, match: { id } }
           : { kind: "insert", table: "visits", payload },
-      ]);
-      return { id };
+      ];
+      if (completesJobId) {
+        ops.push({
+          kind: "update",
+          table: "scheduled_jobs",
+          payload: { status: "done", visit_id: id },
+          match: { id: completesJobId },
+        });
+      }
+
+      await runOrQueue(input.id ? "Visit update" : "New visit", ops);
+      return { id, completedJob: Boolean(completesJobId) };
     },
     onSuccess: () => qc.invalidateQueries(),
   });

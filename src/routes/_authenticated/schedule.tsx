@@ -56,14 +56,19 @@ import {
   useSaveJob,
   useSaveVisit,
   useStaffCompleteJob,
+  useVisits,
 } from "@/hooks/use-crm";
 import { supabase } from "@/integrations/supabase/client";
 import {
   FREQUENCY_LABELS,
+  hoursLabel,
+  money,
   priceVisit,
   type Frequency,
   type ScheduledJob,
+  type Visit,
 } from "@/lib/crm";
+import { findVisitForJob } from "@/lib/job-visit-link";
 import { currentUser } from "@/lib/session";
 
 export const Route = createFileRoute("/_authenticated/schedule")({
@@ -113,6 +118,7 @@ function SchedulePage() {
     from: range.start.toISOString(),
     to: addDays(range.end, 1).toISOString(),
   });
+  const { data: visits = [] } = useVisits();
   const saveJob = useSaveJob();
   const deleteJob = useDeleteJob();
   const [editingJob, setEditingJob] = useState<ScheduledJob | null>(null);
@@ -120,6 +126,16 @@ function SchedulePage() {
 
   const [bookingOpen, setBookingOpen] = useState(false);
   const [completing, setCompleting] = useState<ScheduledJob | null>(null);
+
+  // Visits already claimed by a job, so two jobs on one day cannot both point
+  // at the same one.
+  const claimedVisitIds = useMemo(
+    () => jobs.map((job) => job.visit_id).filter((id): id is string => Boolean(id)),
+    [jobs],
+  );
+  const alreadyLogged = completing
+    ? findVisitForJob(visits, completing.client_id, completing.starts_at, claimedVisitIds)
+    : null;
   const [sheetJob, setSheetJob] = useState<ScheduledJob | null>(null);
 
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name ?? "Client";
@@ -394,6 +410,19 @@ function SchedulePage() {
 
       <CompleteDialog
         job={completing}
+        alreadyLogged={alreadyLogged}
+        onUseLogged={async () => {
+          if (!completing || !alreadyLogged) return;
+          await saveJob.mutateAsync({
+            id: completing.id,
+            client_id: completing.client_id,
+            starts_at: completing.starts_at,
+            status: "done",
+            visit_id: alreadyLogged.id,
+          });
+          setCompleting(null);
+          toast.success("Job completed using the visit already logged");
+        }}
         onClose={() => setCompleting(null)}
         defaultHourlyRate={
           completing ? Number(clients.find((c) => c.id === completing.client_id)?.hourly_rate ?? 0) : 0
@@ -715,6 +744,8 @@ function JobDialog({
 function CompleteDialog({
   job,
   clientName,
+  alreadyLogged,
+  onUseLogged,
   onClose,
   onComplete,
   hideMaterials,
@@ -724,6 +755,9 @@ function CompleteDialog({
 }: {
   job: ScheduledJob | null;
   clientName: string;
+  /** A visit logged for this client on this day that no job has claimed. */
+  alreadyLogged?: Visit | null;
+  onUseLogged?: () => Promise<void>;
   hideMaterials?: boolean;
   defaultHourlyRate?: number;
   defaultDayRate?: number;
@@ -743,6 +777,9 @@ function CompleteDialog({
   const [payMode, setPayMode] = useState<"hourly" | "day">(defaultPayMode);
   const [rate, setRate] = useState("0");
   const [days, setDays] = useState("1");
+  // Set when the offer to reuse a logged visit is turned down, so the form
+  // appears in its place rather than in addition to it.
+  const [enteringAnyway, setEnteringAnyway] = useState(false);
 
   const rateFor = (mode: "hourly" | "day") =>
     String(Number((mode === "day" ? defaultDayRate : defaultHourlyRate) || 0));
@@ -766,6 +803,7 @@ function CompleteDialog({
           setPayMode(defaultPayMode);
           setRate(rateFor(defaultPayMode));
           setDays("1");
+          setEnteringAnyway(false);
         }
       }}
     >
@@ -774,6 +812,54 @@ function CompleteDialog({
         <DialogHeader>
           <DialogTitle>Complete job — {clientName}</DialogTitle>
         </DialogHeader>
+
+        {/*
+          The hours for this day are already written down. Asking for them a
+          second time is how the same afternoon ended up logged twice.
+        */}
+        {alreadyLogged && !enteringAnyway ? (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              A visit is already logged for {clientName} on{" "}
+              {format(parseISO(alreadyLogged.visit_date), "d MMM")}.
+            </p>
+            <div className="rounded-xl border border-border bg-secondary/50 p-3">
+              <p className="figure text-base font-semibold">
+                {hoursLabel(Number(alreadyLogged.hours))} · {money(Number(alreadyLogged.amount))}
+              </p>
+              {alreadyLogged.description ? (
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  {alreadyLogged.description}
+                </p>
+              ) : null}
+            </div>
+            <div className="flex flex-col gap-2">
+              <Button
+                className="h-11"
+                disabled={busy}
+                onClick={async () => {
+                  if (!onUseLogged) return;
+                  setBusy(true);
+                  try {
+                    await onUseLogged();
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                <CalendarCheck className="size-4" /> Complete using this visit
+              </Button>
+              <Button
+                variant="ghost"
+                className="h-11"
+                disabled={busy}
+                onClick={() => setEnteringAnyway(true)}
+              >
+                Log separate hours instead
+              </Button>
+            </div>
+          </div>
+        ) : (
         <form
           className="space-y-3"
           onSubmit={async (e) => {
@@ -886,6 +972,7 @@ function CompleteDialog({
             </Button>
           </DialogFooter>
         </form>
+        )}
       </DialogContent>
     </Dialog>
   );

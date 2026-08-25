@@ -25,8 +25,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { useClients, useDeleteVisit, useSaveVisit, useVisits } from "@/hooks/use-crm";
+import { useClients, useDeleteVisit, useJobs, useSaveVisit, useVisits } from "@/hooks/use-crm";
 import { hoursLabel, money, priceVisit, type Visit } from "@/lib/crm";
+import { findJobForVisit } from "@/lib/job-visit-link";
 
 export const Route = createFileRoute("/_authenticated/visits")({
   head: () => ({
@@ -51,6 +52,20 @@ function todayISO() {
 function VisitsPage() {
   const { data: clients = [] } = useClients();
   const { data: visits = [], isLoading } = useVisits();
+
+  // Jobs around today, to spot the one a visit finishes off. Bounded rather
+  // than every job ever, and memoised so the query key does not change on
+  // every render. A visit dated outside this window simply links nothing,
+  // which is the same as the old behaviour.
+  const jobWindow = useMemo(() => {
+    const now = new Date();
+    return {
+      from: new Date(now.getTime() - 90 * 86400000).toISOString(),
+      to: new Date(now.getTime() + 30 * 86400000).toISOString(),
+    };
+  }, []);
+  const { data: jobs = [] } = useJobs(jobWindow);
+
   const save = useSaveVisit();
   const remove = useDeleteVisit();
 
@@ -128,6 +143,11 @@ function VisitsPage() {
       return;
     }
 
+    // A visit logged for a day this client was booked in is that job, done.
+    // Only on a new visit: editing one months later should not quietly tick
+    // something off the schedule.
+    const jobDone = editing ? null : findJobForVisit(jobs, client.id, date);
+
     try {
       await save.mutateAsync({
         ...(editing ? { id: editing.id } : {}),
@@ -137,9 +157,16 @@ function VisitsPage() {
         materials_cost: Number(materials) || 0,
         description: description || null,
         amount: computedAmount,
+        ...(jobDone ? { completesJobId: jobDone.id } : {}),
       });
 
-      toast.success(editing ? "Visit updated" : "Visit logged");
+      toast.success(
+        editing
+          ? "Visit updated"
+          : jobDone
+            ? `Visit logged — ${client.name}'s job is marked complete`
+            : "Visit logged",
+      );
       setOpen(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save visit");
