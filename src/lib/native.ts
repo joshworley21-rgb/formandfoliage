@@ -29,3 +29,23 @@ export const NATIVE_RECOVERY_REDIRECT = "uk.co.jwgardenservices.crm://password-r
 export function passwordResetRedirect(): string {
   return isNativeApp() ? NATIVE_RECOVERY_REDIRECT : `${window.location.origin}/reset-password`;
 }
+
+/**
+ * Open a link, by whatever means the platform actually has.
+ *
+ * On the web this is a new tab. Inside the app a target="_blank" anchor opens
+ * nothing at all — which is how the Preview button came to look broken — so
+ * the link goes to the share sheet instead. That is the more useful thing
+ * regardless: a link you are putting on your website needs to get out of the
+ * app, not be looked at inside it.
+ */
+export async function openOrShare(url: string, title: string): Promise<void> {
+  if (!isNativeApp()) {
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (!opened) throw new Error("Your browser blocked the new tab.");
+    return;
+  }
+
+  const { Share } = await import("@capacitor/share");
+  await Share.share({ title, text: url, url });
+}

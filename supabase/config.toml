@@ -24,6 +24,11 @@ verify_jwt = true
 [functions.send-quote-email]
 verify_jwt = true
 
+# Called by the signed-in app while a client address is being typed. It proxies
+# a metered third-party lookup, so it is not left open to the internet.
+[functions.address-lookup]
+verify_jwt = true
+
 # Public: the customer-facing enquiry form posts here from any website, so there
 # is no JWT to verify. Protected by the owner's enquiry_key and a honeypot field.
 [functions.public-enquiry]

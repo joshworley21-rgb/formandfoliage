@@ -18,7 +18,7 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { InvoiceReminders } from "@/components/InvoiceReminders";
@@ -34,7 +34,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -101,11 +100,98 @@ export const Route = createFileRoute("/_authenticated/invoices")({
   ),
 });
 
-const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline"> = {
-  draft: "outline",
-  sent: "default",
-  paid: "secondary",
+/**
+ * Status, said twice on purpose: once as the card's edge stripe, which is
+ * readable before any word on it, and once as a chip for when you need the
+ * exact word. Amber appears here and nowhere else in the app, so on this page
+ * it can only ever mean money that is late.
+ */
+const STATUS_LOOK: Record<
+  string,
+  { stripe: string; chip: string; label: string }
+> = {
+  draft: {
+    stripe: "var(--color-border)",
+    chip: "border-border text-muted-foreground",
+    label: "Draft",
+  },
+  sent: {
+    stripe: "var(--color-lime)",
+    chip: "border-border text-muted-foreground",
+    label: "Sent",
+  },
+  paid: {
+    stripe: "var(--color-primary)",
+    chip: "border-primary/40 text-primary",
+    label: "Paid",
+  },
 };
+
+/** Sent, issued more than 30 days ago, and still not paid. */
+function daysOverdue(invoice: Invoice): number {
+  if (invoice.status === "paid") return 0;
+  const days = Math.floor(
+    (Date.now() - parseISO(invoice.issue_date).getTime()) / 86_400_000,
+  );
+  return days > 30 ? days - 30 : 0;
+}
+
+/**
+ * One invoice. The figure is the point of the card, so it sits alone on the
+ * right in the tabular face; everything else is subordinate to it.
+ */
+function InvoiceCard({
+  invoice,
+  clientName,
+  children,
+}: {
+  invoice: Invoice;
+  clientName: string;
+  children: ReactNode;
+}) {
+  const look = STATUS_LOOK[invoice.status] ?? STATUS_LOOK["draft"]!;
+  const late = daysOverdue(invoice);
+
+  return (
+    <Card
+      className="stripe gap-0 overflow-hidden py-0"
+      style={{ ["--stripe" as string]: late > 0 ? "var(--color-warning)" : look.stripe }}
+    >
+      <CardContent className="space-y-3 py-4 pl-4 pr-3">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+          <div className="min-w-0">
+            <p className="figure font-semibold">{invoice.number}</p>
+            <p className="figure text-xs text-muted-foreground">
+              {clientName} · {format(parseISO(invoice.issue_date), "d MMM yyyy")}
+              {invoice.period_start && invoice.period_end
+                ? ` · ${invoice.period_start} – ${invoice.period_end}`
+                : ""}
+            </p>
+          </div>
+          <p className="figure shrink-0 text-lg font-semibold leading-none">
+            {money(invoice.total)}
+          </p>
+        </div>
+
+        <div>
+          {late > 0 ? (
+            <span className="figure inline-flex items-center rounded-full border border-warning px-2 py-0.5 text-[0.6rem] uppercase tracking-[0.08em] text-warning">
+              {late} {late === 1 ? "day" : "days"} over
+            </span>
+          ) : (
+            <span
+              className={`figure inline-flex items-center rounded-full border px-2 py-0.5 text-[0.6rem] uppercase tracking-[0.08em] ${look.chip}`}
+            >
+              {look.label}
+            </span>
+          )}
+        </div>
+
+        {children}
+      </CardContent>
+    </Card>
+  );
+}
 
 function InvoicesPage() {
   const { data: clients = [] } = useClients();
@@ -217,6 +303,10 @@ function InvoicesPage() {
     }
   }
 
+  const unpaid = invoices.filter((i) => i.status !== "paid");
+  const owedTotal = unpaid.reduce((sum, i) => sum + Number(i.total), 0);
+  const unpaidCount = unpaid.length;
+
   return (
     <AppShell
       title="Invoices"
@@ -228,7 +318,20 @@ function InvoicesPage() {
         </Button>
       }
     >
-      <div className="mb-4">
+      {/* What is owed leads, because it is the only number this page exists for. */}
+      <section className="mb-3 rounded-3xl bg-band p-5 text-band-foreground">
+        <div className="flex items-baseline justify-between gap-3">
+          <p className="figure text-[0.65rem] uppercase tracking-[0.14em] opacity-75">
+            Owed to you
+          </p>
+          <p className="figure text-[0.65rem] uppercase tracking-[0.14em] opacity-75">
+            {unpaidCount} unpaid
+          </p>
+        </div>
+        <p className="figure mt-1.5 text-4xl font-semibold leading-none">{money(owedTotal)}</p>
+      </section>
+
+      <div className="mb-3">
         <InvoiceReminders compact />
       </div>
 
@@ -244,46 +347,34 @@ function InvoicesPage() {
       ) : (
         <div className="space-y-2">
           {invoices.map((invoice) => (
-            <Card key={invoice.id}>
-              <CardContent className="space-y-3 py-4">
-              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-semibold">{invoice.number}</p>
-                    <Badge variant={STATUS_VARIANT[invoice.status] ?? "outline"}>
-                      {invoice.status}
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {clientName(invoice.client_id)} ·{" "}
-                    {format(parseISO(invoice.issue_date), "d MMM yyyy")}
-                    {invoice.period_start && invoice.period_end
-                      ? ` · ${invoice.period_start} – ${invoice.period_end}`
-                      : ""}
-                  </p>
-                </div>
-                <p className="shrink-0 font-display text-lg font-semibold">
-                  {money(invoice.total)}
-                </p>
+            <InvoiceCard
+              key={invoice.id}
+              invoice={invoice}
+              clientName={clientName(invoice.client_id)}
+            >
+              {/* The two actions this card is for, at thumb height. */}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-10 flex-1"
+                  disabled={busyId === invoice.id}
+                  onClick={() => openPreview(invoice, "download")}
+                >
+                  <Eye className="size-4" /> Preview
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-10 flex-1"
+                  disabled={busyId === invoice.id}
+                  onClick={() => sendOneClick(invoice)}
+                >
+                  <Mail className="size-4" /> {invoice.status === "draft" ? "Send" : "Resend"}
+                </Button>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
 
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busyId === invoice.id}
-                    onClick={() => openPreview(invoice, "download")}
-                  >
-                    <Eye className="size-4" /> Preview
-                  </Button>
-                  <Button
-                    size="sm"
-                    disabled={busyId === invoice.id}
-                    onClick={() => sendOneClick(invoice)}
-                  >
-                    <Mail className="size-4" /> {invoice.status === "draft" ? "Send" : "Resend"}
-                  </Button>
-
+              {/* Everything else stays small, because it is not what you came for. */}
+              <div className="flex flex-wrap items-center gap-1">
                   {invoice.status !== "paid" ? (
                     <Button
                       variant="ghost"
@@ -358,8 +449,7 @@ function InvoicesPage() {
                 event={emailEvents.find((e) => e.invoice_id === invoice.id) ?? null}
               />
               {openHistory === invoice.id ? <EmailHistory invoiceId={invoice.id} /> : null}
-              </CardContent>
-            </Card>
+            </InvoiceCard>
           ))}
         </div>
       )}
@@ -426,13 +516,6 @@ function InvoicesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <div className="mt-6">
-        <DeliveryLog
-          events={emailEvents}
-          invoiceNumber={(id) => invoices.find((i) => i.id === id)?.number ?? "Invoice"}
-        />
-      </div>
     </AppShell>
   );
 }
@@ -475,54 +558,6 @@ function LastAttempt({ event }: { event: InvoiceEmailEvent | null }) {
       <span>{format(parseISO(event.created_at), "d MMM yyyy, HH:mm")}</span>
       {event.detail && DETAIL_WORTH_SHOWING.has(event.status) ? <span>· {event.detail}</span> : null}
     </p>
-  );
-}
-
-function DeliveryLog({
-  events,
-  invoiceNumber,
-}: {
-  events: InvoiceEmailEvent[];
-  invoiceNumber: (invoiceId: string) => string;
-}) {
-  return (
-    <Card>
-      <CardContent className="space-y-3 py-4">
-        <div>
-          <p className="font-display text-lg font-semibold">Delivery log</p>
-          <p className="text-sm text-muted-foreground">
-            Every invoice email attempt, newest first, with the timestamp and result.
-          </p>
-        </div>
-        {events.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No invoice emails sent yet.</p>
-        ) : (
-          <ul className="divide-y divide-border rounded-xl border border-border">
-            {events.map((event) => {
-              const meta = EVENT_META[event.status] ?? EVENT_META["skipped"]!;
-              const Icon = meta.icon;
-              return (
-                <li key={event.id} className="flex items-start gap-3 px-3 py-2.5 text-sm">
-                  <Icon className={`mt-0.5 size-4 shrink-0 ${meta.className}`} />
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium">
-                      {invoiceNumber(event.invoice_id)} · {meta.label}
-                      {event.recipient ? ` · ${event.recipient}` : ""}
-                    </p>
-                    {event.detail ? (
-                      <p className="break-words text-xs text-muted-foreground">{event.detail}</p>
-                    ) : null}
-                  </div>
-                  <p className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
-                    {format(parseISO(event.created_at), "d MMM yyyy, HH:mm")}
-                  </p>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
   );
 }
 

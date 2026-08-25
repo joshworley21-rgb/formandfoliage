@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { LOGO_URL } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 
@@ -20,6 +20,32 @@ export const Route = createFileRoute("/")({
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
+  /**
+   * Opening the app landed here every time, on a page whose only purpose is to
+   * offer a Login button — so signing in was a tap you made every morning even
+   * though the session had never expired.
+   *
+   * Runs on the client only. The page is prerendered for the website, and a
+   * redirect decided on the server would either bake itself into that HTML or
+   * ask a build machine who is signed in.
+   */
+  beforeLoad: async () => {
+    if (typeof window === "undefined") return;
+
+    // Imported here rather than at the top of the file: this page is
+    // prerendered, and the Capacitor runtime is not something a build machine
+    // can load — pulling it into the server graph broke the prerender outright.
+    const [{ currentUser }, { isNativeApp }] = await Promise.all([
+      import("@/lib/session"),
+      import("@/lib/native"),
+    ]);
+
+    if (await currentUser()) throw redirect({ to: "/dashboard" });
+
+    // In the app there is no marketing page worth showing: nobody installs the
+    // APK to be told what it does.
+    if (isNativeApp()) throw redirect({ to: "/auth" });
+  },
   component: Landing,
 });
 

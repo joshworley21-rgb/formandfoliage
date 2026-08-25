@@ -28,7 +28,6 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { useIsStaff } from "@/hooks/use-workspace";
 import { JobSheetDialog } from "@/components/JobSheetDialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -57,14 +56,19 @@ import {
   useSaveJob,
   useSaveVisit,
   useStaffCompleteJob,
+  useVisits,
 } from "@/hooks/use-crm";
 import { supabase } from "@/integrations/supabase/client";
 import {
   FREQUENCY_LABELS,
+  hoursLabel,
+  money,
   priceVisit,
   type Frequency,
   type ScheduledJob,
+  type Visit,
 } from "@/lib/crm";
+import { findVisitForJob } from "@/lib/job-visit-link";
 import { currentUser } from "@/lib/session";
 
 export const Route = createFileRoute("/_authenticated/schedule")({
@@ -114,6 +118,7 @@ function SchedulePage() {
     from: range.start.toISOString(),
     to: addDays(range.end, 1).toISOString(),
   });
+  const { data: visits = [] } = useVisits();
   const saveJob = useSaveJob();
   const deleteJob = useDeleteJob();
   const [editingJob, setEditingJob] = useState<ScheduledJob | null>(null);
@@ -121,6 +126,16 @@ function SchedulePage() {
 
   const [bookingOpen, setBookingOpen] = useState(false);
   const [completing, setCompleting] = useState<ScheduledJob | null>(null);
+
+  // Visits already claimed by a job, so two jobs on one day cannot both point
+  // at the same one.
+  const claimedVisitIds = useMemo(
+    () => jobs.map((job) => job.visit_id).filter((id): id is string => Boolean(id)),
+    [jobs],
+  );
+  const alreadyLogged = completing
+    ? findVisitForJob(visits, completing.client_id, completing.starts_at, claimedVisitIds)
+    : null;
   const [sheetJob, setSheetJob] = useState<ScheduledJob | null>(null);
 
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name ?? "Client";
@@ -171,7 +186,7 @@ function SchedulePage() {
           <Button variant="outline" size="icon" onClick={() => shift(1)} aria-label="Next">
             <ChevronRight className="size-4" />
           </Button>
-          <span className="ml-2 font-display text-lg font-semibold">{headingLabel}</span>
+          <span className="ml-2 font-display text-lg font-bold tracking-tight">{headingLabel}</span>
         </div>
         <Tabs value={view} onValueChange={(v) => setView(v as View)}>
           <TabsList>
@@ -184,7 +199,7 @@ function SchedulePage() {
 
       {view === "month" ? (
         <Card className="overflow-hidden py-0">
-          <div className="grid grid-cols-7 border-b border-border bg-secondary text-center text-[0.7rem] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="figure grid grid-cols-7 border-b border-border bg-secondary text-center text-[0.6rem] uppercase tracking-[0.1em] text-muted-foreground">
             {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
               <div key={d} className="py-2">
                 {d}
@@ -205,27 +220,43 @@ function SchedulePage() {
                   } ${selected ? "ring-2 ring-inset ring-primary" : ""}`}
                 >
                   <span
-                    className={`inline-flex size-6 items-center justify-center rounded-full text-xs font-semibold ${
+                    className={`figure inline-flex size-6 items-center justify-center rounded-full text-xs font-semibold ${
                       isToday(day) ? "bg-primary text-primary-foreground" : ""
                     }`}
                   >
                     {format(day, "d")}
                   </span>
-                  <div className="mt-1 space-y-0.5">
+                  {/*
+                    A phone gives each cell about fifty pixels. A name truncated
+                    to "09:…" tells you nothing, so on a phone the cell says only
+                    how much work is on the day, as dots; the names appear from
+                    the tablet breakpoint up, where they actually fit.
+                  */}
+                  <div className="mt-1 flex gap-0.5 sm:hidden">
+                    {dayJobs.slice(0, 4).map((job) => (
+                      <span
+                        key={job.id}
+                        className={`size-1.5 rounded-full ${
+                          job.status === "done" ? "bg-primary" : "bg-lime"
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <div className="mt-1 hidden space-y-0.5 sm:block">
                     {dayJobs.slice(0, 2).map((job) => (
                       <p
                         key={job.id}
                         className={`truncate rounded px-1 py-0.5 text-[0.65rem] font-medium ${
                           job.status === "done"
                             ? "bg-secondary text-muted-foreground line-through"
-                            : "bg-primary/12 text-primary"
+                            : "bg-lime/20 text-foreground"
                         }`}
                       >
                         {format(parseISO(job.starts_at), "HH:mm")} {clientName(job.client_id)}
                       </p>
                     ))}
                     {dayJobs.length > 2 ? (
-                      <p className="px-1 text-[0.6rem] text-muted-foreground">
+                      <p className="figure px-1 text-[0.6rem] text-muted-foreground">
                         +{dayJobs.length - 2} more
                       </p>
                     ) : null}
@@ -242,10 +273,20 @@ function SchedulePage() {
           const dayJobs = jobsOn(day);
           return (
             <div key={day.toISOString()}>
-              <h2 className="mb-2 text-sm font-semibold text-foreground">
-                {format(day, "EEEE d MMMM")}
-                {isToday(day) ? <span className="ml-2 text-primary">Today</span> : null}
-              </h2>
+              {isToday(day) ? (
+                <div className="mb-2 flex items-baseline justify-between rounded-2xl bg-band px-4 py-3 text-band-foreground">
+                  <p className="figure text-[0.6rem] uppercase tracking-[0.14em] opacity-75">
+                    Today
+                  </p>
+                  <p className="font-display text-lg font-bold leading-none">
+                    {format(day, "EEE d MMM")}
+                  </p>
+                </div>
+              ) : (
+                <h2 className="figure mb-2 text-[0.65rem] uppercase tracking-[0.12em] text-muted-foreground">
+                  {format(day, "EEEE d MMMM")}
+                </h2>
+              )}
               {dayJobs.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
                   Nothing booked.
@@ -253,63 +294,85 @@ function SchedulePage() {
               ) : (
                 <div className="space-y-2">
                   {dayJobs.map((job) => (
-                    <Card key={job.id}>
-                      {/* Stacked on a phone: four actions in a row leave the
-                          client name and time nothing to sit in. */}
-                      <CardContent className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-semibold">{clientName(job.client_id)}</p>
-                            <Badge variant={job.status === "done" ? "secondary" : "default"}>
-                              {job.status}
-                            </Badge>
+                    <Card
+                      key={job.id}
+                      className="stripe gap-0 overflow-hidden py-0"
+                      style={{
+                        ["--stripe" as string]:
+                          job.status === "done"
+                            ? "var(--color-primary)"
+                            : isToday(day)
+                              ? "var(--color-lime)"
+                              : "var(--color-border)",
+                      }}
+                    >
+                      {/* The two actions wanted mid-job sit on their own row at
+                          thumb height; edit and delete stay small, because they
+                          are not what this card is for. */}
+                      <CardContent className="space-y-2.5 py-3 pl-4 pr-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate font-semibold">{clientName(job.client_id)}</p>
+                            <p className="figure text-xs text-muted-foreground">
+                              {job.duration_minutes} min
+                              {job.status === "done" ? " · done" : ""}
+                            </p>
                           </div>
-                          <p className="text-sm text-muted-foreground">
-                            {format(parseISO(job.starts_at), "HH:mm")} · {job.duration_minutes} min
+                          <p className="figure shrink-0 text-base font-semibold leading-none">
+                            {format(parseISO(job.starts_at), "HH:mm")}
                           </p>
-                          {job.notes ? (
-                            <p className="mt-0.5 line-clamp-2 text-sm text-foreground/80">{job.notes}</p>
-                          ) : null}
                         </div>
-                        <div className="flex flex-wrap items-center gap-1 sm:shrink-0">
+
+                        {job.notes ? (
+                          <p className="line-clamp-2 text-sm text-muted-foreground">{job.notes}</p>
+                        ) : null}
+
+                        <div className="flex items-center gap-2">
                           <Button
                             variant="outline"
                             size="sm"
+                            className="h-10 flex-1"
                             onClick={() => setSheetJob(job)}
                           >
                             <ClipboardList className="size-4" /> Job sheet
                           </Button>
                           {job.status !== "done" ? (
-                            <Button size="sm" onClick={() => setCompleting(job)}>
+                            <Button
+                              size="sm"
+                              className="h-10 flex-1"
+                              onClick={() => setCompleting(job)}
+                            >
                               <CalendarCheck className="size-4" /> Complete
                             </Button>
                           ) : null}
                           {isStaff ? null : (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label="Edit job"
-                            onClick={() => setEditingJob(job)}
-                          >
-                            <Pencil className="size-4" />
-                          </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-10 shrink-0"
+                              aria-label="Edit job"
+                              onClick={() => setEditingJob(job)}
+                            >
+                              <Pencil className="size-4" />
+                            </Button>
                           )}
                           {isStaff ? null : (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label="Delete job"
-                            onClick={async () => {
-                              const wholeSeries =
-                                job.series_id && confirm("Delete the whole repeating series?")
-                                  ? job.series_id
-                                  : null;
-                              await deleteJob.mutateAsync({ id: job.id, wholeSeries });
-                              toast.success("Job removed");
-                            }}
-                          >
-                            <Trash2 className="size-4 text-destructive" />
-                          </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-10 shrink-0"
+                              aria-label="Delete job"
+                              onClick={async () => {
+                                const wholeSeries =
+                                  job.series_id && confirm("Delete the whole repeating series?")
+                                    ? job.series_id
+                                    : null;
+                                await deleteJob.mutateAsync({ id: job.id, wholeSeries });
+                                toast.success("Job removed");
+                              }}
+                            >
+                              <Trash2 className="size-4 text-destructive" />
+                            </Button>
                           )}
                         </div>
                       </CardContent>
@@ -347,6 +410,19 @@ function SchedulePage() {
 
       <CompleteDialog
         job={completing}
+        alreadyLogged={alreadyLogged}
+        onUseLogged={async () => {
+          if (!completing || !alreadyLogged) return;
+          await saveJob.mutateAsync({
+            id: completing.id,
+            client_id: completing.client_id,
+            starts_at: completing.starts_at,
+            status: "done",
+            visit_id: alreadyLogged.id,
+          });
+          setCompleting(null);
+          toast.success("Job completed using the visit already logged");
+        }}
         onClose={() => setCompleting(null)}
         defaultHourlyRate={
           completing ? Number(clients.find((c) => c.id === completing.client_id)?.hourly_rate ?? 0) : 0
@@ -668,6 +744,8 @@ function JobDialog({
 function CompleteDialog({
   job,
   clientName,
+  alreadyLogged,
+  onUseLogged,
   onClose,
   onComplete,
   hideMaterials,
@@ -677,6 +755,9 @@ function CompleteDialog({
 }: {
   job: ScheduledJob | null;
   clientName: string;
+  /** A visit logged for this client on this day that no job has claimed. */
+  alreadyLogged?: Visit | null;
+  onUseLogged?: () => Promise<void>;
   hideMaterials?: boolean;
   defaultHourlyRate?: number;
   defaultDayRate?: number;
@@ -696,6 +777,9 @@ function CompleteDialog({
   const [payMode, setPayMode] = useState<"hourly" | "day">(defaultPayMode);
   const [rate, setRate] = useState("0");
   const [days, setDays] = useState("1");
+  // Set when the offer to reuse a logged visit is turned down, so the form
+  // appears in its place rather than in addition to it.
+  const [enteringAnyway, setEnteringAnyway] = useState(false);
 
   const rateFor = (mode: "hourly" | "day") =>
     String(Number((mode === "day" ? defaultDayRate : defaultHourlyRate) || 0));
@@ -719,6 +803,7 @@ function CompleteDialog({
           setPayMode(defaultPayMode);
           setRate(rateFor(defaultPayMode));
           setDays("1");
+          setEnteringAnyway(false);
         }
       }}
     >
@@ -727,6 +812,54 @@ function CompleteDialog({
         <DialogHeader>
           <DialogTitle>Complete job — {clientName}</DialogTitle>
         </DialogHeader>
+
+        {/*
+          The hours for this day are already written down. Asking for them a
+          second time is how the same afternoon ended up logged twice.
+        */}
+        {alreadyLogged && !enteringAnyway ? (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              A visit is already logged for {clientName} on{" "}
+              {format(parseISO(alreadyLogged.visit_date), "d MMM")}.
+            </p>
+            <div className="rounded-xl border border-border bg-secondary/50 p-3">
+              <p className="figure text-base font-semibold">
+                {hoursLabel(Number(alreadyLogged.hours))} · {money(Number(alreadyLogged.amount))}
+              </p>
+              {alreadyLogged.description ? (
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  {alreadyLogged.description}
+                </p>
+              ) : null}
+            </div>
+            <div className="flex flex-col gap-2">
+              <Button
+                className="h-11"
+                disabled={busy}
+                onClick={async () => {
+                  if (!onUseLogged) return;
+                  setBusy(true);
+                  try {
+                    await onUseLogged();
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                <CalendarCheck className="size-4" /> Complete using this visit
+              </Button>
+              <Button
+                variant="ghost"
+                className="h-11"
+                disabled={busy}
+                onClick={() => setEnteringAnyway(true)}
+              >
+                Log separate hours instead
+              </Button>
+            </div>
+          </div>
+        ) : (
         <form
           className="space-y-3"
           onSubmit={async (e) => {
@@ -839,6 +972,7 @@ function CompleteDialog({
             </Button>
           </DialogFooter>
         </form>
+        )}
       </DialogContent>
     </Dialog>
   );

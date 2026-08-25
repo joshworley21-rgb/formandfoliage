@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { AddressSearch } from "@/components/AddressSearch";
 import { AppShell } from "@/components/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -149,9 +150,23 @@ function ClientsPage() {
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="address">Address</Label>
+                {/*
+                  Search fills the field; the field stays editable underneath.
+                  A garden the lookup has never heard of, or no signal at all,
+                  must never be a reason you cannot add a client.
+                */}
+                <AddressSearch
+                  // Functional update: a tap resolves over the network, and the
+                  // name may have been typed since, so the form must not be
+                  // rebuilt from a snapshot taken before the lookup started.
+                  onPick={(address) => setForm((current) => ({ ...current, address }))}
+                />
                 <Textarea
                   id="address"
-                  rows={2}
+                  // Five lines: a full UK address is house, street, village,
+                  // town, county, postcode, and clipping the postcode is the
+                  // one line worth seeing.
+                  rows={5}
                   value={form.address}
                   onChange={(e) => setForm({ ...form, address: e.target.value })}
                 />
@@ -227,12 +242,22 @@ function ClientsPage() {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {clients.map((client) => (
-            <Card key={client.id}>
+            /*
+              min-w-0 is load-bearing. A grid item defaults to min-width:auto,
+              and "truncate" sets white-space:nowrap, which makes the address
+              line's min-content width the whole address — so the track grew to
+              fit it and the card ran off the side of the phone.
+            */
+            <Card key={client.id} className="min-w-0">
               <CardContent className="flex items-start justify-between gap-3 py-5">
                 <div className="min-w-0">
                   <p className="truncate font-semibold text-foreground">{client.name}</p>
                   {client.address ? (
-                    <p className="mt-0.5 truncate text-sm text-muted-foreground">{client.address}</p>
+                    // Wrapped, not truncated: one line cuts off the postcode,
+                    // which is the half of an address worth having.
+                    <p className="mt-0.5 line-clamp-2 break-words text-sm text-muted-foreground">
+                      {client.address}
+                    </p>
                   ) : null}
                   {client.notes ? (
                     <p className="mt-1 line-clamp-2 text-sm text-foreground/80">{client.notes}</p>
@@ -245,7 +270,9 @@ function ClientsPage() {
                         : `${money(client.hourly_rate)} / hour`}
                     </Badge>
                     {client.email ? (
-                      <span className="truncate text-xs text-muted-foreground">{client.email}</span>
+                      <span className="min-w-0 truncate text-xs text-muted-foreground">
+                        {client.email}
+                      </span>
                     ) : (
                       <span className="text-xs text-warning-foreground">No email for invoices</span>
                     )}

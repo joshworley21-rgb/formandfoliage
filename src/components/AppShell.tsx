@@ -25,7 +25,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useIsStaff } from "@/hooks/use-workspace";
-import { supabase } from "@/integrations/supabase/client";
+import { signOutHere } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -80,7 +80,7 @@ export function AppShell({
   const barSlots = barItems.length + (moreItems.length > 0 ? 1 : 0);
 
   async function signOut() {
-    await supabase.auth.signOut();
+    await signOutHere();
     navigate({ to: "/auth" });
   }
 
@@ -94,13 +94,12 @@ export function AppShell({
               <Link
                 key={item.to}
                 to={item.to}
-                className="group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                activeProps={{
-                  className:
-                    "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary",
-                }}
+                className={cn(
+                  "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                  "data-[status=active]:bg-sidebar-primary data-[status=active]:font-semibold data-[status=active]:text-sidebar-primary-foreground data-[status=active]:hover:bg-sidebar-primary",
+                )}
               >
-                <span className="flex size-7 items-center justify-center rounded-lg bg-sidebar-accent/50 transition-colors group-hover:bg-sidebar-accent group-[.active]:bg-sidebar-primary-foreground/20">
+                <span className="flex size-7 items-center justify-center rounded-lg bg-sidebar-accent/50 transition-colors group-hover:bg-sidebar-accent group-data-[status=active]:bg-sidebar-primary-foreground/20">
                   <item.icon className="size-4" />
                 </span>
                 {item.label}
@@ -119,7 +118,7 @@ export function AppShell({
 
       <div className="relative flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur lg:hidden">
-          <div className="flex items-center justify-between px-4 py-3">
+          <div className="flex items-center justify-between px-4 py-2.5">
             <Logo />
             <div className="flex items-center gap-1">
               {isStaff ? null : (
@@ -136,13 +135,13 @@ export function AppShell({
           </div>
         </header>
 
-        <main className="flex-1 px-4 pb-28 pt-6 lg:px-8 lg:pb-12">
+        <main className="flex-1 px-4 pb-32 pt-5 lg:px-8 lg:pb-12">
           <MaybePullToRefresh onRefresh={onRefresh}>
           <div className="mx-auto w-full max-w-5xl">
             <InstallAppBanner />
             <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
               <div>
-                <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+                <h1 className="font-display text-[1.75rem] font-bold leading-none tracking-tight text-foreground lg:text-4xl">
                   {title}
                 </h1>
                 {description ? (
@@ -156,7 +155,12 @@ export function AppShell({
           </MaybePullToRefresh>
         </main>
 
-        <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur lg:hidden">
+        {/*
+          A floating pill rather than a full-width bar: it reads as one control
+          instead of a strip of the page, and the gap underneath keeps the last
+          card clear of the phone's own gesture area.
+        */}
+        <nav className="fixed inset-x-3.5 bottom-3 z-40 rounded-full bg-sidebar px-1.5 py-1.5 shadow-lg shadow-black/25 lg:hidden">
           <div
             className={cn(
               "grid",
@@ -174,12 +178,12 @@ export function AppShell({
                 key={item.to}
                 to={item.to}
                 className={cn(
-                  "flex flex-col items-center gap-1 py-2.5 text-[0.65rem] font-medium text-muted-foreground",
+                  "flex flex-col items-center gap-1 rounded-full py-2 font-mono text-[0.6rem] uppercase tracking-[0.05em] text-sidebar-foreground/55",
+                  // The router sets data-status itself. Colouring off it beats
+                  // activeProps, whose class merely joins the base one and
+                  // leaves CSS source order to decide which colour wins.
+                  "data-[status=active]:bg-white/10 data-[status=active]:font-semibold data-[status=active]:text-lime",
                 )}
-                activeProps={{
-                  className:
-                    "flex flex-col items-center gap-1 py-2.5 text-[0.65rem] font-semibold text-primary",
-                }}
               >
                 <item.icon className="size-5" />
                 {item.label}
@@ -189,7 +193,7 @@ export function AppShell({
               <button
                 type="button"
                 onClick={() => setMoreOpen(true)}
-                className="flex flex-col items-center gap-1 py-2.5 text-[0.65rem] font-medium text-muted-foreground"
+                className="flex flex-col items-center gap-1 rounded-full py-2 font-mono text-[0.6rem] uppercase tracking-[0.05em] text-sidebar-foreground/60"
               >
                 <MoreHorizontal className="size-5" />
                 More
@@ -208,11 +212,10 @@ export function AppShell({
                 <SheetClose asChild key={item.to}>
                   <Link
                     to={item.to}
-                    className="flex flex-col items-center gap-2 rounded-xl border border-border bg-card px-2 py-4 text-xs font-medium text-foreground"
-                    activeProps={{
-                      className:
-                        "flex flex-col items-center gap-2 rounded-xl border border-primary bg-primary/10 px-2 py-4 text-xs font-semibold text-primary",
-                    }}
+                    className={cn(
+                      "flex flex-col items-center gap-2 rounded-xl border border-border bg-card px-2 py-4 text-xs font-medium text-foreground",
+                      "data-[status=active]:border-primary data-[status=active]:bg-primary/10 data-[status=active]:font-semibold data-[status=active]:text-primary",
+                    )}
                   >
                     <item.icon className="size-5" />
                     {item.label}
