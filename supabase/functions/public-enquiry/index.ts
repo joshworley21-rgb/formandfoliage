@@ -33,6 +33,10 @@ function validate(raw: EnquiryInput) {
     message: text(raw.message, 4000),
     source: text(raw.source, 60),
     website: text(raw.website, 200),
+    // A forwarder that has already emailed the owner sets this false, so one
+    // enquiry does not arrive twice. Anything else — a plain HTML form — omits
+    // it and is notified as before.
+    notify: raw.notify !== false && raw.notify !== "false",
   };
 }
 
@@ -80,12 +84,13 @@ Deno.serve(
     if (error) return json({ error: "Could not save enquiry" }, 500);
 
     // Notify the owner by email (best effort — never blocks the enquiry).
+    let notified = false;
     try {
       // A new enquiry belongs in the inbox that is actually read, which is
       // the reply-to address — not the send-only address invoices go out from.
       const notifyTo = owner.reply_to_email || owner.email;
       const notifyFrom = owner.email || notifyTo;
-      if (isEmailConfigured() && notifyTo) {
+      if (data.notify && isEmailConfigured() && notifyTo) {
         const businessName = owner.business_name || DEFAULT_BUSINESS_NAME;
         const rows: [string, string][] = [
           ["Name", data.name],
@@ -112,11 +117,14 @@ Deno.serve(
           subject: `New enquiry — ${data.name}`,
           html,
         });
+        notified = true;
       }
     } catch {
       // ignore notification failures
     }
 
-    return json({ ok: true });
+    // The caller is told whether an email actually went out, so a forwarder
+    // that suppressed it can log what happened rather than assume.
+    return json({ ok: true, notified });
   }),
 );

@@ -158,8 +158,8 @@ function EnquiriesPage() {
             */
             <div className="rounded-xl border border-dashed border-border p-4 text-center">
               <p className="text-sm text-muted-foreground">
-                Your link needs a website address to live on. Add yours in Settings and it will
-                appear here.
+                A ready-made enquiry page needs a website address to live on. Add yours in
+                Settings and the link will appear here.
               </p>
               <Button asChild variant="outline" size="sm" className="mt-3 h-10">
                 <Link to="/settings">
@@ -168,6 +168,29 @@ function EnquiriesPage() {
               </Button>
             </div>
           )}
+
+          {key ? (
+            <div className="space-y-2 border-t border-border pt-3">
+              <p className="text-sm text-muted-foreground">
+                Already have a contact form on your website? It can post straight here instead.
+                This is your enquiry key — it says which business an enquiry belongs to.
+              </p>
+              <code className="block select-all break-all rounded-lg border border-border bg-muted px-3 py-2 text-xs">
+                {key}
+              </code>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-10 w-full"
+                onClick={async () => {
+                  if (await copyText(key)) toast.success("Key copied");
+                  else toast.error("Could not copy — press and hold the key to select it");
+                }}
+              >
+                <Copy className="size-4" /> Copy key
+              </Button>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
