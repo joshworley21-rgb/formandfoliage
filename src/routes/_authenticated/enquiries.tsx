@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { copyText } from "@/lib/clipboard";
+import { openReply, replyToEnquiry } from "@/lib/compose-email";
 import { isNativeApp, openOrShare } from "@/lib/native";
 import { QuoteDialog } from "@/components/QuoteDialog";
 import { OwnerOnly } from "@/components/OwnerOnly";
@@ -208,6 +209,7 @@ function EnquiriesPage() {
             <EnquiryCard
               key={enquiry.id}
               enquiry={enquiry}
+              businessName={settings?.business_name}
               onStatus={async (status) => {
                 await update.mutateAsync({ id: enquiry.id, status });
               }}
@@ -246,12 +248,14 @@ function EnquiriesPage() {
 
 function EnquiryCard({
   enquiry,
+  businessName,
   onStatus,
   onConvert,
   onQuote,
   onDelete,
 }: {
   enquiry: Enquiry;
+  businessName?: string | null | undefined;
   onStatus: (status: EnquiryStatus) => void | Promise<void>;
   onConvert: () => void | Promise<void>;
   onQuote: () => void;
@@ -291,10 +295,21 @@ function EnquiryCard({
             </Button>
           ) : null}
           {enquiry.email ? (
-            <Button variant="outline" size="sm" asChild>
-              <a href={`mailto:${enquiry.email}`}>
-                <Mail className="size-4" /> Email
-              </a>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                // Opens Outlook when it is installed, and whatever the phone's
+                // mail app is otherwise. Prefilled, because a reply to an
+                // enquiry always says the same first two things.
+                await openReply({
+                  to: enquiry.email!,
+                  subject: "Your garden enquiry",
+                  body: replyToEnquiry(enquiry.name, businessName),
+                });
+              }}
+            >
+              <Mail className="size-4" /> Email
             </Button>
           ) : null}
         </div>
