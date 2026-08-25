@@ -1,8 +1,20 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { FileSignature, Mail, Phone, Trash2, UserPlus } from "lucide-react";
+import {
+  Copy,
+  ExternalLink,
+  FileSignature,
+  Mail,
+  Phone,
+  Settings as SettingsIcon,
+  Share2,
+  Trash2,
+  UserPlus,
+} from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import { copyText } from "@/lib/clipboard";
+import { isNativeApp, openOrShare } from "@/lib/native";
 import { QuoteDialog } from "@/components/QuoteDialog";
 import { OwnerOnly } from "@/components/OwnerOnly";
 import { Badge } from "@/components/ui/badge";
@@ -85,28 +97,77 @@ function EnquiriesPage() {
             Link (or embed) this page from your website's "Get in touch" button. Every submission
             appears below instead of just landing in your inbox.
           </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <code className="min-w-0 flex-1 truncate rounded-lg border border-border bg-muted px-3 py-2 text-xs">
-              {formUrl ?? "Add your website address in Settings to get your link"}
-            </code>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!formUrl}
-              onClick={async () => {
-                if (!formUrl) return;
-                await navigator.clipboard.writeText(formUrl);
-                toast.success("Link copied");
-              }}
-            >
-              Copy link
-            </Button>
-            <Button variant="ghost" size="sm" disabled={!key} asChild>
-              <a href={formUrl ?? "#"} target="_blank" rel="noreferrer">
-                Preview
-              </a>
-            </Button>
-          </div>
+          {formUrl ? (
+            <div className="space-y-2">
+              {/*
+                select-all so a long press grabs the whole thing, and break-all
+                so it wraps instead of being cut off at the edge of the phone.
+              */}
+              <code className="block select-all break-all rounded-lg border border-border bg-muted px-3 py-2 text-xs">
+                {formUrl}
+              </code>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-10 flex-1"
+                  onClick={async () => {
+                    // Says which of the two happened. This used to await a
+                    // promise that rejects inside the app's WebView, with
+                    // nothing catching it, so the button appeared dead.
+                    if (await copyText(formUrl)) toast.success("Link copied");
+                    else toast.error("Could not copy — press and hold the link to select it");
+                  }}
+                >
+                  <Copy className="size-4" /> Copy link
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-10 flex-1"
+                  onClick={async () => {
+                    // target="_blank" opens nothing inside the app, and Share
+                    // is the more useful thing anyway: it puts the link into
+                    // whatever you are building the website in.
+                    try {
+                      await openOrShare(formUrl, "Your enquiry form");
+                    } catch (error) {
+                      toast.error(
+                        error instanceof Error ? error.message : "Could not open the link",
+                      );
+                    }
+                  }}
+                >
+                  {isNativeApp() ? (
+                    <>
+                      <Share2 className="size-4" /> Share
+                    </>
+                  ) : (
+                    <>
+                      <ExternalLink className="size-4" /> Preview
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            /*
+              The link needs a website to live on. Until one is saved there is
+              nothing to copy, and this used to be a disabled button beside a
+              line of grey text — which reads exactly like a broken button.
+            */
+            <div className="rounded-xl border border-dashed border-border p-4 text-center">
+              <p className="text-sm text-muted-foreground">
+                Your link needs a website address to live on. Add yours in Settings and it will
+                appear here.
+              </p>
+              <Button asChild variant="outline" size="sm" className="mt-3 h-10">
+                <Link to="/settings">
+                  <SettingsIcon className="size-4" /> Open Settings
+                </Link>
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 

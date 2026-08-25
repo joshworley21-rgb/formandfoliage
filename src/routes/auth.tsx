@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Logo } from "@/components/Logo";
@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { passwordResetRedirect } from "@/lib/native";
+import { currentUser } from "@/lib/session";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
@@ -24,6 +25,17 @@ export const Route = createFileRoute("/auth")({
       },
     ],
   }),
+  /**
+   * Already signed in? Then this page has nothing to ask. Without this, tapping
+   * Login showed the form again even though the session was perfectly good.
+   *
+   * Client only: the sign-in page is prerendered for the website, and who is
+   * signed in is not a question a build machine can answer.
+   */
+  beforeLoad: async () => {
+    if (typeof window === "undefined") return;
+    if (await currentUser()) throw redirect({ to: "/dashboard" });
+  },
   component: AuthPage,
 });
 
