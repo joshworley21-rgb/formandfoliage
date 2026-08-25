@@ -43,12 +43,18 @@ function createSupabaseClient() {
     throw new Error(message);
   }
 
+  // The same key supabase-js would derive for itself. Named here because the
+  // app reads the stored session directly at start-up, and a key that drifted
+  // from the one supabase-js writes would silently look like "never signed in".
+  authStorageKey = `sb-${new URL(SUPABASE_URL).hostname.split(".")[0]}-auth-token`;
+
   return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
     global: {
       fetch: createSupabaseFetch(SUPABASE_PUBLISHABLE_KEY),
     },
     auth: {
       storage: typeof window !== 'undefined' ? localStorage : undefined,
+      storageKey: authStorageKey,
       persistSession: true,
       autoRefreshToken: true,
       // PKCE rather than the implicit default: the Android app finishes a
@@ -60,6 +66,18 @@ function createSupabaseClient() {
 }
 
 let _supabase: ReturnType<typeof createSupabaseClient> | undefined;
+let authStorageKey: string | undefined;
+
+/**
+ * Where the signed-in session is kept on this device.
+ *
+ * Only known once the client has been built, because it is derived from the
+ * project URL — so callers go through the getter, which builds it if needed.
+ */
+export function getAuthStorageKey(): string {
+  if (!authStorageKey) void supabase.auth; // builds the client, setting the key
+  return authStorageKey!;
+}
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";

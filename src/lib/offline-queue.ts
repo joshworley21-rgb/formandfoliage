@@ -118,7 +118,7 @@ export async function runOps(ops: QueuedOp[]) {
   for (const op of ops) await runOp(op);
 }
 
-function isOffline() {
+export function isOffline() {
   return typeof navigator !== "undefined" && navigator.onLine === false;
 }
 

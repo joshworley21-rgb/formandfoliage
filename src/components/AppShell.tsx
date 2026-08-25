@@ -25,7 +25,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useIsStaff } from "@/hooks/use-workspace";
-import { supabase } from "@/integrations/supabase/client";
+import { signOutHere } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -80,7 +80,7 @@ export function AppShell({
   const barSlots = barItems.length + (moreItems.length > 0 ? 1 : 0);
 
   async function signOut() {
-    await supabase.auth.signOut();
+    await signOutHere();
     navigate({ to: "/auth" });
   }
 

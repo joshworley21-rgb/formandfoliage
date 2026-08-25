@@ -8,7 +8,25 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { passwordResetRedirect } from "@/lib/native";
+import { isOffline } from "@/lib/offline-queue";
 import { currentUser } from "@/lib/session";
+
+/** Tracks the connection so the sign-in page can say why it cannot help. */
+function useOffline(): boolean {
+  const [offline, setOffline] = useState(() => isOffline());
+
+  useEffect(() => {
+    const update = () => setOffline(isOffline());
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
+
+  return offline;
+}
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
@@ -41,6 +59,7 @@ export const Route = createFileRoute("/auth")({
 
 function AuthPage() {
   const navigate = useNavigate();
+  const offline = useOffline();
   const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -126,6 +145,19 @@ function AuthPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/*
+              Signing in is the one thing in the app that genuinely cannot be
+              done without signal — the password has to be checked by the
+              server. Say so, rather than letting a tap fail with a network
+              error that reads like a wrong password.
+            */}
+            {offline ? (
+              <p className="rounded-xl border border-warning/40 bg-warning/10 px-3 py-2.5 text-sm text-warning-foreground">
+                You are offline. Signing in needs signal — once you are back in
+                range this will work, and after that the app opens without
+                asking again.
+              </p>
+            ) : null}
             <form className="space-y-3" onSubmit={handleSubmit}>
               <div className="space-y-1.5">
                 <Label htmlFor="email">Email</Label>
