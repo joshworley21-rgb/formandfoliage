@@ -47,4 +47,24 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+        Android 11 and later hide other installed apps unless they are declared
+        here. Without this, asking "can this phone open Outlook?" always answers
+        no, and the Email button on an enquiry would fall back to the default
+        mail app even when Outlook is sitting on the home screen.
+
+        Declaring only what is asked about: Outlook's own scheme, and the
+        general ability to send mail so the fallback resolves too.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="ms-outlook" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="mailto" />
+        </intent>
+    </queries>
 </manifest>
