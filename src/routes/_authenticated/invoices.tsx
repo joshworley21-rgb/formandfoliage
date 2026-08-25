@@ -516,13 +516,6 @@ function InvoicesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <div className="mt-6">
-        <DeliveryLog
-          events={emailEvents}
-          invoiceNumber={(id) => invoices.find((i) => i.id === id)?.number ?? "Invoice"}
-        />
-      </div>
     </AppShell>
   );
 }
@@ -565,54 +558,6 @@ function LastAttempt({ event }: { event: InvoiceEmailEvent | null }) {
       <span>{format(parseISO(event.created_at), "d MMM yyyy, HH:mm")}</span>
       {event.detail && DETAIL_WORTH_SHOWING.has(event.status) ? <span>· {event.detail}</span> : null}
     </p>
-  );
-}
-
-function DeliveryLog({
-  events,
-  invoiceNumber,
-}: {
-  events: InvoiceEmailEvent[];
-  invoiceNumber: (invoiceId: string) => string;
-}) {
-  return (
-    <Card>
-      <CardContent className="space-y-3 py-4">
-        <div>
-          <p className="font-display text-lg font-semibold">Delivery log</p>
-          <p className="text-sm text-muted-foreground">
-            Every invoice email attempt, newest first, with the timestamp and result.
-          </p>
-        </div>
-        {events.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No invoice emails sent yet.</p>
-        ) : (
-          <ul className="divide-y divide-border rounded-xl border border-border">
-            {events.map((event) => {
-              const meta = EVENT_META[event.status] ?? EVENT_META["skipped"]!;
-              const Icon = meta.icon;
-              return (
-                <li key={event.id} className="flex items-start gap-3 px-3 py-2.5 text-sm">
-                  <Icon className={`mt-0.5 size-4 shrink-0 ${meta.className}`} />
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium">
-                      {invoiceNumber(event.invoice_id)} · {meta.label}
-                      {event.recipient ? ` · ${event.recipient}` : ""}
-                    </p>
-                    {event.detail ? (
-                      <p className="break-words text-xs text-muted-foreground">{event.detail}</p>
-                    ) : null}
-                  </div>
-                  <p className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
-                    {format(parseISO(event.created_at), "d MMM yyyy, HH:mm")}
-                  </p>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
   );
 }
 
