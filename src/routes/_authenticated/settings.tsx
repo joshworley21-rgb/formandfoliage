@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
@@ -39,6 +39,7 @@ export const Route = createFileRoute("/_authenticated/settings")({
 });
 
 function SettingsPage() {
+  const queryClient = useQueryClient();
   const { data: settings } = useSettings();
   const saveSettings = useSaveSettings();
   const senderFn = getResendStatus;
@@ -93,7 +94,15 @@ function SettingsPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
 
   return (
-    <AppShell title="Settings" description="These details appear on every invoice you send.">
+    <AppShell
+      title="Settings"
+      description="These details appear on every invoice you send."
+      // Connecting Monzo happens in the browser and is approved in the banking
+      // app, so this screen is routinely returned to with something on the
+      // server having changed under it. Without a way to ask again, the only
+      // way to see it was to close the app.
+      onRefresh={() => queryClient.refetchQueries({ type: "active" })}
+    >
       <form
         className="grid gap-4 lg:grid-cols-2"
         onSubmit={async (e) => {

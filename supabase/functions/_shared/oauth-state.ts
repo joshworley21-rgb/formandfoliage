@@ -12,8 +12,13 @@
 
 const ENCODER = new TextEncoder();
 
-/** Long enough to sign in to Monzo and approve on a phone, short enough to matter. */
-const LIFETIME_MS = 15 * 60 * 1000;
+/**
+ * Long enough to sign in to Monzo and approve on a phone, short enough to
+ * matter. Monzo's sign-in is an emailed magic link followed by an approval in
+ * the banking app — waiting on an email, switching apps twice, and coming back
+ * is a slow business, and 15 minutes turned out to be tight for it.
+ */
+const LIFETIME_MS = 30 * 60 * 1000;
 
 function base64url(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes))

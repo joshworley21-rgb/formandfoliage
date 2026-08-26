@@ -11,9 +11,11 @@ import { requireUser, adminClient, type SupabaseClient } from "../_shared/supaba
 import { json, serveJson } from "../_shared/http.ts";
 import { storePayments, suggestMatches } from "../_shared/reconcile.ts";
 import {
+  chooseAccount,
   freshAccessToken,
   HISTORY_DAYS,
   isAwaitingApproval,
+  listAccounts,
   listTransactions,
   registerWebhook,
 } from "../_shared/monzo.ts";
@@ -52,17 +54,29 @@ function windowStart(connection: Connection): Date {
 }
 
 async function syncOne(supabase: SupabaseClient, connection: Connection): Promise<SyncResult> {
-  if (!connection.account_id) {
-    return { added: 0, awaitingApproval: false, error: "No Monzo account is chosen yet" };
-  }
-
   try {
     const token = await freshAccessToken(connection, supabase);
-    const transactions = await listTransactions(
-      token,
-      connection.account_id,
-      windowStart(connection),
-    );
+
+    // The connection may have been saved before Monzo would say which accounts
+    // it covers — that call is refused until access is approved in the phone
+    // app. Finishing it here is what makes "approve, then tap Sync now" work,
+    // rather than leaving a connection stuck half made.
+    let accountId = connection.account_id;
+    if (!accountId) {
+      const account = chooseAccount(await listAccounts(token));
+      if (!account) throw new Error("Monzo returned no open accounts for this connection");
+      accountId = account.id;
+      await supabase
+        .from("bank_connections")
+        .update({
+          account_id: account.id,
+          account_name: account.description ?? account.id,
+          account_type: account.type ?? null,
+        })
+        .eq("id", connection.id);
+    }
+
+    const transactions = await listTransactions(token, accountId, windowStart(connection));
     const added = await storePayments(supabase, connection.user_id, transactions);
     await suggestMatches(supabase, connection.user_id);
 
@@ -74,7 +88,7 @@ async function syncOne(supabase: SupabaseClient, connection: Connection): Promis
       try {
         webhookId = await registerWebhook(
           token,
-          connection.account_id,
+          accountId,
           `${Deno.env.get("SUPABASE_URL")}/functions/v1/monzo-webhook?token=${connection.webhook_secret}`,
         );
       } catch (error) {

@@ -76,22 +76,33 @@ export function MonzoConnection() {
           </>
         ) : (
           <>
-            <p className="text-sm">
-              Connected to <strong>{status.accountName}</strong>.
-              {status.lastSyncedAt ? (
-                <span className="text-muted-foreground">
-                  {" "}
-                  Last checked {format(parseISO(status.lastSyncedAt), "d MMM 'at' HH:mm")}.
-                </span>
-              ) : null}
-            </p>
+            {status.accountChosen ? (
+              <p className="text-sm">
+                Connected to <strong>{status.accountName}</strong>.
+                {status.lastSyncedAt ? (
+                  <span className="text-muted-foreground">
+                    {" "}
+                    Last checked {format(parseISO(status.lastSyncedAt), "d MMM 'at' HH:mm")}.
+                  </span>
+                ) : null}
+              </p>
+            ) : (
+              /* Signed in to Monzo, but Monzo has not said which accounts this
+                 covers — it withholds that until access is approved. Saying
+                 "connected" here would be a lie, and saying nothing would look
+                 like the connection failed. */
+              <p className="text-sm">
+                Signed in to Monzo. Waiting for Monzo to release your account details.
+              </p>
+            )}
 
             {/* The one thing that stops a connection working while looking fine. */}
             {!status.approved ? (
               <p className="rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm">
-                <strong>Open your Monzo app and approve access.</strong> Monzo holds back every
-                transaction until you do — the connection is made, but it cannot see anything yet.
-                Then tap Sync now.
+                <strong>Open your Monzo app and approve access.</strong> Monzo holds back your
+                accounts and every transaction until you do — the connection is made, but it cannot
+                see anything yet. Then come back here and tap <strong>Sync now</strong>, which
+                finishes the setup.
               </p>
             ) : null}
 
