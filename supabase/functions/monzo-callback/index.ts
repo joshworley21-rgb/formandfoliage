@@ -138,20 +138,15 @@ Deno.serve(async (request) => {
       throw error;
     }
 
-    const accounts = await listAccounts(tokens.access_token);
-    const account = chooseAccount(accounts);
-    if (!account) {
-      return page(
-        "No account came back",
-        `<p>Monzo authorised the connection but returned no open accounts for it.</p>
-         <p>Invoices can still be marked paid by hand.</p>`,
-        backTo,
-        200,
-      );
-    }
-
-    // Written before anything else is attempted: whatever follows, the tokens
-    // are the part that cannot be obtained again without the whole round trip.
+    // The tokens are saved before Monzo is asked anything else, because they are
+    // the one part of this that cannot be obtained again: the authorisation code
+    // is spent, and a second attempt has to start the whole round trip over.
+    //
+    // This used to list the accounts first. On a fresh connection that call is
+    // exactly the one Monzo refuses until access has been approved in the phone
+    // app — so the common case threw, the tokens were discarded, and every retry
+    // burned another code the same way. Everything below is now best effort, and
+    // anything that does not work here is finished by the next sync.
     const webhookSecret = randomSecret();
     const { error: saveError } = await supabase.from("bank_connections").upsert(
       {
@@ -160,22 +155,59 @@ Deno.serve(async (request) => {
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token ?? null,
         expires_at: expiresAt(tokens),
-        account_id: account.id,
-        account_name: account.description ?? account.id,
-        account_type: account.type ?? null,
+        account_id: null,
+        account_name: null,
+        account_type: null,
         webhook_secret: webhookSecret,
         webhook_id: null,
+        approved_at: null,
         last_sync_error: null,
       },
       { onConflict: "user_id" },
     );
     if (saveError) throw new Error(saveError.message);
 
+    // From here nothing is fatal. A connection with tokens and no account is a
+    // connection the sync can finish; a connection with no tokens is nothing.
+    let account = null;
+    let note = "";
+    try {
+      account = chooseAccount(await listAccounts(tokens.access_token));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!isAwaitingApproval(message)) note = message;
+    }
+
+    if (!account) {
+      await supabase
+        .from("bank_connections")
+        .update({
+          last_sync_error: note || "Waiting for you to approve access in the Monzo app",
+        })
+        .eq("user_id", userId);
+      return page(
+        "Almost there",
+        `<p>Monzo authorised the connection, but has not released your account details yet.</p>
+         <p><strong>Open your Monzo app and approve access.</strong> Then go back to Settings in the
+         CRM and tap <strong>Sync now</strong> — it will finish the setup from there.</p>
+         ${note ? `<p class="muted">Monzo said: ${escapeHtml(note)}</p>` : ""}`,
+        backTo,
+      );
+    }
+
+    await supabase
+      .from("bank_connections")
+      .update({
+        account_id: account.id,
+        account_name: account.description ?? account.id,
+        account_type: account.type ?? null,
+      })
+      .eq("user_id", userId);
+
     // Does Monzo actually answer for this account yet? Reading one minute of
     // history is the cheapest way to find out, and its failure is the specific
     // "approve it in the app" case rather than a broken connection.
     let approved = false;
-    let note = "";
     try {
       await listTransactions(tokens.access_token, account.id, new Date(Date.now() - 60_000));
       approved = true;

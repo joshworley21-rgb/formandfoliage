@@ -49,6 +49,10 @@ Deno.serve(
           connected: Boolean(connection),
           accountName: connection?.account_name ?? null,
           accountType: connection?.account_type ?? null,
+          // Monzo will not name the accounts a connection covers until access
+          // is approved in the phone app, so a connection can exist with the
+          // tokens saved and no account picked yet. The next sync finishes it.
+          accountChosen: Boolean(connection?.account_id),
           // Monzo will not serve transactions until this is approved in the app.
           approved: Boolean(connection?.approved_at),
           // The developer API is documented for personal accounts. A business

@@ -13,6 +13,8 @@ export type MonzoStatus = {
   connected: boolean;
   accountName: string | null;
   accountType: string | null;
+  /** False while Monzo has not yet released which accounts the connection covers. */
+  accountChosen: boolean;
   /** Monzo serves no transactions until access is approved in the phone app. */
   approved: boolean;
   /** The developer API is documented for personal accounts; this one is not one. */
