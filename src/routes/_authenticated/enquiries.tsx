@@ -159,8 +159,8 @@ function EnquiriesPage() {
             */
             <div className="rounded-xl border border-dashed border-border p-4 text-center">
               <p className="text-sm text-muted-foreground">
-                A ready-made enquiry page needs a website address to live on. Add yours in
-                Settings and the link will appear here.
+                A ready-made enquiry page needs a website address to live on. Add yours in Settings
+                and the link will appear here.
               </p>
               <Button asChild variant="outline" size="sm" className="mt-3 h-10">
                 <Link to="/settings">
@@ -173,8 +173,8 @@ function EnquiriesPage() {
           {key ? (
             <div className="space-y-2 border-t border-border pt-3">
               <p className="text-sm text-muted-foreground">
-                Already have a contact form on your website? It can post straight here instead.
-                This is your enquiry key — it says which business an enquiry belongs to.
+                Already have a contact form on your website? It can post straight here instead. This
+                is your enquiry key — it says which business an enquiry belongs to.
               </p>
               <code className="block select-all break-all rounded-lg border border-border bg-muted px-3 py-2 text-xs">
                 {key}

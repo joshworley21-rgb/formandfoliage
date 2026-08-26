@@ -35,7 +35,10 @@ export const Route = createFileRoute("/_authenticated/visits")({
       { title: "Visits — JW Garden Services CRM" },
       { name: "description", content: "Log hours and materials for every completed garden visit." },
       { property: "og:title", content: "Visits — JW Garden Services CRM" },
-      { property: "og:description", content: "Log hours and materials for every completed garden visit." },
+      {
+        property: "og:description",
+        content: "Log hours and materials for every completed garden visit.",
+      },
     ],
   }),
   component: () => (
@@ -88,7 +91,6 @@ function VisitsPage() {
       : (Number(rate) || 0) * (Number(hours) || 0) + materialsNum;
   const preview = computedAmount;
 
-
   const totals = useMemo(() => {
     const unbilled = visits.filter((v) => !v.billed);
     return {
@@ -105,7 +107,13 @@ function VisitsPage() {
     return String(Number((mode === "day" ? c?.fixed_price : c?.hourly_rate) ?? 0));
   }
 
-  function resetRate(c?: { billing_mode?: string; hourly_rate?: number | string; fixed_price?: number | string } | null) {
+  function resetRate(
+    c?: {
+      billing_mode?: string;
+      hourly_rate?: number | string;
+      fixed_price?: number | string;
+    } | null,
+  ) {
     const mode: "hourly" | "day" = c?.billing_mode === "fixed" ? "day" : "hourly";
     setPayMode(mode);
     setRate(rateFor(c, mode));
@@ -134,7 +142,6 @@ function VisitsPage() {
     resetRate(clients.find((c) => c.id === visit.client_id));
     setOpen(true);
   }
-
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -192,7 +199,9 @@ function VisitsPage() {
         </Card>
         <Card>
           <CardContent className="py-4">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Ready to invoice</p>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+              Ready to invoice
+            </p>
             <p className="font-display text-2xl font-bold text-primary">
               {money(totals.unbilledValue)}
             </p>
@@ -223,18 +232,26 @@ function VisitsPage() {
                       </Badge>
                     </div>
                     <p className="mt-0.5 text-sm text-muted-foreground">
-                      {format(parseISO(visit.visit_date), "EEE d MMM yyyy")} · {hoursLabel(visit.hours)}
+                      {format(parseISO(visit.visit_date), "EEE d MMM yyyy")} ·{" "}
+                      {hoursLabel(visit.hours)}
                       {Number(visit.materials_cost) > 0
                         ? ` · materials ${money(visit.materials_cost)}`
                         : ""}
                     </p>
                     {visit.description ? (
-                      <p className="mt-1 line-clamp-2 text-sm text-foreground/80">{visit.description}</p>
+                      <p className="mt-1 line-clamp-2 text-sm text-foreground/80">
+                        {visit.description}
+                      </p>
                     ) : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
                     <span className="mr-1 font-semibold">{money(visit.amount)}</span>
-                    <Button variant="ghost" size="icon" aria-label="Edit" onClick={() => openEdit(visit)}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Edit"
+                      onClick={() => openEdit(visit)}
+                    >
                       <Pencil className="size-4" />
                     </Button>
                     <Button
@@ -272,7 +289,6 @@ function VisitsPage() {
                   const c = clients.find((x) => x.id === v);
                   if (c) resetRate(c);
                 }}
-
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Choose client" />
@@ -289,7 +305,12 @@ function VisitsPage() {
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="space-y-1.5">
                 <Label htmlFor="date">Date</Label>
-                <Input id="date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                <Input
+                  id="date"
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="hours">Hours</Label>
@@ -377,7 +398,6 @@ function VisitsPage() {
               Charge: <span className="font-semibold">{money(preview)}</span>{" "}
               <span className="text-muted-foreground">
                 ({payMode === "day" ? "day rate" : "hourly rate"} + materials)
-
               </span>
             </p>
 

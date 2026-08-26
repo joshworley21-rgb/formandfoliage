@@ -71,7 +71,11 @@ Deno.serve(
       notes: quote.notes,
       terms: quote.terms,
       vatRegistered: Boolean(settings?.vat_registered),
-      business: { name: businessName, email: settings?.email ?? null, phone: settings?.phone ?? null },
+      business: {
+        name: businessName,
+        email: settings?.email ?? null,
+        phone: settings?.phone ?? null,
+      },
       items: ((items ?? []) as ItemRow[]).map((item) => ({
         description: item.description,
         quantity: Number(item.quantity),

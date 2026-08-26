@@ -153,9 +153,8 @@ function AuthPage() {
             */}
             {offline ? (
               <p className="rounded-xl border border-warning/40 bg-warning/10 px-3 py-2.5 text-sm text-warning-foreground">
-                You are offline. Signing in needs signal — once you are back in
-                range this will work, and after that the app opens without
-                asking again.
+                You are offline. Signing in needs signal — once you are back in range this will
+                work, and after that the app opens without asking again.
               </p>
             ) : null}
             <form className="space-y-3" onSubmit={handleSubmit}>
@@ -206,7 +205,9 @@ function AuthPage() {
             <button
               type="button"
               className="w-full text-center text-sm text-muted-foreground underline-offset-4 hover:underline"
-              onClick={() => setMode(mode === "signup" ? "signin" : mode === "forgot" ? "signin" : "signup")}
+              onClick={() =>
+                setMode(mode === "signup" ? "signin" : mode === "forgot" ? "signin" : "signup")
+              }
             >
               {mode === "signin"
                 ? "Need an account? Create one"

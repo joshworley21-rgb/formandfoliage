@@ -26,7 +26,11 @@ test("a visit finishes off the job booked for that client that day", () => {
 });
 
 test("the booked time and the time it was actually done need not agree", () => {
-  const found = findJobForVisit([job({ starts_at: at("2026-08-25", "07:00") })], "c1", "2026-08-25");
+  const found = findJobForVisit(
+    [job({ starts_at: at("2026-08-25", "07:00") })],
+    "c1",
+    "2026-08-25",
+  );
   expect(found?.id).toBe("j1");
 });
 
@@ -78,7 +82,9 @@ test("completing a job finds the visit already logged that day", () => {
 
 test("a visit for another client, or another day, is not offered", () => {
   expect(findVisitForJob([visit({ client_id: "c2" })], "c1", at("2026-08-25", "09:30"))).toBeNull();
-  expect(findVisitForJob([visit({ visit_date: "2026-08-24" })], "c1", at("2026-08-25", "09:30"))).toBeNull();
+  expect(
+    findVisitForJob([visit({ visit_date: "2026-08-24" })], "c1", at("2026-08-25", "09:30")),
+  ).toBeNull();
 });
 
 test("a visit another job already claimed is not offered again", () => {

@@ -96,8 +96,8 @@ export function InvoiceReminders({ compact = false }: { compact?: boolean }) {
           <div>
             <p className="font-display text-lg font-semibold">Time to invoice</p>
             <p className="text-sm text-muted-foreground">
-              {reminders.length === 1 ? "This client has" : "These clients have"} enough
-              unbilled visits to bill — 4 for weekly clients, 2 for fortnightly.
+              {reminders.length === 1 ? "This client has" : "These clients have"} enough unbilled
+              visits to bill — 4 for weekly clients, 2 for fortnightly.
             </p>
           </div>
         </div>
@@ -107,13 +107,18 @@ export function InvoiceReminders({ compact = false }: { compact?: boolean }) {
             words wide. */}
         <ul className="divide-y divide-border rounded-xl border border-border bg-card">
           {reminders.map((r) => (
-            <li key={r.clientId} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
+            <li
+              key={r.clientId}
+              className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5"
+            >
               <div className="w-full min-w-0 sm:flex-1">
                 <p className="truncate font-medium">{r.clientName}</p>
                 <p className="text-xs text-muted-foreground">
                   {r.visits} unbilled {r.visits === 1 ? "visit" : "visits"}
-                  {r.frequency ? ` · ${FREQUENCY_LABEL[r.frequency]} (bill every ${r.threshold})` : ""} · oldest{" "}
-                  {format(parseISO(r.oldest), "d MMM")}
+                  {r.frequency
+                    ? ` · ${FREQUENCY_LABEL[r.frequency]} (bill every ${r.threshold})`
+                    : ""}{" "}
+                  · oldest {format(parseISO(r.oldest), "d MMM")}
                 </p>
               </div>
               <p className="font-display text-lg">{money(r.value)}</p>

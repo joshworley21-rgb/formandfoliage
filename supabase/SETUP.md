@@ -79,7 +79,7 @@ supabase gen types typescript --linked > src/integrations/supabase/types.ts
 **Authentication → Sign In / Providers**.
 
 - **Email**: on by default. If you would rather not deal with confirmation
-  emails while setting up, turn *Confirm email* off — you can turn it back on
+  emails while setting up, turn _Confirm email_ off — you can turn it back on
   later.
 - **Google**: enable it and paste in a Google OAuth client ID and secret from
   [console.cloud.google.com](https://console.cloud.google.com) (APIs & Services
@@ -89,11 +89,11 @@ supabase gen types typescript --linked > src/integrations/supabase/types.ts
 
 **Authentication → URL Configuration → Redirect URLs** — add all three:
 
-| URL | Why |
-|---|---|
-| `http://localhost:8080/**` | local development |
-| `https://<your-web-domain>/**` | the website, once it has one |
-| `uk.co.jwgardenservices.crm://auth-callback` | the Android app's deep link |
+| URL                                          | Why                          |
+| -------------------------------------------- | ---------------------------- |
+| `http://localhost:8080/**`                   | local development            |
+| `https://<your-web-domain>/**`               | the website, once it has one |
+| `uk.co.jwgardenservices.crm://auth-callback` | the Android app's deep link  |
 
 Miss the last one and Google sign-in in the app fails after the browser step.
 

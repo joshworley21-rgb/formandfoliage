@@ -72,9 +72,7 @@ export function JobSheetDialog({
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Job sheet — {clientName}</DialogTitle>
-          <DialogDescription>
-            Tick off tasks and attach photos of completed work.
-          </DialogDescription>
+          <DialogDescription>Tick off tasks and attach photos of completed work.</DialogDescription>
         </DialogHeader>
 
         <section className="space-y-3">
@@ -172,7 +170,10 @@ export function JobSheetDialog({
           ) : (
             <div className="grid grid-cols-3 gap-2">
               {photos.map((photo) => (
-                <div key={photo.id} className="group relative overflow-hidden rounded-lg border border-border">
+                <div
+                  key={photo.id}
+                  className="group relative overflow-hidden rounded-lg border border-border"
+                >
                   {photo.url ? (
                     <img
                       src={photo.url}

@@ -9,12 +9,12 @@ only thing behind it is Supabase — there is no server of our own to keep alive
 
 ## How it fits together
 
-| Piece | What it does |
-|---|---|
-| React SPA (TanStack Router/Start, Vite) | The whole app. Runs in the browser or inside the Android WebView. |
-| Supabase | Postgres with row-level security, auth, and file storage for invoice PDFs. |
-| Edge Functions | The few jobs that need a server: invoice numbering, sending email, the public enquiry and quote endpoints, overdue reminders, and the Monzo bank feed. See `supabase/functions/README.md`. |
-| Capacitor | Wraps the built app as an Android APK. See `ANDROID-APK.md`. |
+| Piece                                   | What it does                                                                                                                                                                               |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| React SPA (TanStack Router/Start, Vite) | The whole app. Runs in the browser or inside the Android WebView.                                                                                                                          |
+| Supabase                                | Postgres with row-level security, auth, and file storage for invoice PDFs.                                                                                                                 |
+| Edge Functions                          | The few jobs that need a server: invoice numbering, sending email, the public enquiry and quote endpoints, overdue reminders, and the Monzo bank feed. See `supabase/functions/README.md`. |
+| Capacitor                               | Wraps the built app as an Android APK. See `ANDROID-APK.md`.                                                                                                                               |
 
 Invoice and quote PDFs are generated on the device with jsPDF, so no rendering
 service is involved.
@@ -28,15 +28,15 @@ bun install
 bun run dev      # http://localhost:8080
 ```
 
-| Command | What it does |
-|---|---|
-| `bun run dev` | Development server |
-| `bun run build` | Production web build into `.output/` |
-| `bun run build:app` | Web build plus `dist-app/` for the Android app |
-| `bun run app:sync` | `build:app`, then copy into the Android project |
-| `bun run app:open` | Open the Android project in Android Studio |
-| `bun run lint` | ESLint |
-| `bun run format` | Prettier |
+| Command             | What it does                                    |
+| ------------------- | ----------------------------------------------- |
+| `bun run dev`       | Development server                              |
+| `bun run build`     | Production web build into `.output/`            |
+| `bun run build:app` | Web build plus `dist-app/` for the Android app  |
+| `bun run app:sync`  | `build:app`, then copy into the Android project |
+| `bun run app:open`  | Open the Android project in Android Studio      |
+| `bun run lint`      | ESLint                                          |
+| `bun run format`    | Prettier                                        |
 
 ## Configuration
 

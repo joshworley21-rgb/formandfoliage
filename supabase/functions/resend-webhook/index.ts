@@ -98,9 +98,13 @@ Deno.serve(async (request) => {
     user_id: origin.user_id,
     invoice_id: origin.invoice_id,
     status,
-    recipient: Array.isArray(event.data?.to) ? event.data?.to[0] : (event.data?.to ?? origin.recipient),
+    recipient: Array.isArray(event.data?.to)
+      ? event.data?.to[0]
+      : (event.data?.to ?? origin.recipient),
     provider_message_id: emailId,
-    detail: bounceReason ? `${DETAIL[status]}: ${bounceReason}`.slice(0, 500) : (DETAIL[status] ?? null),
+    detail: bounceReason
+      ? `${DETAIL[status]}: ${bounceReason}`.slice(0, 500)
+      : (DETAIL[status] ?? null),
   });
 
   return new Response("ok", { status: 200 });

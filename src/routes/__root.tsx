@@ -1,4 +1,5 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import {
   Outlet,
   Link,
@@ -7,13 +8,14 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { ClientOnly } from "@tanstack/react-router";
 import { OfflineSupport } from "@/components/OfflineSupport";
 import { NativeAuthListener } from "@/components/NativeAuthListener";
 import { supabase } from "@/integrations/supabase/client";
+import { clearPersistedCache, createPersister, persistOptions } from "@/lib/query-persist";
 import { Toaster } from "@/components/ui/sonner";
 
 // iOS standalone launch images (Android/PWABuilder uses manifest background_color + icon)
@@ -34,7 +36,6 @@ const APPLE_SPLASH_LINKS = (
   href: `/splash-${w}x${h}.png`,
   media: `(device-width: ${cssW}px) and (device-height: ${cssH}px) and (-webkit-device-pixel-ratio: ${dpr}) and (orientation: portrait)`,
 }));
-
 
 function NotFoundComponent() {
   return (
@@ -166,7 +167,16 @@ function AuthSync() {
     const { data } = supabase.auth.onAuthStateChange((event) => {
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
       router.invalidate();
-      if (event !== "SIGNED_OUT") queryClient.invalidateQueries();
+      if (event !== "SIGNED_OUT") {
+        queryClient.invalidateQueries();
+        return;
+      }
+      // Signing out has to empty the saved cache as well as the live one.
+      // Otherwise a signed-out phone still has this workspace's clients and
+      // invoices written to disk, waiting to be restored by whoever opens the
+      // app next.
+      queryClient.clear();
+      clearPersistedCache();
     });
     return () => data.subscription.unsubscribe();
   }, [router, queryClient]);
@@ -187,11 +197,14 @@ function SplashDismiss() {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
-
-
+  // Built once, and passed by the same identity every render: a new options
+  // object each time would have the provider tear down and re-establish
+  // persistence on every render. On the server this is the persister that does
+  // nothing.
+  const [persistOpts] = useState(() => persistOptions(createPersister()));
 
   return (
-    <QueryClientProvider client={queryClient}>
+    <PersistQueryClientProvider client={queryClient} persistOptions={persistOpts}>
       <AuthSync />
       <ClientOnly fallback={null}>
         <SplashDismiss />
@@ -205,7 +218,6 @@ function RootComponent() {
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
       <Toaster richColors position="top-center" />
-    </QueryClientProvider>
+    </PersistQueryClientProvider>
   );
 }
-

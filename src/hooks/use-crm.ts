@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { requireUserId } from "@/lib/session";
 import { runOrQueue } from "@/lib/offline-queue";
+import { workspaceQueryOptions } from "@/hooks/use-workspace";
 import type {
   Client,
   Invoice,
@@ -30,18 +31,22 @@ async function workspaceOwnerId(): Promise<string> {
 /* ---------------- clients ---------------- */
 
 export function useClients() {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: ["clients"],
     queryFn: async (): Promise<Client[]> => {
-      const { data: ws } = await supabase.rpc("my_workspace");
-      const wsRow = Array.isArray(ws) ? ws[0] : ws;
-      if (wsRow?.role === "staff") {
+      // Through the cache rather than straight to the server. This was an
+      // unconditional round trip before every single clients fetch, and the
+      // clients query could not start until it came back — two waits where the
+      // answer had usually been known for minutes.
+      const workspace = await queryClient.fetchQuery(workspaceQueryOptions());
+      if (workspace.role === "staff") {
         // Staff only ever see name / address / notes — never contact details or rates.
         const { data, error } = await supabase.rpc("staff_clients");
         if (error) throw error;
         return (data ?? []).map((row) => ({
           id: row.id,
-          user_id: (wsRow.owner_id as string) ?? "",
+          user_id: workspace.ownerId,
           name: row.name,
           address: row.address,
           notes: row.notes,
@@ -62,21 +67,17 @@ export function useClients() {
   });
 }
 
-
 export function useSaveClient() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: Partial<Client> & { name: string }) => {
       const user_id = await currentUserId();
       const payload = { ...input, user_id };
-      await runOrQueue(
-        input.id ? `Client "${input.name}" update` : `New client "${input.name}"`,
-        [
-          input.id
-            ? { kind: "update", table: "clients", payload, match: { id: input.id } }
-            : { kind: "insert", table: "clients", payload },
-        ],
-      );
+      await runOrQueue(input.id ? `Client "${input.name}" update` : `New client "${input.name}"`, [
+        input.id
+          ? { kind: "update", table: "clients", payload, match: { id: input.id } }
+          : { kind: "insert", table: "clients", payload },
+      ]);
     },
     onSuccess: () => qc.invalidateQueries(),
   });
@@ -86,9 +87,7 @@ export function useDeleteClient() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      await runOrQueue("Delete client", [
-        { kind: "delete", table: "clients", match: { id } },
-      ]);
+      await runOrQueue("Delete client", [{ kind: "delete", table: "clients", match: { id } }]);
     },
     onSuccess: () => qc.invalidateQueries(),
   });
@@ -150,9 +149,7 @@ export function useDeleteVisit() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      await runOrQueue("Delete visit", [
-        { kind: "delete", table: "visits", match: { id } },
-      ]);
+      await runOrQueue("Delete visit", [{ kind: "delete", table: "visits", match: { id } }]);
     },
     onSuccess: () => qc.invalidateQueries(),
   });
@@ -209,9 +206,7 @@ export function useDeleteJob() {
         ]);
         return;
       }
-      await runOrQueue("Delete job", [
-        { kind: "delete", table: "scheduled_jobs", match: { id } },
-      ]);
+      await runOrQueue("Delete job", [{ kind: "delete", table: "scheduled_jobs", match: { id } }]);
     },
     onSuccess: () => qc.invalidateQueries(),
   });
@@ -493,7 +488,15 @@ export function useJobPhotos(jobId?: string) {
 export function useUploadJobPhoto() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ jobId, file, caption }: { jobId: string; file: File; caption?: string }) => {
+    mutationFn: async ({
+      jobId,
+      file,
+      caption,
+    }: {
+      jobId: string;
+      file: File;
+      caption?: string;
+    }) => {
       const user_id = await workspaceOwnerId();
       const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
       const path = `${user_id}/${jobId}/${crypto.randomUUID()}.${ext}`;

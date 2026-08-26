@@ -40,9 +40,15 @@ export const Route = createFileRoute("/_authenticated/recurring")({
   head: () => ({
     meta: [
       { title: "Recurring billing — JW Garden Services CRM" },
-      { name: "description", content: "Set clients on weekly, fortnightly, monthly or quarterly invoice schedules." },
+      {
+        name: "description",
+        content: "Set clients on weekly, fortnightly, monthly or quarterly invoice schedules.",
+      },
       { property: "og:title", content: "Recurring billing — JW Garden Services CRM" },
-      { property: "og:description", content: "Set clients on weekly, fortnightly, monthly or quarterly invoice schedules." },
+      {
+        property: "og:description",
+        content: "Set clients on weekly, fortnightly, monthly or quarterly invoice schedules.",
+      },
     ],
   }),
   component: () => (

@@ -7,10 +7,14 @@ export type TeamMember = Database["public"]["Tables"]["team_members"]["Row"];
 export type WorkspaceRole = "owner" | "staff";
 export type Workspace = { ownerId: string; role: WorkspaceRole };
 
-/** Who am I working for, and as what? Also links a pending staff invite on first sign-in. */
-export function useWorkspace() {
-  return useQuery({
-    queryKey: ["workspace"],
+/**
+ * The query itself, shared so anything needing the workspace goes through one
+ * cache entry rather than asking the server again. Five minutes: your own role
+ * does not change while you are holding the phone.
+ */
+export function workspaceQueryOptions() {
+  return {
+    queryKey: ["workspace"] as const,
     staleTime: 5 * 60 * 1000,
     queryFn: async (): Promise<Workspace> => {
       await supabase.rpc("claim_staff_invite");
@@ -23,7 +27,12 @@ export function useWorkspace() {
         role: ((row?.role as WorkspaceRole) ?? "owner") satisfies WorkspaceRole,
       };
     },
-  });
+  };
+}
+
+/** Who am I working for, and as what? Also links a pending staff invite on first sign-in. */
+export function useWorkspace() {
+  return useQuery(workspaceQueryOptions());
 }
 
 export function useIsStaff(): boolean {
@@ -37,10 +46,7 @@ export function useTeam() {
   return useQuery({
     queryKey: ["team_members"],
     queryFn: async (): Promise<TeamMember[]> => {
-      const { data, error } = await supabase
-        .from("team_members")
-        .select("*")
-        .order("created_at");
+      const { data, error } = await supabase.from("team_members").select("*").order("created_at");
       if (error) throw error;
       return data ?? [];
     },

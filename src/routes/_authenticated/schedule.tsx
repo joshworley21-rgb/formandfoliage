@@ -75,9 +75,15 @@ export const Route = createFileRoute("/_authenticated/schedule")({
   head: () => ({
     meta: [
       { title: "Schedule — JW Garden Services CRM" },
-      { name: "description", content: "Plan and track upcoming garden jobs in month, week and day views." },
+      {
+        name: "description",
+        content: "Plan and track upcoming garden jobs in month, week and day views.",
+      },
       { property: "og:title", content: "Schedule — JW Garden Services CRM" },
-      { property: "og:description", content: "Plan and track upcoming garden jobs in month, week and day views." },
+      {
+        property: "og:description",
+        content: "Plan and track upcoming garden jobs in month, week and day views.",
+      },
     ],
   }),
   component: SchedulePage,
@@ -151,7 +157,9 @@ function SchedulePage() {
   }, [range]);
 
   const jobsOn = (day: Date) =>
-    jobs.filter((j) => isSameDay(parseISO(j.starts_at), day)).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+    jobs
+      .filter((j) => isSameDay(parseISO(j.starts_at), day))
+      .sort((a, b) => a.starts_at.localeCompare(b.starts_at));
 
   function shift(dir: 1 | -1) {
     setCursor((c) =>
@@ -425,14 +433,17 @@ function SchedulePage() {
         }}
         onClose={() => setCompleting(null)}
         defaultHourlyRate={
-          completing ? Number(clients.find((c) => c.id === completing.client_id)?.hourly_rate ?? 0) : 0
+          completing
+            ? Number(clients.find((c) => c.id === completing.client_id)?.hourly_rate ?? 0)
+            : 0
         }
         defaultDayRate={
-          completing ? Number(clients.find((c) => c.id === completing.client_id)?.fixed_price ?? 0) : 0
+          completing
+            ? Number(clients.find((c) => c.id === completing.client_id)?.fixed_price ?? 0)
+            : 0
         }
         defaultPayMode={
-          completing &&
-          clients.find((c) => c.id === completing.client_id)?.billing_mode === "fixed"
+          completing && clients.find((c) => c.id === completing.client_id)?.billing_mode === "fixed"
             ? "day"
             : "hourly"
         }
@@ -492,7 +503,14 @@ function JobDialog({
   onOpenChange: (v: boolean) => void;
   defaultDate: Date;
   onSaved: () => void;
-  saveJob: (input: { id?: string; client_id: string; starts_at: string; duration_minutes?: number; notes?: string | null; series_id?: string | null }) => Promise<unknown>;
+  saveJob: (input: {
+    id?: string;
+    client_id: string;
+    starts_at: string;
+    duration_minutes?: number;
+    notes?: string | null;
+    series_id?: string | null;
+  }) => Promise<unknown>;
 }) {
   const { data: clients = [] } = useClients();
   const [clientId, setClientId] = useState("");
@@ -645,11 +663,21 @@ function JobDialog({
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
               <Label htmlFor="jdate">Date</Label>
-              <Input id="jdate" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              <Input
+                id="jdate"
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="jtime">Start</Label>
-              <Input id="jtime" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+              <Input
+                id="jtime"
+                type="time"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="jend">Finish</Label>
@@ -807,7 +835,6 @@ function CompleteDialog({
         }
       }}
     >
-
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Complete job — {clientName}</DialogTitle>
@@ -828,9 +855,7 @@ function CompleteDialog({
                 {hoursLabel(Number(alreadyLogged.hours))} · {money(Number(alreadyLogged.amount))}
               </p>
               {alreadyLogged.description ? (
-                <p className="mt-0.5 text-sm text-muted-foreground">
-                  {alreadyLogged.description}
-                </p>
+                <p className="mt-0.5 text-sm text-muted-foreground">{alreadyLogged.description}</p>
               ) : null}
             </div>
             <div className="flex flex-col gap-2">
@@ -860,118 +885,117 @@ function CompleteDialog({
             </div>
           </div>
         ) : (
-        <form
-          className="space-y-3"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            setBusy(true);
-            try {
-              await onComplete({
-                hours: Number(hours) || 0,
-                materials: Number(materials) || 0,
-                description,
-                ...(amountOverride === undefined ? {} : { amount: amountOverride }),
-              });
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="chours">Hours worked</Label>
-              <Input
-                id="chours"
-                type="number"
-                step="0.25"
-                min="0"
-                value={hours}
-                onChange={(e) => setHours(e.target.value)}
-              />
-            </div>
-            {hideMaterials ? null : (
-            <div className="space-y-1.5">
-              <Label htmlFor="cmat">Materials (£)</Label>
-              <Input
-                id="cmat"
-                type="number"
-                step="0.01"
-                min="0"
-                value={materials}
-                onChange={(e) => setMaterials(e.target.value)}
-              />
-            </div>
-            )}
-          </div>
-          {hideMaterials ? null : (
+          <form
+            className="space-y-3"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setBusy(true);
+              try {
+                await onComplete({
+                  hours: Number(hours) || 0,
+                  materials: Number(materials) || 0,
+                  description,
+                  ...(amountOverride === undefined ? {} : { amount: amountOverride }),
+                });
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label>Pay basis</Label>
-                <Select
-                  value={payMode}
-                  onValueChange={(v) => {
-                    const mode = v as "hourly" | "day";
-                    setPayMode(mode);
-                    setRate(rateFor(mode));
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="hourly">Hourly rate</SelectItem>
-                    <SelectItem value="day">Day rate</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="crate">
-                  {payMode === "day" ? "Day rate (£)" : "Hourly rate (£)"}
-                </Label>
+                <Label htmlFor="chours">Hours worked</Label>
                 <Input
-                  id="crate"
+                  id="chours"
                   type="number"
-                  step="0.01"
+                  step="0.25"
                   min="0"
-                  value={rate}
-                  onChange={(e) => setRate(e.target.value)}
+                  value={hours}
+                  onChange={(e) => setHours(e.target.value)}
                 />
-                <p className="text-xs text-muted-foreground">From the client record</p>
               </div>
-              {payMode === "day" ? (
+              {hideMaterials ? null : (
                 <div className="space-y-1.5">
-                  <Label htmlFor="cdays">Days worked</Label>
+                  <Label htmlFor="cmat">Materials (£)</Label>
                   <Input
-                    id="cdays"
+                    id="cmat"
                     type="number"
-                    step="0.5"
+                    step="0.01"
                     min="0"
-                    value={days}
-                    onChange={(e) => setDays(e.target.value)}
+                    value={materials}
+                    onChange={(e) => setMaterials(e.target.value)}
                   />
                 </div>
-              ) : null}
-              <p className="self-end text-sm text-muted-foreground sm:col-span-2">
-                Visit total: £{amountOverride.toFixed(2)}
-              </p>
-
+              )}
             </div>
-          )}
-          <div className="space-y-1.5">
-            <Label htmlFor="cdesc">Work done</Label>
-            <Textarea
-              id="cdesc"
-              rows={3}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button type="submit" disabled={busy}>
-              Log visit
-            </Button>
-          </DialogFooter>
-        </form>
+            {hideMaterials ? null : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>Pay basis</Label>
+                  <Select
+                    value={payMode}
+                    onValueChange={(v) => {
+                      const mode = v as "hourly" | "day";
+                      setPayMode(mode);
+                      setRate(rateFor(mode));
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="hourly">Hourly rate</SelectItem>
+                      <SelectItem value="day">Day rate</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="crate">
+                    {payMode === "day" ? "Day rate (£)" : "Hourly rate (£)"}
+                  </Label>
+                  <Input
+                    id="crate"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={rate}
+                    onChange={(e) => setRate(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">From the client record</p>
+                </div>
+                {payMode === "day" ? (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="cdays">Days worked</Label>
+                    <Input
+                      id="cdays"
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      value={days}
+                      onChange={(e) => setDays(e.target.value)}
+                    />
+                  </div>
+                ) : null}
+                <p className="self-end text-sm text-muted-foreground sm:col-span-2">
+                  Visit total: £{amountOverride.toFixed(2)}
+                </p>
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Label htmlFor="cdesc">Work done</Label>
+              <Textarea
+                id="cdesc"
+                rows={3}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
+            </div>
+            <DialogFooter>
+              <Button type="submit" disabled={busy}>
+                Log visit
+              </Button>
+            </DialogFooter>
+          </form>
         )}
       </DialogContent>
     </Dialog>

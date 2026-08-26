@@ -37,12 +37,12 @@ base64 -w0 release.jks   # copy the output
 Then add four repository secrets under **Settings → Secrets and variables →
 Actions**:
 
-| Secret | Value |
-|---|---|
-| `ANDROID_KEYSTORE_BASE64` | the base64 output above |
+| Secret                      | Value                           |
+| --------------------------- | ------------------------------- |
+| `ANDROID_KEYSTORE_BASE64`   | the base64 output above         |
 | `ANDROID_KEYSTORE_PASSWORD` | the keystore password you chose |
-| `ANDROID_KEY_ALIAS` | `jwgarden` |
-| `ANDROID_KEY_PASSWORD` | the key password you chose |
+| `ANDROID_KEY_ALIAS`         | `jwgarden`                      |
+| `ANDROID_KEY_PASSWORD`      | the key password you chose      |
 
 Keep `release.jks` and the passwords somewhere safe. Losing them means future
 builds can no longer update an installed app.

@@ -36,7 +36,8 @@ export type Caller = { userId: string; token: string; supabase: SupabaseClient }
 export async function requireUser(request: Request): Promise<Caller> {
   const authHeader = request.headers.get("authorization");
   if (!authHeader) throw new Error("Unauthorized: no authorization header provided");
-  if (!authHeader.startsWith("Bearer ")) throw new Error("Unauthorized: only Bearer tokens are supported");
+  if (!authHeader.startsWith("Bearer "))
+    throw new Error("Unauthorized: only Bearer tokens are supported");
 
   const token = authHeader.slice("Bearer ".length).trim();
   if (!token || token.split(".").length !== 3) throw new Error("Unauthorized: invalid token");

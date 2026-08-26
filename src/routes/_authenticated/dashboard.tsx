@@ -32,7 +32,10 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({
     meta: [
       { title: "Dashboard — JW Garden Services CRM" },
-      { name: "description", content: "Today's round, hours this month and work waiting to be billed." },
+      {
+        name: "description",
+        content: "Today's round, hours this month and work waiting to be billed.",
+      },
       { property: "og:title", content: "Dashboard — JW Garden Services CRM" },
       {
         property: "og:description",
@@ -132,9 +135,7 @@ function DashboardPage() {
   const todayMinutes = todayJobs.reduce((s, j) => s + Number(j.duration_minutes ?? 0), 0);
 
   // Which days this week carry work, for the dots under the band.
-  const busyDays = new Set(
-    scheduled.map((j) => format(parseISO(j.starts_at), "yyyy-MM-dd")),
-  );
+  const busyDays = new Set(scheduled.map((j) => format(parseISO(j.starts_at), "yyyy-MM-dd")));
 
   const monthVisits = visits.filter((v) => {
     const d = parseISO(v.visit_date);
@@ -153,12 +154,15 @@ function DashboardPage() {
     .sort((a, b) => b.issue_date.localeCompare(a.issue_date))
     .slice(0, 6);
 
-
   const stats = [
     { label: "Hours this month", value: hoursLabel(monthHours), icon: Clock },
     { label: "Value logged", value: money(monthValue), icon: ClipboardList },
     { label: "Unbilled work", value: money(unbilledTotal), icon: PoundSterling },
-    { label: "Jobs next 7 days", value: String(upcoming.length + todayJobs.length), icon: CalendarDays },
+    {
+      label: "Jobs next 7 days",
+      value: String(upcoming.length + todayJobs.length),
+      icon: CalendarDays,
+    },
   ];
 
   return (
@@ -223,8 +227,7 @@ function DashboardPage() {
                 key={job.id}
                 className="stripe flex items-center gap-3 py-3 pl-4 pr-3"
                 style={{
-                  ["--stripe" as string]:
-                    index === 0 ? "var(--color-lime)" : "var(--color-border)",
+                  ["--stripe" as string]: index === 0 ? "var(--color-lime)" : "var(--color-border)",
                 }}
               >
                 <p className="figure w-12 shrink-0 text-base font-semibold leading-none">
@@ -258,9 +261,7 @@ function DashboardPage() {
             <ul className="space-y-1">
               {overdue.slice(0, 5).map((job) => (
                 <li key={job.id} className="flex items-baseline justify-between gap-3 text-sm">
-                  <span className="min-w-0 truncate font-medium">
-                    {clientName(job.client_id)}
-                  </span>
+                  <span className="min-w-0 truncate font-medium">{clientName(job.client_id)}</span>
                   <span className="figure shrink-0 text-xs text-muted-foreground">
                     {format(parseISO(job.starts_at), "EEE d MMM")}
                   </span>
@@ -282,7 +283,9 @@ function DashboardPage() {
       {/* 2. Next 7 days */}
       <Card className="mt-4">
         <CardHeader className="flex-row items-center justify-between">
-          <CardTitle className="font-display text-xl font-bold tracking-tight">Next 7 days</CardTitle>
+          <CardTitle className="font-display text-xl font-bold tracking-tight">
+            Next 7 days
+          </CardTitle>
           <Button asChild size="sm" variant="ghost">
             <Link to="/schedule">Open calendar</Link>
           </Button>
@@ -367,11 +370,13 @@ function DashboardPage() {
         </CardContent>
       </Card>
 
-
       {unbilledTotal > 0 || outstandingTotal > 0 ? (
         <p className="mt-3 text-sm text-muted-foreground">
           {money(unbilledTotal)} ready to bill · {money(outstandingTotal)} awaiting payment.{" "}
-          <Link to="/invoices" className="font-medium text-primary underline-offset-4 hover:underline">
+          <Link
+            to="/invoices"
+            className="font-medium text-primary underline-offset-4 hover:underline"
+          >
             Go to invoices
           </Link>
         </p>

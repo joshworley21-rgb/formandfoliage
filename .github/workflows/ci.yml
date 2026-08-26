@@ -1,0 +1,91 @@
+name: Checks
+
+# Runs the things a contributor would run before pushing: the tests, the type
+# checker, the linter, and a look at whether the generated schema still matches
+# the migrations it is built from.
+#
+# None of this ran anywhere before. The deploy workflow deployed whatever was on
+# the branch, and the only thing standing between a broken build and the phone
+# was somebody remembering to check. That is how supabase/schema.sql came to be
+# three migrations out of date without a word being said.
+#
+# Deliberately not a deploy gate: this reports, the deploy workflow deploys. A
+# red tick here means look before you merge, not that the site is down.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # Feature branches are covered by their pull request. This is for checking one
+  # before opening it, from the Actions tab.
+  workflow_dispatch:
+
+# A second push supersedes the first: no point finishing a run for a commit
+# nobody is looking at any more.
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # --frozen-lockfile so a run can never quietly resolve a different version
+      # from the one the app is built against.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Ordered cheapest and most specific first, and none of them stop the
+      # others: one push should report everything that is wrong, not the first
+      # thing. Each step says what to run locally, because a failure here is
+      # only useful if it can be reproduced in one command.
+      - name: Tests
+        id: tests
+        if: ${{ !cancelled() }}
+        run: bun test
+
+      - name: Types
+        id: types
+        if: ${{ !cancelled() }}
+        run: bunx tsc --noEmit
+
+      - name: Lint
+        id: lint
+        if: ${{ !cancelled() }}
+        run: bun run lint
+
+      # supabase/schema.sql and schema-parts/ are generated from the migrations,
+      # and are what a brand-new project is built from. If they drift, that build
+      # is quietly wrong — which has happened. Regenerate and see if anything
+      # moved.
+      - name: Generated schema matches the migrations
+        id: schema
+        if: ${{ !cancelled() }}
+        run: |
+          scripts/build-schema-sql.sh > /dev/null
+          if ! git diff --quiet -- supabase/schema.sql supabase/schema-parts/; then
+            echo "::error::supabase/schema.sql is out of date. Run scripts/build-schema-sql.sh and commit the result."
+            git diff --stat -- supabase/schema.sql supabase/schema-parts/
+            exit 1
+          fi
+          echo "Generated schema is up to date."
+
+      - name: Summary
+        if: ${{ !cancelled() }}
+        run: |
+          {
+            echo "### Checks"
+            echo ""
+            echo "| Check | Result | Run it yourself |"
+            echo "|---|---|---|"
+            echo "| Tests | ${{ steps.tests.outcome }} | \`bun test\` |"
+            echo "| Types | ${{ steps.types.outcome }} | \`bunx tsc --noEmit\` |"
+            echo "| Lint | ${{ steps.lint.outcome }} | \`bun run lint\` |"
+            echo "| Schema | ${{ steps.schema.outcome }} | \`scripts/build-schema-sql.sh\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

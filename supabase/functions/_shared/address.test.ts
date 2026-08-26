@@ -79,7 +79,9 @@ test("photon: a hit with neither street nor name is not a doorstep", () => {
 
 test("photon: the same address twice is listed once", () => {
   const props = { countrycode: "GB", street: "Example Road", city: "Tring" };
-  expect(photonToSuggestions({ features: [{ properties: props }, { properties: props }] })).toHaveLength(1);
+  expect(
+    photonToSuggestions({ features: [{ properties: props }, { properties: props }] }),
+  ).toHaveLength(1);
 });
 
 test("photon: junk does not throw", () => {
@@ -92,7 +94,11 @@ test("photon: junk does not throw", () => {
 test("getAddress: suggestions carry an id to resolve, not an address", () => {
   const suggestions = getAddressToSuggestions({
     suggestions: [
-      { address: "53 Example Road, Wilstone, Tring, Hertfordshire, HP23 4PE", id: "abc123", url: "/get/abc123" },
+      {
+        address: "53 Example Road, Wilstone, Tring, Hertfordshire, HP23 4PE",
+        id: "abc123",
+        url: "/get/abc123",
+      },
     ],
   });
 
