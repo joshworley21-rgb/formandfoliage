@@ -39,7 +39,10 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - uses: android-actions/setup-android@v3
+      # v4 is the first Node 24 release, and also the one that moves the default
+      # cmdline-tools to 20.0. Both are why this pin is worth a build to confirm
+      # rather than a bump on trust.
+      - uses: android-actions/setup-android@v4
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -103,7 +106,7 @@ jobs:
             -PappVersionName=1.0.${{ github.run_number }}
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: jw-garden-services-apk
           path: |
