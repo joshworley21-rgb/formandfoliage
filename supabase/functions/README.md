@@ -4,20 +4,20 @@ These replace the server functions and API routes the CRM used to run inside the
 web app. Moving them here is what lets the app ship as a standalone Android app:
 the phone talks to Supabase directly, and nothing needs a web server.
 
-| Function | Replaces | Who may call it |
-|---|---|---|
-| `create-invoice` | `createInvoice` server fn | signed-in user |
-| `send-invoice-email` | `sendInvoiceEmail` server fn | signed-in user |
-| `email-status` | `getResendStatus` server fn | signed-in user |
-| `send-test-email` | `sendTestEmail` server fn | signed-in user |
-| `send-quote-email` | new — emails a quote with its accept link | signed-in user |
-| `public-enquiry` | `POST /api/public/enquiry` | anyone (public form) |
-| `public-quote` | new — customer views and answers a quote | anyone with the link |
-| `payment-reminders` | `POST /api/public/hooks/payment-reminders` | scheduler only, via the service-role key |
-| `monzo-connect` | new — connects, inspects and disconnects the Monzo bank feed | signed-in user |
-| `monzo-callback` | new — where Monzo returns the browser after authorising | anyone (a browser mid-OAuth) |
-| `monzo-sync` | new — pulls recent payments and suggests matches | signed-in user, or the scheduler via the service-role key |
-| `monzo-webhook` | new — Monzo posts payments here as they land | Monzo, via a secret token in the URL |
+| Function             | Replaces                                                     | Who may call it                                           |
+| -------------------- | ------------------------------------------------------------ | --------------------------------------------------------- |
+| `create-invoice`     | `createInvoice` server fn                                    | signed-in user                                            |
+| `send-invoice-email` | `sendInvoiceEmail` server fn                                 | signed-in user                                            |
+| `email-status`       | `getResendStatus` server fn                                  | signed-in user                                            |
+| `send-test-email`    | `sendTestEmail` server fn                                    | signed-in user                                            |
+| `send-quote-email`   | new — emails a quote with its accept link                    | signed-in user                                            |
+| `public-enquiry`     | `POST /api/public/enquiry`                                   | anyone (public form)                                      |
+| `public-quote`       | new — customer views and answers a quote                     | anyone with the link                                      |
+| `payment-reminders`  | `POST /api/public/hooks/payment-reminders`                   | scheduler only, via the service-role key                  |
+| `monzo-connect`      | new — connects, inspects and disconnects the Monzo bank feed | signed-in user                                            |
+| `monzo-callback`     | new — where Monzo returns the browser after authorising      | anyone (a browser mid-OAuth)                              |
+| `monzo-sync`         | new — pulls recent payments and suggests matches             | signed-in user, or the scheduler via the service-role key |
+| `monzo-webhook`      | new — Monzo posts payments here as they land                 | Monzo, via a secret token in the URL                      |
 
 `public-quote` is how the customer's accept page reaches a quote: the `quotes`
 table has no anon policy, so this function is the only way in and it returns

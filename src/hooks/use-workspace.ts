@@ -37,10 +37,7 @@ export function useTeam() {
   return useQuery({
     queryKey: ["team_members"],
     queryFn: async (): Promise<TeamMember[]> => {
-      const { data, error } = await supabase
-        .from("team_members")
-        .select("*")
-        .order("created_at");
+      const { data, error } = await supabase.from("team_members").select("*").order("created_at");
       if (error) throw error;
       return data ?? [];
     },

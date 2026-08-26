@@ -84,8 +84,7 @@ export function findVisitForJob<T extends VisitLike>(
 
   return (
     visits.find(
-      (visit) =>
-        visit.client_id === clientId && visit.visit_date === day && !claimed.has(visit.id),
+      (visit) => visit.client_id === clientId && visit.visit_date === day && !claimed.has(visit.id),
     ) ?? null
   );
 }

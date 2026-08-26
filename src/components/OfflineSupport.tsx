@@ -5,12 +5,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
 import { persistQueryClient } from "@tanstack/react-query-persist-client";
 import { registerOfflineSupport } from "@/lib/register-sw";
-import {
-  flushQueue,
-  getQueueSnapshot,
-  startAutoSync,
-  subscribeQueue,
-} from "@/lib/offline-queue";
+import { flushQueue, getQueueSnapshot, startAutoSync, subscribeQueue } from "@/lib/offline-queue";
 
 const emptySnapshot = {
   pending: [] as ReturnType<typeof getQueueSnapshot>["pending"],
@@ -22,11 +17,7 @@ const emptySnapshot = {
 export function OfflineSupport({ queryClient }: { queryClient: QueryClient }) {
   const [offline, setOffline] = useState(false);
 
-  const queue = useSyncExternalStore(
-    subscribeQueue,
-    getQueueSnapshot,
-    () => emptySnapshot,
-  );
+  const queue = useSyncExternalStore(subscribeQueue, getQueueSnapshot, () => emptySnapshot);
 
   useEffect(() => {
     registerOfflineSupport();
@@ -46,9 +37,7 @@ export function OfflineSupport({ queryClient }: { queryClient: QueryClient }) {
 
     const stopSync = startAutoSync((count) => {
       void queryClient.invalidateQueries();
-      toast.success(
-        count === 1 ? "1 saved change synced" : `${count} saved changes synced`,
-      );
+      toast.success(count === 1 ? "1 saved change synced" : `${count} saved changes synced`);
     });
 
     const update = () => setOffline(!navigator.onLine);

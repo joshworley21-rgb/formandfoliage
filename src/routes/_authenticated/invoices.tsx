@@ -89,9 +89,15 @@ export const Route = createFileRoute("/_authenticated/invoices")({
   head: () => ({
     meta: [
       { title: "Invoices — JW Garden Services CRM" },
-      { name: "description", content: "Turn logged visits into branded PDF invoices and email them in one click." },
+      {
+        name: "description",
+        content: "Turn logged visits into branded PDF invoices and email them in one click.",
+      },
       { property: "og:title", content: "Invoices — JW Garden Services CRM" },
-      { property: "og:description", content: "Turn logged visits into branded PDF invoices and email them in one click." },
+      {
+        property: "og:description",
+        content: "Turn logged visits into branded PDF invoices and email them in one click.",
+      },
     ],
   }),
   component: () => (
@@ -107,10 +113,7 @@ export const Route = createFileRoute("/_authenticated/invoices")({
  * exact word. Amber appears here and nowhere else in the app, so on this page
  * it can only ever mean money that is late.
  */
-const STATUS_LOOK: Record<
-  string,
-  { stripe: string; chip: string; label: string }
-> = {
+const STATUS_LOOK: Record<string, { stripe: string; chip: string; label: string }> = {
   draft: {
     stripe: "var(--color-border)",
     chip: "border-border text-muted-foreground",
@@ -131,9 +134,7 @@ const STATUS_LOOK: Record<
 /** Sent, issued more than 30 days ago, and still not paid. */
 function daysOverdue(invoice: Invoice): number {
   if (invoice.status === "paid") return 0;
-  const days = Math.floor(
-    (Date.now() - parseISO(invoice.issue_date).getTime()) / 86_400_000,
-  );
+  const days = Math.floor((Date.now() - parseISO(invoice.issue_date).getTime()) / 86_400_000);
   return days > 30 ? days - 30 : 0;
 }
 
@@ -218,14 +219,12 @@ function InvoicesPage() {
   }, [clientFromLink, navigate]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [openHistory, setOpenHistory] = useState<string | null>(null);
-  const [preview, setPreview] = useState<
-    {
-      invoice: Invoice;
-      client: Client;
-      items: InvoiceItem[];
-      intent: "download" | "send";
-    } | null
-  >(null);
+  const [preview, setPreview] = useState<{
+    invoice: Invoice;
+    client: Client;
+    items: InvoiceItem[];
+    intent: "download" | "send";
+  } | null>(null);
 
   const queryClient = useQueryClient();
 
@@ -282,8 +281,6 @@ function InvoicesPage() {
   function closePreview() {
     setPreview(null);
   }
-
-
 
   async function sendOneClick(invoice: Invoice) {
     try {
@@ -379,79 +376,77 @@ function InvoicesPage() {
 
               {/* Everything else stays small, because it is not what you came for. */}
               <div className="flex flex-wrap items-center gap-1">
-                  {invoice.status !== "paid" ? (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={async () => {
-                        await updateInvoice.mutateAsync({
-                          id: invoice.id,
-                          patch: { status: "paid", paid_at: new Date().toISOString() },
-                        });
-                        toast.success("Marked as paid");
-                      }}
-                    >
-                      Mark paid
-                    </Button>
-                  ) : null}
+                {invoice.status !== "paid" ? (
                   <Button
                     variant="ghost"
                     size="sm"
-                    aria-label="Email history"
-                    onClick={() =>
-                      setOpenHistory((current) => (current === invoice.id ? null : invoice.id))
-                    }
+                    onClick={async () => {
+                      await updateInvoice.mutateAsync({
+                        id: invoice.id,
+                        patch: { status: "paid", paid_at: new Date().toISOString() },
+                      });
+                      toast.success("Marked as paid");
+                    }}
                   >
-                    <History className="size-4" />
-                    {openHistory === invoice.id ? (
-                      <ChevronUp className="size-4" />
-                    ) : (
-                      <ChevronDown className="size-4" />
-                    )}
+                    Mark paid
                   </Button>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        aria-label={`Delete invoice ${invoice.number}`}
-                        className="text-destructive hover:text-destructive"
+                ) : null}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Email history"
+                  onClick={() =>
+                    setOpenHistory((current) => (current === invoice.id ? null : invoice.id))
+                  }
+                >
+                  <History className="size-4" />
+                  {openHistory === invoice.id ? (
+                    <ChevronUp className="size-4" />
+                  ) : (
+                    <ChevronDown className="size-4" />
+                  )}
+                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`Delete invoice ${invoice.number}`}
+                      className="text-destructive hover:text-destructive"
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete {invoice.number}?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This removes the invoice, its lines and its email history. Any visits on it
+                        go back to unbilled so you can invoice them again.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={async () => {
+                          try {
+                            await deleteInvoice.mutateAsync(invoice.id);
+                            toast.success(`Invoice ${invoice.number} deleted`);
+                          } catch (error) {
+                            toast.error(
+                              error instanceof Error ? error.message : "Could not delete",
+                            );
+                          }
+                        }}
                       >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Delete {invoice.number}?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          This removes the invoice, its lines and its email history. Any visits on
-                          it go back to unbilled so you can invoice them again.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction
-                          onClick={async () => {
-                            try {
-                              await deleteInvoice.mutateAsync(invoice.id);
-                              toast.success(`Invoice ${invoice.number} deleted`);
-                            } catch (error) {
-                              toast.error(
-                                error instanceof Error ? error.message : "Could not delete",
-                              );
-                            }
-                          }}
-                        >
-                          Delete invoice
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </div>
+                        Delete invoice
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
 
-              <LastAttempt
-                event={emailEvents.find((e) => e.invoice_id === invoice.id) ?? null}
-              />
+              <LastAttempt event={emailEvents.find((e) => e.invoice_id === invoice.id) ?? null} />
               {openHistory === invoice.id ? <EmailHistory invoiceId={invoice.id} /> : null}
             </InvoiceCard>
           ))}
@@ -524,21 +519,19 @@ function InvoicesPage() {
   );
 }
 
-const EVENT_META: Record<
-  string,
-  { label: string; icon: typeof CheckCircle2; className: string }
-> = {
-  sent: { label: "Sent", icon: CheckCircle2, className: "text-primary" },
-  failed: { label: "Failed", icon: AlertCircle, className: "text-destructive" },
-  skipped: { label: "Not sent", icon: MinusCircle, className: "text-muted-foreground" },
-  // Reported by Resend after the fact, through the webhook.
-  delivered: { label: "Delivered", icon: MailCheck, className: "text-primary" },
-  opened: { label: "Opened", icon: Eye, className: "text-primary" },
-  clicked: { label: "Link clicked", icon: MousePointerClick, className: "text-primary" },
-  bounced: { label: "Bounced", icon: AlertCircle, className: "text-destructive" },
-  complained: { label: "Marked as spam", icon: AlertCircle, className: "text-destructive" },
-  delivery_delayed: { label: "Delayed", icon: Clock, className: "text-muted-foreground" },
-};
+const EVENT_META: Record<string, { label: string; icon: typeof CheckCircle2; className: string }> =
+  {
+    sent: { label: "Sent", icon: CheckCircle2, className: "text-primary" },
+    failed: { label: "Failed", icon: AlertCircle, className: "text-destructive" },
+    skipped: { label: "Not sent", icon: MinusCircle, className: "text-muted-foreground" },
+    // Reported by Resend after the fact, through the webhook.
+    delivered: { label: "Delivered", icon: MailCheck, className: "text-primary" },
+    opened: { label: "Opened", icon: Eye, className: "text-primary" },
+    clicked: { label: "Link clicked", icon: MousePointerClick, className: "text-primary" },
+    bounced: { label: "Bounced", icon: AlertCircle, className: "text-destructive" },
+    complained: { label: "Marked as spam", icon: AlertCircle, className: "text-destructive" },
+    delivery_delayed: { label: "Delayed", icon: Clock, className: "text-muted-foreground" },
+  };
 
 /** The statuses whose detail line is worth showing next to the label. */
 const DETAIL_WORTH_SHOWING = new Set(["failed", "skipped", "bounced", "complained"]);
@@ -560,7 +553,9 @@ function LastAttempt({ event }: { event: InvoiceEmailEvent | null }) {
       {event.recipient ? <span>to {event.recipient}</span> : null}
       <span>·</span>
       <span>{format(parseISO(event.created_at), "d MMM yyyy, HH:mm")}</span>
-      {event.detail && DETAIL_WORTH_SHOWING.has(event.status) ? <span>· {event.detail}</span> : null}
+      {event.detail && DETAIL_WORTH_SHOWING.has(event.status) ? (
+        <span>· {event.detail}</span>
+      ) : null}
     </p>
   );
 }
@@ -649,7 +644,6 @@ function NewInvoiceDialog({
     new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
   );
 
-
   // The dialog stays mounted between openings, so its fields are put back
   // deliberately each time — otherwise the last invoice's notes and retainer
   // would be waiting in the next one.
@@ -657,7 +651,9 @@ function NewInvoiceDialog({
     if (!open) return;
     const client = initialClientId ?? "";
     setClientId(client);
-    setSelected(client ? unbilledVisits.filter((v) => v.client_id === client).map((v) => v.id) : []);
+    setSelected(
+      client ? unbilledVisits.filter((v) => v.client_id === client).map((v) => v.id) : [],
+    );
     setRetainer("0");
     setRetainerDescription("");
     setNotes("");
@@ -674,9 +670,8 @@ function NewInvoiceDialog({
   );
 
   const total =
-    clientVisits
-      .filter((v) => selected.includes(v.id))
-      .reduce((s, v) => s + Number(v.amount), 0) + (Number(retainer) || 0);
+    clientVisits.filter((v) => selected.includes(v.id)).reduce((s, v) => s + Number(v.amount), 0) +
+    (Number(retainer) || 0);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -687,7 +682,6 @@ function NewInvoiceDialog({
         retainerDescription: retainerDescription || null,
         notes: notes || null,
         dueDate: dueDate || null,
-
       }),
     onError: (error) =>
       toast.error(error instanceof Error ? error.message : "Could not create the invoice"),
@@ -795,10 +789,14 @@ function NewInvoiceDialog({
             </p>
           </div>
 
-
           <div className="space-y-1.5">
             <Label htmlFor="inotes">Invoice notes</Label>
-            <Textarea id="inotes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+            <Textarea
+              id="inotes"
+              rows={2}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
           </div>
 
           <p className="text-sm text-muted-foreground">

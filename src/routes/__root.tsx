@@ -35,7 +35,6 @@ const APPLE_SPLASH_LINKS = (
   media: `(device-width: ${cssW}px) and (device-height: ${cssH}px) and (-webkit-device-pixel-ratio: ${dpr}) and (orientation: portrait)`,
 }));
 
-
 function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -188,8 +187,6 @@ function SplashDismiss() {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
-
-
   return (
     <QueryClientProvider client={queryClient}>
       <AuthSync />
@@ -208,4 +205,3 @@ function RootComponent() {
     </QueryClientProvider>
   );
 }
-

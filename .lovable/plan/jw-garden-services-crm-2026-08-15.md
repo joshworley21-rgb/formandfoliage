@@ -42,8 +42,6 @@ A Recurring tab shows every schedule, its next due date, and lets you pause, edi
 
 **Dashboard** gains a "Today / next 7 days" round list with client address and phone for quick directions and calls, plus a count of overdue jobs still awaiting completion.
 
-
-
 ## What's needed from you
 
 - Lovable Cloud is enabled for the database, your login, and PDF storage.

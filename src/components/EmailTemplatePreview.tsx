@@ -92,7 +92,8 @@ export function EmailTemplatePreview({
           <div className="space-y-1 border-b bg-muted/40 px-4 py-3 text-sm">
             <p>
               <span className="text-muted-foreground">From: </span>
-              {(businessName || "JW Garden Services") + ` <${fromEmail || "onboarding@resend.dev"}>`}
+              {(businessName || "JW Garden Services") +
+                ` <${fromEmail || "onboarding@resend.dev"}>`}
             </p>
             {replyToEmail && replyToEmail !== fromEmail ? (
               <p>
@@ -114,7 +115,7 @@ export function EmailTemplatePreview({
             dangerouslySetInnerHTML={{ __html: html }}
           />
           <div className="border-t px-4 py-2 text-xs text-muted-foreground">
-            Attachment: {(invoice?.number ?? `${invoicePrefix || "JW-"}0001`)}.pdf
+            Attachment: {invoice?.number ?? `${invoicePrefix || "JW-"}0001`}.pdf
           </div>
         </div>
         <p className="text-xs text-muted-foreground">

@@ -2,11 +2,7 @@ import { Loader2, MapPin, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  resolveAddress,
-  searchAddresses,
-  type AddressSuggestion,
-} from "@/lib/invoicing";
+import { resolveAddress, searchAddresses, type AddressSuggestion } from "@/lib/invoicing";
 
 /**
  * Finds an address so it does not have to be typed on a phone.
@@ -153,8 +149,6 @@ export function AddressSearch({ onPick }: { onPick: (address: string) => void })
 
 /** The postcode out of what was typed, for filling a gap in a resolved record. */
 function postcodeIn(query: string): string | undefined {
-  const match = query
-    .toUpperCase()
-    .match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/);
+  const match = query.toUpperCase().match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/);
   return match ? match[0].replace(/\s+/g, " ") : undefined;
 }

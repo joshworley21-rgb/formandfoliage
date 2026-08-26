@@ -89,7 +89,8 @@ Deno.serve(
       await logEvent("skipped", "Email is not connected — Resend is not set up yet.");
       return json({
         sent: false,
-        reason: "Email is not connected yet — connect Resend in Settings to send invoices by email.",
+        reason:
+          "Email is not connected yet — connect Resend in Settings to send invoices by email.",
       });
     }
 

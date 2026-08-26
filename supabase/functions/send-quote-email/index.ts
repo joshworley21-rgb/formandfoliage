@@ -35,7 +35,10 @@ Deno.serve(
     if (!quote.contact_email) throw new Error("This quote has no email address to send to");
 
     if (!isEmailConfigured()) {
-      return json({ sent: false, reason: "Email is not connected yet — set up Resend in Settings." });
+      return json({
+        sent: false,
+        reason: "Email is not connected yet — set up Resend in Settings.",
+      });
     }
 
     const { data: items } = await supabase

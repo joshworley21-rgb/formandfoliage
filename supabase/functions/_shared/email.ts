@@ -26,8 +26,7 @@ export type SendEmailInput = {
 };
 
 export type SendEmailResult =
-  | { ok: true; id: string | null }
-  | { ok: false; status: number; detail: string };
+  { ok: true; id: string | null } | { ok: false; status: number; detail: string };
 
 function apiKey(): string | undefined {
   return Deno.env.get("RESEND_API_KEY");
@@ -116,7 +115,11 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
     const body = await response.text();
     // The blob goes to the logs; the caller gets something a person can act on.
     console.error("Resend rejected the send", response.status, body);
-    return { ok: false, status: response.status, detail: explainResendError(response.status, body) };
+    return {
+      ok: false,
+      status: response.status,
+      detail: explainResendError(response.status, body),
+    };
   }
 
   try {

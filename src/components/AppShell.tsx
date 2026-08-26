@@ -17,13 +17,7 @@ import { useState, type ReactNode } from "react";
 import { InstallAppBanner } from "@/components/InstallAppBanner";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useIsStaff } from "@/hooks/use-workspace";
 import { signOutHere } from "@/lib/session";
 import { cn } from "@/lib/utils";
@@ -46,12 +40,7 @@ const STAFF_NAV_PATHS = ["/schedule", "/clients"];
 // These four are the ones wanted mid-job; everything else lives behind More,
 // which is what stops the rest — Settings and Invoices among them — from being
 // silently unreachable on a phone.
-const PHONE_BAR_PATHS: readonly string[] = [
-  "/dashboard",
-  "/schedule",
-  "/clients",
-  "/invoices",
-];
+const PHONE_BAR_PATHS: readonly string[] = ["/dashboard", "/schedule", "/clients", "/invoices"];
 
 export function AppShell({
   title,
@@ -137,21 +126,21 @@ export function AppShell({
 
         <main className="flex-1 px-4 pb-32 pt-5 lg:px-8 lg:pb-12">
           <MaybePullToRefresh onRefresh={onRefresh}>
-          <div className="mx-auto w-full max-w-5xl">
-            <InstallAppBanner />
-            <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <h1 className="font-display text-[1.75rem] font-bold leading-none tracking-tight text-foreground lg:text-4xl">
-                  {title}
-                </h1>
-                {description ? (
-                  <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-                ) : null}
+            <div className="mx-auto w-full max-w-5xl">
+              <InstallAppBanner />
+              <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h1 className="font-display text-[1.75rem] font-bold leading-none tracking-tight text-foreground lg:text-4xl">
+                    {title}
+                  </h1>
+                  {description ? (
+                    <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+                  ) : null}
+                </div>
+                {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
               </div>
-              {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
+              {children}
             </div>
-            {children}
-          </div>
           </MaybePullToRefresh>
         </main>
 
@@ -239,7 +228,6 @@ export function AppShell({
     </div>
   );
 }
-
 
 /** Keeps the markup identical on pages that have not opted in. */
 function MaybePullToRefresh({

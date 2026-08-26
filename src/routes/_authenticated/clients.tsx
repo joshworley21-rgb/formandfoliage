@@ -33,9 +33,15 @@ export const Route = createFileRoute("/_authenticated/clients")({
   head: () => ({
     meta: [
       { title: "Clients — JW Garden Services CRM" },
-      { name: "description", content: "Manage garden maintenance clients, rates and contact details." },
+      {
+        name: "description",
+        content: "Manage garden maintenance clients, rates and contact details.",
+      },
       { property: "og:title", content: "Clients — JW Garden Services CRM" },
-      { property: "og:description", content: "Manage garden maintenance clients, rates and contact details." },
+      {
+        property: "og:description",
+        content: "Manage garden maintenance clients, rates and contact details.",
+      },
     ],
   }),
   component: ClientsPage,
@@ -106,128 +112,132 @@ function ClientsPage() {
   return (
     <AppShell
       title="Clients"
-      description={isStaff ? "Gardens on your round, with access notes." : "Every garden you look after, with their rates."}
+      description={
+        isStaff
+          ? "Gardens on your round, with access notes."
+          : "Every garden you look after, with their rates."
+      }
       actions={
         isStaff ? null : (
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={openNew}>
-              <Plus className="size-4" /> New client
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{editing ? "Edit client" : "New client"}</DialogTitle>
-            </DialogHeader>
-            <form className="space-y-3" onSubmit={submit}>
-              <div className="space-y-1.5">
-                <Label htmlFor="name">Name</Label>
-                <Input
-                  id="name"
-                  required
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                />
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button onClick={openNew}>
+                <Plus className="size-4" /> New client
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>{editing ? "Edit client" : "New client"}</DialogTitle>
+              </DialogHeader>
+              <form className="space-y-3" onSubmit={submit}>
                 <div className="space-y-1.5">
-                  <Label htmlFor="phone">Phone</Label>
+                  <Label htmlFor="name">Name</Label>
                   <Input
-                    id="phone"
-                    value={form.phone}
-                    onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                    id="name"
+                    required
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="email">Email (for invoices)</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={form.email}
-                    onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="phone">Phone</Label>
+                    <Input
+                      id="phone"
+                      value={form.phone}
+                      onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="email">Email (for invoices)</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={form.email}
+                      onChange={(e) => setForm({ ...form, email: e.target.value })}
+                    />
+                  </div>
                 </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="address">Address</Label>
-                {/*
+                <div className="space-y-1.5">
+                  <Label htmlFor="address">Address</Label>
+                  {/*
                   Search fills the field; the field stays editable underneath.
                   A garden the lookup has never heard of, or no signal at all,
                   must never be a reason you cannot add a client.
                 */}
-                <AddressSearch
-                  // Functional update: a tap resolves over the network, and the
-                  // name may have been typed since, so the form must not be
-                  // rebuilt from a snapshot taken before the lookup started.
-                  onPick={(address) => setForm((current) => ({ ...current, address }))}
-                />
-                <Textarea
-                  id="address"
-                  // Five lines: a full UK address is house, street, village,
-                  // town, county, postcode, and clipping the postcode is the
-                  // one line worth seeing.
-                  rows={5}
-                  value={form.address}
-                  onChange={(e) => setForm({ ...form, address: e.target.value })}
-                />
-              </div>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="space-y-1.5">
-                  <Label>Billing</Label>
-                  <Select
-                    value={form.billing_mode}
-                    onValueChange={(v) => setForm({ ...form, billing_mode: v as BillingMode })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="hourly">Hourly</SelectItem>
-                      <SelectItem value="fixed">Fixed per visit</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="rate">Hourly rate (£)</Label>
-                  <Input
-                    id="rate"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={form.hourly_rate}
-                    onChange={(e) => setForm({ ...form, hourly_rate: e.target.value })}
+                  <AddressSearch
+                    // Functional update: a tap resolves over the network, and the
+                    // name may have been typed since, so the form must not be
+                    // rebuilt from a snapshot taken before the lookup started.
+                    onPick={(address) => setForm((current) => ({ ...current, address }))}
+                  />
+                  <Textarea
+                    id="address"
+                    // Five lines: a full UK address is house, street, village,
+                    // town, county, postcode, and clipping the postcode is the
+                    // one line worth seeing.
+                    rows={5}
+                    value={form.address}
+                    onChange={(e) => setForm({ ...form, address: e.target.value })}
                   />
                 </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="space-y-1.5">
+                    <Label>Billing</Label>
+                    <Select
+                      value={form.billing_mode}
+                      onValueChange={(v) => setForm({ ...form, billing_mode: v as BillingMode })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="hourly">Hourly</SelectItem>
+                        <SelectItem value="fixed">Fixed per visit</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="rate">Hourly rate (£)</Label>
+                    <Input
+                      id="rate"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={form.hourly_rate}
+                      onChange={(e) => setForm({ ...form, hourly_rate: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="fixed">Fixed price (£)</Label>
+                    <Input
+                      id="fixed"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={form.fixed_price}
+                      onChange={(e) => setForm({ ...form, fixed_price: e.target.value })}
+                    />
+                  </div>
+                </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="fixed">Fixed price (£)</Label>
-                  <Input
-                    id="fixed"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={form.fixed_price}
-                    onChange={(e) => setForm({ ...form, fixed_price: e.target.value })}
+                  <Label htmlFor="notes">Notes</Label>
+                  <Textarea
+                    id="notes"
+                    rows={2}
+                    placeholder="Gate code, dog, bin day…"
+                    value={form.notes}
+                    onChange={(e) => setForm({ ...form, notes: e.target.value })}
                   />
                 </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="notes">Notes</Label>
-                <Textarea
-                  id="notes"
-                  rows={2}
-                  placeholder="Gate code, dog, bin day…"
-                  value={form.notes}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                />
-              </div>
-              <DialogFooter>
-                <Button type="submit" disabled={save.isPending}>
-                  Save client
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+                <DialogFooter>
+                  <Button type="submit" disabled={save.isPending}>
+                    Save client
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
         )
       }
     >
@@ -263,40 +273,47 @@ function ClientsPage() {
                     <p className="mt-1 line-clamp-2 text-sm text-foreground/80">{client.notes}</p>
                   ) : null}
                   {isStaff ? null : (
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <Badge variant="secondary">
-                      {client.billing_mode === "fixed"
-                        ? `${money(client.fixed_price)} / visit`
-                        : `${money(client.hourly_rate)} / hour`}
-                    </Badge>
-                    {client.email ? (
-                      <span className="min-w-0 truncate text-xs text-muted-foreground">
-                        {client.email}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-warning-foreground">No email for invoices</span>
-                    )}
-                  </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <Badge variant="secondary">
+                        {client.billing_mode === "fixed"
+                          ? `${money(client.fixed_price)} / visit`
+                          : `${money(client.hourly_rate)} / hour`}
+                      </Badge>
+                      {client.email ? (
+                        <span className="min-w-0 truncate text-xs text-muted-foreground">
+                          {client.email}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-warning-foreground">
+                          No email for invoices
+                        </span>
+                      )}
+                    </div>
                   )}
                 </div>
                 {isStaff ? null : (
-                <div className="flex shrink-0 gap-1">
-                  <Button variant="ghost" size="icon" onClick={() => openEdit(client)} aria-label="Edit">
-                    <Pencil className="size-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label="Delete"
-                    onClick={async () => {
-                      if (!confirm(`Delete ${client.name} and all their records?`)) return;
-                      await remove.mutateAsync(client.id);
-                      toast.success("Client deleted");
-                    }}
-                  >
-                    <Trash2 className="size-4 text-destructive" />
-                  </Button>
-                </div>
+                  <div className="flex shrink-0 gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => openEdit(client)}
+                      aria-label="Edit"
+                    >
+                      <Pencil className="size-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Delete"
+                      onClick={async () => {
+                        if (!confirm(`Delete ${client.name} and all their records?`)) return;
+                        await remove.mutateAsync(client.id);
+                        toast.success("Client deleted");
+                      }}
+                    >
+                      <Trash2 className="size-4 text-destructive" />
+                    </Button>
+                  </div>
                 )}
               </CardContent>
             </Card>

@@ -62,21 +62,17 @@ export function useClients() {
   });
 }
 
-
 export function useSaveClient() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: Partial<Client> & { name: string }) => {
       const user_id = await currentUserId();
       const payload = { ...input, user_id };
-      await runOrQueue(
-        input.id ? `Client "${input.name}" update` : `New client "${input.name}"`,
-        [
-          input.id
-            ? { kind: "update", table: "clients", payload, match: { id: input.id } }
-            : { kind: "insert", table: "clients", payload },
-        ],
-      );
+      await runOrQueue(input.id ? `Client "${input.name}" update` : `New client "${input.name}"`, [
+        input.id
+          ? { kind: "update", table: "clients", payload, match: { id: input.id } }
+          : { kind: "insert", table: "clients", payload },
+      ]);
     },
     onSuccess: () => qc.invalidateQueries(),
   });
@@ -86,9 +82,7 @@ export function useDeleteClient() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      await runOrQueue("Delete client", [
-        { kind: "delete", table: "clients", match: { id } },
-      ]);
+      await runOrQueue("Delete client", [{ kind: "delete", table: "clients", match: { id } }]);
     },
     onSuccess: () => qc.invalidateQueries(),
   });
@@ -150,9 +144,7 @@ export function useDeleteVisit() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      await runOrQueue("Delete visit", [
-        { kind: "delete", table: "visits", match: { id } },
-      ]);
+      await runOrQueue("Delete visit", [{ kind: "delete", table: "visits", match: { id } }]);
     },
     onSuccess: () => qc.invalidateQueries(),
   });
@@ -209,9 +201,7 @@ export function useDeleteJob() {
         ]);
         return;
       }
-      await runOrQueue("Delete job", [
-        { kind: "delete", table: "scheduled_jobs", match: { id } },
-      ]);
+      await runOrQueue("Delete job", [{ kind: "delete", table: "scheduled_jobs", match: { id } }]);
     },
     onSuccess: () => qc.invalidateQueries(),
   });
@@ -493,7 +483,15 @@ export function useJobPhotos(jobId?: string) {
 export function useUploadJobPhoto() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ jobId, file, caption }: { jobId: string; file: File; caption?: string }) => {
+    mutationFn: async ({
+      jobId,
+      file,
+      caption,
+    }: {
+      jobId: string;
+      file: File;
+      caption?: string;
+    }) => {
       const user_id = await workspaceOwnerId();
       const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
       const path = `${user_id}/${jobId}/${crypto.randomUUID()}.${ext}`;
