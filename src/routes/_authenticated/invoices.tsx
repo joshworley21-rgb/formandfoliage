@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { InvoiceReminders } from "@/components/InvoiceReminders";
 import { PaymentsToReview } from "@/components/PaymentsToReview";
+import { SearchField } from "@/components/SearchField";
 import { OwnerOnly } from "@/components/OwnerOnly";
 import {
   AlertDialog,
@@ -78,6 +79,7 @@ import {
 import { InvoicePreviewDoc } from "@/components/InvoicePreviewDoc";
 import { buildInvoicePdf, pdfToBase64 } from "@/lib/invoice-pdf";
 import { createInvoice, sendInvoiceEmail } from "@/lib/invoicing";
+import { filterBy, SEARCH_FROM } from "@/lib/search";
 
 export const Route = createFileRoute("/_authenticated/invoices")({
   // "Create invoice" on a reminder names the client it is nagging about, so
@@ -218,6 +220,7 @@ function InvoicesPage() {
     navigate({ to: "/invoices", search: {}, replace: true });
   }, [clientFromLink, navigate]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const [openHistory, setOpenHistory] = useState<string | null>(null);
   const [preview, setPreview] = useState<{
     invoice: Invoice;
@@ -305,6 +308,16 @@ function InvoicesPage() {
   const owedTotal = unpaid.reduce((sum, i) => sum + Number(i.total), 0);
   const unpaidCount = unpaid.length;
 
+  // Client name as well as the number, because an invoice is remembered as
+  // "the one for Mrs Smith" far more often than as JW-0007. Status is searchable
+  // too, so "paid" and "draft" work as filters without needing their own control.
+  const shown = filterBy(invoices, query, (invoice) => [
+    invoice.number,
+    clientName(invoice.client_id),
+    invoice.status,
+    invoice.notes,
+  ]);
+
   return (
     <AppShell
       title="Invoices"
@@ -336,6 +349,19 @@ function InvoicesPage() {
         <InvoiceReminders compact />
       </div>
 
+      {/* The total above always counts every unpaid invoice, searched or not:
+          a filtered list must never make the amount owed look smaller. */}
+      {invoices.length > SEARCH_FROM ? (
+        <div className="mb-3">
+          <SearchField
+            value={query}
+            onChange={setQuery}
+            label="Search invoices"
+            placeholder="Invoice number or client"
+          />
+        </div>
+      ) : null}
+
       {invoices.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
@@ -345,9 +371,15 @@ function InvoicesPage() {
             </p>
           </CardContent>
         </Card>
+      ) : shown.length === 0 ? (
+        <Card>
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+            No invoice matches “{query}”.
+          </CardContent>
+        </Card>
       ) : (
         <div className="space-y-2">
-          {invoices.map((invoice) => (
+          {shown.map((invoice) => (
             <InvoiceCard
               key={invoice.id}
               invoice={invoice}

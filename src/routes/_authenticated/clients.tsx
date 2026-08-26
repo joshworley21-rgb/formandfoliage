@@ -4,6 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { AddressSearch } from "@/components/AddressSearch";
 import { AppShell } from "@/components/AppShell";
+import { SearchField } from "@/components/SearchField";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -28,6 +29,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useClients, useDeleteClient, useSaveClient } from "@/hooks/use-crm";
 import { useIsStaff } from "@/hooks/use-workspace";
 import { money, type BillingMode, type Client } from "@/lib/crm";
+import { filterBy, SEARCH_FROM } from "@/lib/search";
 
 export const Route = createFileRoute("/_authenticated/clients")({
   head: () => ({
@@ -66,6 +68,19 @@ function ClientsPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
   const [form, setForm] = useState(EMPTY);
+  const [query, setQuery] = useState("");
+
+  // Address included so a postcode or a village finds the client, which is how
+  // you think of them when you are standing outside the wrong house. Phone and
+  // email are in here too but never shown to staff, so they are only searched
+  // when they were loaded in the first place.
+  const shown = filterBy(clients, query, (client) => [
+    client.name,
+    client.address,
+    client.phone,
+    client.email,
+    client.notes,
+  ]);
 
   function openNew() {
     setEditing(null);
@@ -241,6 +256,19 @@ function ClientsPage() {
         )
       }
     >
+      {/* Only worth the space once there is enough here to lose something in.
+          Below that the list is the search. */}
+      {clients.length > SEARCH_FROM ? (
+        <div className="mb-3">
+          <SearchField
+            value={query}
+            onChange={setQuery}
+            label="Search clients"
+            placeholder="Name, address or postcode"
+          />
+        </div>
+      ) : null}
+
       {isLoading ? (
         <p className="text-sm text-muted-foreground">Loading clients…</p>
       ) : clients.length === 0 ? (
@@ -249,9 +277,15 @@ function ClientsPage() {
             No clients yet. Add your first one to start scheduling jobs.
           </CardContent>
         </Card>
+      ) : shown.length === 0 ? (
+        <Card>
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+            No client matches “{query}”.
+          </CardContent>
+        </Card>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
-          {clients.map((client) => (
+          {shown.map((client) => (
             /*
               min-w-0 is load-bearing. A grid item defaults to min-width:auto,
               and "truncate" sets white-space:nowrap, which makes the address
