@@ -13,7 +13,7 @@ only thing behind it is Supabase — there is no server of our own to keep alive
 |---|---|
 | React SPA (TanStack Router/Start, Vite) | The whole app. Runs in the browser or inside the Android WebView. |
 | Supabase | Postgres with row-level security, auth, and file storage for invoice PDFs. |
-| Edge Functions | The few jobs that need a server: invoice numbering, sending email, the public enquiry and quote endpoints, and overdue reminders. See `supabase/functions/README.md`. |
+| Edge Functions | The few jobs that need a server: invoice numbering, sending email, the public enquiry and quote endpoints, overdue reminders, and the Monzo bank feed. See `supabase/functions/README.md`. |
 | Capacitor | Wraps the built app as an Android APK. See `ANDROID-APK.md`. |
 
 Invoice and quote PDFs are generated on the device with jsPDF, so no rendering
@@ -43,9 +43,19 @@ bun run dev      # http://localhost:8080
 `.env` holds the Supabase URL and publishable key. Both are public client
 values, which is why they are committed.
 
-Secrets are never kept here. The Resend API key lives only in the Edge Function
-secrets (`supabase secrets set RESEND_API_KEY=...`), and the service-role key
-only in Supabase itself. Nothing in this repo needs either.
+Secrets are never kept here. The Resend API key and the Monzo OAuth credentials
+live only in the Edge Function secrets (`supabase secrets set RESEND_API_KEY=...`,
+`MONZO_CLIENT_ID`, `MONZO_CLIENT_SECRET`), and the service-role key only in
+Supabase itself. Nothing in this repo needs any of them.
+
+## Getting paid
+
+Invoices can always be marked paid by hand. Connecting Monzo under Settings adds
+a bank feed on top: payments into the account appear on the Invoices screen with
+a suggestion of which invoice they settle and a sentence explaining the guess,
+and a tap confirms it. Nothing is ever marked paid on its own — a wrongly
+settled invoice stops being chased, which costs more than a tap. Setup, and the
+limits of Monzo's developer API, are in `supabase/functions/README.md`.
 
 ## Setting up Supabase from scratch
 

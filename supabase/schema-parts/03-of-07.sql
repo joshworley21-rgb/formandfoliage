@@ -1,4 +1,4 @@
--- JW Garden Services CRM schema — part 3 of 5.
+-- JW Garden Services CRM schema — part 3 of 7.
 --
 -- GENERATED FILE. Run the parts in order, one at a time, in the Supabase
 -- SQL Editor. Each part is its own transaction: if one fails, nothing in

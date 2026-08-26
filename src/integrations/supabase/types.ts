@@ -19,40 +19,55 @@ export type Database = {
           access_token: string
           account_id: string | null
           account_name: string | null
+          account_type: string | null
+          approved_at: string | null
           created_at: string
           expires_at: string | null
           id: string
+          last_sync_error: string | null
           last_synced_at: string | null
           provider: string
           refresh_token: string | null
           updated_at: string
           user_id: string
+          webhook_id: string | null
+          webhook_secret: string | null
         }
         Insert: {
           access_token: string
           account_id?: string | null
           account_name?: string | null
+          account_type?: string | null
+          approved_at?: string | null
           created_at?: string
           expires_at?: string | null
           id?: string
+          last_sync_error?: string | null
           last_synced_at?: string | null
           provider?: string
           refresh_token?: string | null
           updated_at?: string
           user_id: string
+          webhook_id?: string | null
+          webhook_secret?: string | null
         }
         Update: {
           access_token?: string
           account_id?: string | null
           account_name?: string | null
+          account_type?: string | null
+          approved_at?: string | null
           created_at?: string
           expires_at?: string | null
           id?: string
+          last_sync_error?: string | null
           last_synced_at?: string | null
           provider?: string
           refresh_token?: string | null
           updated_at?: string
           user_id?: string
+          webhook_id?: string | null
+          webhook_secret?: string | null
         }
         Relationships: []
       }
@@ -66,10 +81,14 @@ export type Database = {
           id: string
           ignored: boolean
           invoice_id: string | null
+          match_reason: string | null
           matched_at: string | null
           posted_at: string
           provider_transaction_id: string
           reference: string | null
+          reviewed_at: string | null
+          settled_at: string | null
+          suggested_invoice_id: string | null
           updated_at: string
           user_id: string
         }
@@ -82,10 +101,14 @@ export type Database = {
           id?: string
           ignored?: boolean
           invoice_id?: string | null
+          match_reason?: string | null
           matched_at?: string | null
           posted_at: string
           provider_transaction_id: string
           reference?: string | null
+          reviewed_at?: string | null
+          settled_at?: string | null
+          suggested_invoice_id?: string | null
           updated_at?: string
           user_id: string
         }
@@ -98,10 +121,14 @@ export type Database = {
           id?: string
           ignored?: boolean
           invoice_id?: string | null
+          match_reason?: string | null
           matched_at?: string | null
           posted_at?: string
           provider_transaction_id?: string
           reference?: string | null
+          reviewed_at?: string | null
+          settled_at?: string | null
+          suggested_invoice_id?: string | null
           updated_at?: string
           user_id?: string
         }
@@ -109,6 +136,13 @@ export type Database = {
           {
             foreignKeyName: "bank_transactions_invoice_id_fkey"
             columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_transactions_suggested_invoice_id_fkey"
+            columns: ["suggested_invoice_id"]
             isOneToOne: false
             referencedRelation: "invoices"
             referencedColumns: ["id"]

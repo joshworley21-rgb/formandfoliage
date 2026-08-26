@@ -13,7 +13,6 @@ export function isNativeApp(): boolean {
   }
 }
 
-
 /**
  * Where Supabase should send someone back to after they follow a password
  * reset link.
@@ -28,6 +27,36 @@ export const NATIVE_RECOVERY_REDIRECT = "uk.co.jwgardenservices.crm://password-r
 /** The address a password reset email should return to on this platform. */
 export function passwordResetRedirect(): string {
   return isNativeApp() ? NATIVE_RECOVERY_REDIRECT : `${window.location.origin}/reset-password`;
+}
+
+/**
+ * Opens a tab now, to be pointed somewhere once we know where.
+ *
+ * Browsers only allow a new tab while a click is still being handled, and an
+ * OAuth URL has to be fetched first — so the tab is claimed on the click and
+ * filled in when the answer arrives. Returns null on native, and on any browser
+ * that blocked it, in which case followUrl falls back to this tab.
+ */
+export function openBlankTab(): Window | null {
+  if (isNativeApp() || typeof window === "undefined") return null;
+  const tab = window.open("about:blank", "_blank");
+  // "noopener" would be the usual way to sever this, but it makes window.open
+  // return null and the whole point here is to keep the handle. Cutting the
+  // back-reference by hand leaves the page we send it to unable to reach back
+  // into this one.
+  if (tab) tab.opener = null;
+  return tab;
+}
+
+/** Sends the browser to a URL: the tab claimed above, the system browser, or here. */
+export async function followUrl(url: string, tab: Window | null): Promise<void> {
+  if (isNativeApp()) {
+    const { AppLauncher } = await import("@capacitor/app-launcher");
+    await AppLauncher.openUrl({ url });
+    return;
+  }
+  if (tab && !tab.closed) tab.location.href = url;
+  else window.location.href = url;
 }
 
 /**

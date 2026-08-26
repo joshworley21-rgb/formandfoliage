@@ -4,6 +4,8 @@
 // the platform — they do not need to be set as secrets.
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
+export type { SupabaseClient };
+
 function requireEnv(name: string): string {
   const value = Deno.env.get(name);
   if (!value) throw new Error(`Missing environment variable: ${name}`);

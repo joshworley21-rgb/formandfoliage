@@ -6,31 +6,7 @@
 //
 // The argument shape ({ data }) is kept from the server-function era so call
 // sites read the same.
-import { FunctionsHttpError } from "@supabase/supabase-js";
-import { supabase } from "@/integrations/supabase/client";
-
-/**
- * Edge Functions signal failure with a non-2xx status and a { error } body, but
- * supabase-js surfaces only a generic message. Dig the real one out so the user
- * sees "This client has no email address saved" rather than "non-2xx status".
- */
-async function readError(error: unknown): Promise<string> {
-  if (error instanceof FunctionsHttpError) {
-    try {
-      const payload = (await error.context.json()) as { error?: string } | null;
-      if (payload?.error) return payload.error;
-    } catch {
-      // Body was not JSON — fall through to the generic message.
-    }
-  }
-  return error instanceof Error ? error.message : String(error);
-}
-
-async function invoke<T>(name: string, body: Record<string, unknown> = {}): Promise<T> {
-  const { data, error } = await supabase.functions.invoke<T>(name, { body });
-  if (error) throw new Error(await readError(error));
-  return data as T;
-}
+import { invoke } from "@/lib/functions";
 
 export type CreateInvoiceInput = {
   clientId: string;
