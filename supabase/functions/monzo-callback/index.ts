@@ -109,7 +109,34 @@ Deno.serve(async (request) => {
   const backTo = settings?.public_site_url ? `${settings.public_site_url}/settings` : null;
 
   try {
-    const tokens = await exchangeCode(code);
+    let tokens;
+    try {
+      tokens = await exchangeCode(code);
+    } catch (error) {
+      // Monzo authorisation codes are single use. Spending one twice almost
+      // always means this page was reopened, refreshed, or restored by the
+      // browser — in which case the first visit already did the work, and
+      // saying "could not be connected" would be alarming and wrong.
+      const { data: existing } = await supabase
+        .from("bank_connections")
+        .select("account_name, approved_at")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (existing) {
+        return page(
+          "Monzo is already connected",
+          `<p>Connected to <strong>${escapeHtml(existing.account_name ?? "your account")}</strong>.</p>
+           ${
+             existing.approved_at
+               ? "<p>Payments into this account will appear in the CRM for you to match against invoices.</p>"
+               : "<p><strong>Open your Monzo app and approve access</strong> if you have not already — Monzo releases no transactions until you do.</p>"
+           }
+           <p class="muted">This link had already been used, which is why you are seeing this rather than the page from the first time.</p>`,
+          backTo,
+        );
+      }
+      throw error;
+    }
 
     const accounts = await listAccounts(tokens.access_token);
     const account = chooseAccount(accounts);
@@ -206,6 +233,19 @@ Deno.serve(async (request) => {
   } catch (error) {
     console.error("Monzo callback failed:", error);
     const message = error instanceof Error ? error.message : String(error);
-    return page("Monzo could not be connected", `<p>${escapeHtml(message)}</p>`, backTo, 500);
+    // A spent code with no connection behind it means the round trip never
+    // finished. Monzo's own wording for that is unreadable, and the way out is
+    // not to reload this page — which spends the code again — but to start over.
+    const spent = /bad_authorization_code/i.test(message);
+    return page(
+      "Monzo could not be connected",
+      spent
+        ? `<p>That sign-in link had already been used, and no connection was saved.</p>
+           <p>Open Settings in the CRM and tap Connect Monzo to start again. Reloading this page
+           will not work: each link can only be used once.</p>`
+        : `<p>${escapeHtml(message)}</p>`,
+      backTo,
+      500,
+    );
   }
 });
