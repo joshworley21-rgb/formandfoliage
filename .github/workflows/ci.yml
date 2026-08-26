@@ -16,7 +16,8 @@ on:
   pull_request:
   push:
     branches: [main]
-  # Feature branches too, so a push tells you before a pull request exists.
+  # Feature branches are covered by their pull request. This is for checking one
+  # before opening it, from the Actions tab.
   workflow_dispatch:
 
 # A second push supersedes the first: no point finishing a run for a commit
