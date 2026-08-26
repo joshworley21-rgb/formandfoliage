@@ -86,8 +86,11 @@ export function getQueueSnapshot(): QueueState {
 /* ---------------- execution ---------------- */
 
 // The generated Supabase types are table-literal specific; the queue is generic
-// by design, so we go through a loosely typed handle here.
+// by design, so we go through a loosely typed handle here. The query builder is
+// chainable and its shape depends on the table, so there is no honest type to
+// give it — anything narrower here would be a guess dressed up as a guarantee.
 const db = supabase as unknown as {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   from: (table: string) => any;
   rpc: (fn: string, args: Record<string, unknown>) => Promise<{ error: unknown }>;
 };

@@ -20,7 +20,7 @@ const RealPdf = jsPDF as unknown as new (...args: unknown[]) => Record<string, u
 class RecordingPdf extends RealPdf {
   constructor(...args: unknown[]) {
     super(...args);
-    const real = (this["text"] as Function).bind(this);
+    const real = (this["text"] as (...args: unknown[]) => unknown).bind(this);
     this["text"] = (txt: string | string[], x: number, y: number, opts?: { align?: string }) => {
       for (const [i, line] of (Array.isArray(txt) ? txt : [txt]).entries()) {
         const at: Drawn = { text: String(line), x, y: y + i * 13 };
@@ -42,34 +42,77 @@ function render(over: { vat?: boolean; bankDetails?: string } = {}) {
   const vat = over.vat ?? false;
   return buildInvoicePdf({
     invoice: {
-      id: "i1", user_id: "u", client_id: "c", number: "JW-0001", status: "draft",
-      issue_date: DAY, due_date: "2026-09-07", subtotal: 280,
-      vat_amount: vat ? 56 : 0, total: vat ? 336 : 280,
-      notes: null, sent_at: null, paid_at: null, pdf_path: null,
-      created_at: DAY, updated_at: DAY,
+      id: "i1",
+      user_id: "u",
+      client_id: "c",
+      number: "JW-0001",
+      status: "draft",
+      issue_date: DAY,
+      due_date: "2026-09-07",
+      subtotal: 280,
+      vat_amount: vat ? 56 : 0,
+      total: vat ? 336 : 280,
+      notes: null,
+      sent_at: null,
+      paid_at: null,
+      pdf_path: null,
+      created_at: DAY,
+      updated_at: DAY,
     } as unknown as Invoice,
-    items: [{
-      id: "it1", user_id: "u", invoice_id: "i1",
-      description: "24 Aug 2026 — Garden maintenance",
-      quantity: 8, unit_price: 35, amount: 280, sort_order: 0, created_at: DAY,
-    }] as unknown as InvoiceItem[],
+    items: [
+      {
+        id: "it1",
+        user_id: "u",
+        invoice_id: "i1",
+        description: "24 Aug 2026 — Garden maintenance",
+        quantity: 8,
+        unit_price: 35,
+        amount: 280,
+        sort_order: 0,
+        created_at: DAY,
+      },
+    ] as unknown as InvoiceItem[],
     client: {
-      id: "c", user_id: "u", name: "Test Josh", email: "a@b.com", address: null,
-      phone: null, notes: null, billing_mode: "hourly", hourly_rate: 35, fixed_price: 0,
-      active: true, created_at: DAY, updated_at: DAY,
+      id: "c",
+      user_id: "u",
+      name: "Test Josh",
+      email: "a@b.com",
+      address: null,
+      phone: null,
+      notes: null,
+      billing_mode: "hourly",
+      hourly_rate: 35,
+      fixed_price: 0,
+      active: true,
+      created_at: DAY,
+      updated_at: DAY,
     } as unknown as Client,
     settings: {
-      user_id: "u", business_name: "JW Garden Services",
+      user_id: "u",
+      business_name: "JW Garden Services",
       address: "24 Portland Close\nBierton\nHP22 7DG",
-      email: "info@jw-gardenservices.co.uk", reply_to_email: null, phone: null,
-      bank_details: over.bankDetails ??
+      email: "info@jw-gardenservices.co.uk",
+      reply_to_email: null,
+      phone: null,
+      bank_details:
+        over.bankDetails ??
         "Account name: Joshua Worley trading as JW Garden Services\nSort code: 04-00-03\nAccount number: 64775630",
-      payment_terms: "Payment due within 14 days.", invoice_prefix: "JW-", invoice_counter: 1,
-      vat_registered: vat, vat_rate: 20, vat_number: vat ? "GB123456789" : null,
-      quote_prefix: "Q-", quote_counter: 0, quote_terms: null, quote_validity_days: 30,
-      public_site_url: null, enquiry_key: "k",
-      email_subject_template: "", email_body_template: "",
-      created_at: DAY, updated_at: DAY,
+      payment_terms: "Payment due within 14 days.",
+      invoice_prefix: "JW-",
+      invoice_counter: 1,
+      vat_registered: vat,
+      vat_rate: 20,
+      vat_number: vat ? "GB123456789" : null,
+      quote_prefix: "Q-",
+      quote_counter: 0,
+      quote_terms: null,
+      quote_validity_days: 30,
+      public_site_url: null,
+      enquiry_key: "k",
+      email_subject_template: "",
+      email_body_template: "",
+      created_at: DAY,
+      updated_at: DAY,
     } as unknown as Settings,
   });
 }
@@ -82,7 +125,9 @@ const spanOf = (d: Drawn) => {
 
 function overlaps() {
   const totals = drawn.filter(
-    (d) => ["Total", "Subtotal"].includes(d.text) || d.text.startsWith("VAT (") ||
+    (d) =>
+      ["Total", "Subtotal"].includes(d.text) ||
+      d.text.startsWith("VAT (") ||
       (d.align === "right" && d.text.startsWith("£")),
   );
   const start = drawn.findIndex((d) => d.text === "Payment details");
@@ -94,7 +139,8 @@ function overlaps() {
       if (Math.abs(t.y - p.y) >= 11) continue;
       const [a1, a2] = spanOf(t);
       const [b1, b2] = spanOf(p);
-      if (a1 < b2 && b1 < a2) found.push(`"${p.text}" runs into "${t.text}" at y≈${t.y.toFixed(0)}`);
+      if (a1 < b2 && b1 < a2)
+        found.push(`"${p.text}" runs into "${t.text}" at y≈${t.y.toFixed(0)}`);
     }
   }
   return found;
