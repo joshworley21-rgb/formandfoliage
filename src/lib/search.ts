@@ -26,14 +26,6 @@ function normalise(value: string): string {
   );
 }
 
-/**
- * How many rows a list needs before its search box earns its place. Below this
- * the list is the search, and a box above it is just something else to look
- * past — but the number lives here so Clients and Invoices cannot disagree
- * about when one appears.
- */
-export const SEARCH_FROM = 8;
-
 /** The words to look for. Empty when the box is empty or only punctuation. */
 export function searchTerms(query: string): string[] {
   const cleaned = normalise(query);
