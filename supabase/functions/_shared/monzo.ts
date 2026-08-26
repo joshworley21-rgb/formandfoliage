@@ -32,11 +32,40 @@ export type MonzoTokens = {
 export type MonzoAccount = {
   id: string;
   description?: string;
+  /** uk_retail, uk_retail_joint, uk_business, uk_rewards. */
   type?: string;
+  /** "personal" or "business" — the plainer half of the same answer. */
+  owner_type?: string;
   closed?: boolean;
   account_number?: string;
   sort_code?: string;
 };
+
+/**
+ * Which account the bank feed should watch, out of everything Monzo returns.
+ *
+ * A real login came back with three: a personal current account first, a
+ * rewards pot second, and the business account third — so taking the first was
+ * simply wrong. Customers pay invoices into the business account, so that is
+ * the default, and a rewards pot is never it. Whatever this picks can still be
+ * changed in Settings; the point is that the common case needs no correcting.
+ */
+export function chooseAccount(accounts: MonzoAccount[]): MonzoAccount | null {
+  const open = accounts.filter((account) => !account.closed);
+  if (open.length === 0) return null;
+
+  const isBusiness = (account: MonzoAccount) =>
+    account.owner_type === "business" || (account.type ?? "").includes("business");
+  // Savings and rewards pots take no payments in from customers.
+  const isSpendable = (account: MonzoAccount) => !/rewards|savings/.test(account.type ?? "");
+
+  return (
+    open.find((account) => isBusiness(account) && isSpendable(account)) ??
+    open.find((account) => (account.type ?? "").startsWith("uk_retail")) ??
+    open.find(isSpendable) ??
+    open[0]!
+  );
+}
 
 export type MonzoTransaction = {
   id: string;

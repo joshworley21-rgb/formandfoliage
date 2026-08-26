@@ -145,9 +145,15 @@ select cron.schedule(
 ### Things worth knowing before you rely on it
 
 - **Business accounts.** Monzo documents the developer API for personal accounts
-  (`uk_retail`, `uk_retail_joint`). A business account may not be returned by it
-  at all. Settings says which account was connected and flags this; if payments
-  never appear, that is the likely reason rather than a fault here.
+  (`uk_retail`, `uk_retail_joint`), but a real login returns `uk_business`
+  alongside them, so this works. It is undocumented rather than unsupported —
+  worth knowing if it ever stops. Settings names the account it connected and
+  explains this only if the connection gets stuck.
+- **Which account gets picked.** A login returns everything: personal current
+  account, rewards pot, business account, in that order. `chooseAccount` prefers
+  the business account, then a personal current account, and never a rewards
+  pot — taking the first would have watched the wrong one. Settings can change
+  it either way.
 - **90 days.** A freshly authorised token can read the whole history, but five
   minutes later Monzo will only serve the last 90 days. The sync asks for 90 days
   and no more, so anything older has to be reconciled by hand.

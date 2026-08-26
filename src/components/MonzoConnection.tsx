@@ -95,11 +95,15 @@ export function MonzoConnection() {
               </p>
             ) : null}
 
-            {status.businessAccount ? (
+            {/* Only worth raising when something is actually wrong. A business
+                account that is syncing needs no explaining; one that is stuck
+                does, because Monzo documents this API for personal accounts and
+                that is the likeliest reason it would be. */}
+            {status.businessAccount && (!status.approved || status.lastSyncError) ? (
               <p className="text-xs text-muted-foreground">
                 This is a business account. Monzo documents its developer API for personal accounts,
-                so if payments never appear, that is why rather than anything here being broken —
-                invoices can still be marked paid by hand.
+                so if it stays stuck that is the likeliest cause rather than anything here being
+                broken — invoices can still be marked paid by hand.
               </p>
             ) : null}
 

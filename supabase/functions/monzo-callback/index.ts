@@ -7,6 +7,7 @@
 import { adminClient } from "../_shared/supabase.ts";
 import { readState } from "../_shared/oauth-state.ts";
 import {
+  chooseAccount,
   exchangeCode,
   expiresAt,
   isAwaitingApproval,
@@ -111,17 +112,16 @@ Deno.serve(async (request) => {
     const tokens = await exchangeCode(code);
 
     const accounts = await listAccounts(tokens.access_token);
-    if (accounts.length === 0) {
+    const account = chooseAccount(accounts);
+    if (!account) {
       return page(
         "No account came back",
         `<p>Monzo authorised the connection but returned no open accounts for it.</p>
-         <p>The developer API is documented for personal accounts, so a business account may not be
-         reachable this way. Invoices can still be marked paid by hand.</p>`,
+         <p>Invoices can still be marked paid by hand.</p>`,
         backTo,
         200,
       );
     }
-    const account = accounts[0]!;
 
     // Written before anything else is attempted: whatever follows, the tokens
     // are the part that cannot be obtained again without the whole round trip.
