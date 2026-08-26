@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useSaveSettings, useSettings } from "@/hooks/use-crm";
 import { getResendStatus, sendTestEmail } from "@/lib/invoicing";
 import { EmailTemplatePreview } from "@/components/EmailTemplatePreview";
+import { MonzoConnection } from "@/components/MonzoConnection";
 import { useInviteMember, useRemoveMember, useTeam } from "@/hooks/use-workspace";
 
 export const Route = createFileRoute("/_authenticated/settings")({
@@ -362,7 +363,10 @@ function SettingsPage() {
         </div>
       </form>
 
-      <div className="mt-6">
+      {/* Outside the settings form: these are actions against Monzo, not fields
+          waiting on Save. */}
+      <div className="mt-6 space-y-6">
+        <MonzoConnection />
         <TeamCard />
       </div>
     </AppShell>

@@ -2,7 +2,7 @@
 
 Everything the CRM needs is in this repo: the schema is in `migrations/`, the
 server-side jobs are in `functions/`. Nothing has to be clicked together in a
-dashboard except the account itself, the auth providers, and one secret.
+dashboard except the account itself, the auth providers, and the secrets.
 
 The migration chain is checked against an empty database by
 `scripts/test-migrations.sh`, so `db push` should not surprise you.
@@ -137,7 +137,45 @@ select cron.schedule(
 );
 ```
 
-## 8. Check it works
+## 8. Connect the Monzo bank feed (optional)
+
+Skip this and everything still works — invoices are simply marked paid by hand.
+With it, payments into the bank show up in the app ready to be matched.
+
+Register a **confidential** OAuth client at
+[developers.monzo.com](https://developers.monzo.com) with the redirect URL
+`https://<your-new-project-ref>.supabase.co/functions/v1/monzo-callback`, then:
+
+```sh
+supabase secrets set MONZO_CLIENT_ID=oauth2client_... MONZO_CLIENT_SECRET=mnzconf...
+supabase functions deploy monzo-connect monzo-callback monzo-sync monzo-webhook
+```
+
+Connect it in Settings → Monzo bank feed, and **approve access in the Monzo
+phone app** when prompted — Monzo serves no transactions until you do. Then
+schedule the daily catch-up sync, alongside the reminder schedule above:
+
+```sql
+select cron.schedule(
+  'monzo-sync',
+  '0 7 * * *',  -- 07:00 UTC daily
+  $$
+  select net.http_post(
+    url     := 'https://<your-new-project-ref>.supabase.co/functions/v1/monzo-sync',
+    headers := jsonb_build_object(
+      'Content-Type',  'application/json',
+      'Authorization', 'Bearer <YOUR_SERVICE_ROLE_KEY>'
+    ),
+    body    := '{}'::jsonb
+  );
+  $$
+);
+```
+
+`supabase/functions/README.md` covers the rest, including why the client has to
+be confidential and what Monzo's API will and will not serve.
+
+## 9. Check it works
 
 In the app:
 

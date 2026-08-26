@@ -49,3 +49,26 @@ verify_jwt = false
 # request is checked against RESEND_WEBHOOK_SECRET before anything is written.
 [functions.resend-webhook]
 verify_jwt = false
+
+# Called by the signed-in app from Settings: starts the Monzo connection,
+# reports its state, switches account, disconnects. Holds no secrets of its own
+# but reads a table that only service_role may see.
+[functions.monzo-connect]
+verify_jwt = true
+
+# Public: Monzo redirects the account holder's browser here at the end of the
+# OAuth flow, and a browser arriving from another site carries no JWT. The
+# signed `state` parameter is what proves the round trip started in the app.
+[functions.monzo-callback]
+verify_jwt = false
+
+# Called by the app's "Sync now", and by the nightly cron with the service-role
+# key. Which one is calling is worked out inside the function.
+[functions.monzo-sync]
+verify_jwt = false
+
+# Public: Monzo posts transactions here and has no JWT. Monzo does not sign its
+# webhooks either, so the URL carries a secret token and every payload is read
+# back from the Monzo API before it is believed.
+[functions.monzo-webhook]
+verify_jwt = false

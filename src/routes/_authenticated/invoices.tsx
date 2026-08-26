@@ -22,6 +22,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { InvoiceReminders } from "@/components/InvoiceReminders";
+import { PaymentsToReview } from "@/components/PaymentsToReview";
 import { OwnerOnly } from "@/components/OwnerOnly";
 import {
   AlertDialog,
@@ -331,7 +332,10 @@ function InvoicesPage() {
         <p className="figure mt-1.5 text-4xl font-semibold leading-none">{money(owedTotal)}</p>
       </section>
 
-      <div className="mb-3">
+      {/* Above the reminder to invoice, because money that has already arrived
+          is more urgent than money not yet asked for. */}
+      <div className="mb-3 space-y-3">
+        <PaymentsToReview />
         <InvoiceReminders compact />
       </div>
 

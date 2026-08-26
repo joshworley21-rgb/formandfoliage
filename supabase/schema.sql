@@ -726,6 +726,164 @@ ALTER TABLE public.settings
   ADD COLUMN IF NOT EXISTS public_site_url text;
 
 -- ─────────────────────────────────────────────────────────────────────
+-- 20260823150000_business_details.sql
+-- ─────────────────────────────────────────────────────────────────────
+
+-- Pre-fill the business details so Settings is populated the first time it is
+-- opened, rather than being a form to fill in on a phone.
+--
+-- These are column defaults rather than values in the app, so they apply to the
+-- settings row whenever it is created, and they never ship inside the APK.
+
+ALTER TABLE public.settings
+  ALTER COLUMN address SET DEFAULT '24 Portland Close
+Bierton
+HP22 7DG',
+  ALTER COLUMN email SET DEFAULT 'info@jw-gardenservices.co.uk',
+  ALTER COLUMN payment_terms SET DEFAULT 'Payment due within 14 days.',
+  -- The invoice PDF reads this as "Label: value" lines, so labelling them here
+  -- is what turns it into a payment block rather than loose numbers.
+  ALTER COLUMN bank_details SET DEFAULT 'Account name: Joshua Worley trading as JW Garden Services
+Sort code: 04-00-03
+Account number: 64775630';
+
+-- Fill in a settings row that already exists, but only where a field is still
+-- empty — anything already typed in the app wins over these.
+UPDATE public.settings SET
+  business_name = COALESCE(NULLIF(btrim(business_name), ''), 'JW Garden Services'),
+  address       = COALESCE(NULLIF(btrim(address), ''), '24 Portland Close
+Bierton
+HP22 7DG'),
+  email         = COALESCE(NULLIF(btrim(email), ''), 'info@jw-gardenservices.co.uk'),
+  invoice_prefix = COALESCE(NULLIF(btrim(invoice_prefix), ''), 'JW-'),
+  payment_terms = COALESCE(NULLIF(btrim(payment_terms), ''), 'Payment due within 14 days.'),
+  bank_details  = COALESCE(NULLIF(btrim(bank_details), ''), 'Account name: Joshua Worley trading as JW Garden Services
+Sort code: 04-00-03
+Account number: 64775630');
+
+-- Phone is deliberately left blank: no number was given. Add it in Settings and
+-- it will appear on invoices alongside the address.
+
+-- ─────────────────────────────────────────────────────────────────────
+-- 20260823170000_reply_to_address.sql
+-- ─────────────────────────────────────────────────────────────────────
+
+-- Let the From address and the reply address differ.
+--
+-- One field was doing both jobs, so sending invoices from a send-only address
+-- would have quietly dropped every customer reply. Nothing needs two addresses
+-- today — this stays empty, and everything falls back to `email` — but the
+-- fallback is what makes adding an invoices@ alias later a Settings change
+-- rather than a code change.
+
+ALTER TABLE public.settings
+  ADD COLUMN IF NOT EXISTS reply_to_email text;
+
+COMMENT ON COLUMN public.settings.email IS
+  'The From address on invoice and quote emails. Must be on a domain verified with Resend; it does not need a mailbox.';
+COMMENT ON COLUMN public.settings.reply_to_email IS
+  'Where customer replies, website enquiries and quote answers land, and the contact address printed on the invoice. Falls back to email when blank.';
+
+-- ─────────────────────────────────────────────────────────────────────
+-- 20260824100000_email_delivery_events.sql
+-- ─────────────────────────────────────────────────────────────────────
+
+-- Delivery outcomes reported by Resend after an email leaves the app.
+--
+-- Until now the log stopped at "sent", which only means Resend accepted it.
+-- Whether it reached the client, bounced, or was marked as spam is the part
+-- worth knowing — a wrong address currently looks identical to a paid invoice
+-- nobody has answered yet.
+
+ALTER TYPE public.email_event_status ADD VALUE IF NOT EXISTS 'delivered';
+ALTER TYPE public.email_event_status ADD VALUE IF NOT EXISTS 'opened';
+ALTER TYPE public.email_event_status ADD VALUE IF NOT EXISTS 'clicked';
+ALTER TYPE public.email_event_status ADD VALUE IF NOT EXISTS 'bounced';
+ALTER TYPE public.email_event_status ADD VALUE IF NOT EXISTS 'complained';
+ALTER TYPE public.email_event_status ADD VALUE IF NOT EXISTS 'delivery_delayed';
+
+-- Webhooks arrive knowing only Resend's message id, so that is the way back to
+-- the invoice the email was about.
+CREATE INDEX IF NOT EXISTS invoice_email_events_provider_idx
+  ON public.invoice_email_events(provider_message_id)
+  WHERE provider_message_id IS NOT NULL;
+
+-- ─────────────────────────────────────────────────────────────────────
+-- 20260826120000_monzo_bank_feed.sql
+-- ─────────────────────────────────────────────────────────────────────
+
+-- Monzo bank feed: incoming payments arrive on their own and wait to be matched
+-- to an invoice.
+--
+-- The bank_connections and bank_transactions tables have existed since the
+-- first migration but nothing has ever written to them — they were shaped for
+-- TrueLayer and left dormant. This fills them in for Monzo, whose developer API
+-- pushes a webhook the moment money lands, so the CRM learns about a payment
+-- without anyone opening the banking app.
+--
+-- Nothing here marks an invoice paid. A payment becomes a suggestion; a person
+-- confirms it. That is deliberate: a wrongly auto-settled invoice is worse than
+-- one tap, because it stops the reminder that would have chased a real debt.
+
+-- ------------------------------------------------------------- connection ---
+
+ALTER TABLE public.bank_connections
+  -- Every row this app writes is Monzo. The old default named a provider that
+  -- was never implemented, which made the column read like a lie.
+  ALTER COLUMN provider SET DEFAULT 'monzo',
+  -- Monzo hands back a webhook id at registration; it is the only way to take
+  -- the webhook down again when the account is disconnected.
+  ADD COLUMN IF NOT EXISTS webhook_id text,
+  -- Monzo does not sign its webhooks, so the endpoint has nothing to verify a
+  -- request against. This random token travels in the webhook URL and is what
+  -- tells a real delivery from a stranger who found the function. The payload
+  -- is checked against the Monzo API before it is trusted regardless.
+  ADD COLUMN IF NOT EXISTS webhook_secret text,
+  -- uk_retail, uk_retail_joint, or a business type. Worth keeping: the
+  -- developer API documents the retail ones, so this is the field that explains
+  -- an account the sync cannot see.
+  ADD COLUMN IF NOT EXISTS account_type text,
+  -- Monzo requires the account holder to approve API access in the phone app.
+  -- Until they do, transaction reads come back 403 and the connection is real
+  -- but useless, which needs saying out loud in Settings.
+  ADD COLUMN IF NOT EXISTS approved_at timestamptz,
+  -- Why the last sync failed, shown in Settings. Cleared by a sync that works.
+  ADD COLUMN IF NOT EXISTS last_sync_error text;
+
+-- The webhook arrives with no user and no JWT: this token is the lookup.
+CREATE UNIQUE INDEX IF NOT EXISTS bank_connections_webhook_secret_idx
+  ON public.bank_connections(webhook_secret)
+  WHERE webhook_secret IS NOT NULL;
+
+-- ------------------------------------------------------------ transaction ---
+
+ALTER TABLE public.bank_transactions
+  -- What the matcher thinks this payment pays, and why. Kept apart from
+  -- invoice_id so that a guess can never be mistaken for a decision: invoice_id
+  -- is only ever set by a person confirming one.
+  ADD COLUMN IF NOT EXISTS suggested_invoice_id uuid REFERENCES public.invoices(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS match_reason text,
+  -- Set when the payment has been dealt with — confirmed against an invoice or
+  -- dismissed. What is left is the review list.
+  ADD COLUMN IF NOT EXISTS reviewed_at timestamptz,
+  -- Monzo's own settled timestamp. posted_at holds when it was created; a
+  -- faster payment in is usually both at once, but a pending one is not.
+  ADD COLUMN IF NOT EXISTS settled_at timestamptz;
+
+-- The review list is "money in, not yet dealt with, newest first". Everything
+-- else in the table is history.
+CREATE INDEX IF NOT EXISTS bank_transactions_review_idx
+  ON public.bank_transactions(user_id, posted_at DESC)
+  WHERE reviewed_at IS NULL AND ignored = false;
+
+-- One payment settles one invoice here. Two rows pointing at the same invoice
+-- would each look like the thing that paid it, and the second would silently
+-- overwrite the first's audit trail.
+CREATE UNIQUE INDEX IF NOT EXISTS bank_transactions_invoice_idx
+  ON public.bank_transactions(invoice_id)
+  WHERE invoice_id IS NOT NULL;
+
+-- ─────────────────────────────────────────────────────────────────────
 -- Mark these migrations as applied, so the CLI agrees with reality if it
 -- is ever used against this project.
 -- ─────────────────────────────────────────────────────────────────────
@@ -767,5 +925,13 @@ INSERT INTO supabase_migrations.schema_migrations (version, name)
   VALUES ('20260822120000', 'quotes') ON CONFLICT (version) DO NOTHING;
 INSERT INTO supabase_migrations.schema_migrations (version, name)
   VALUES ('20260822130000', 'fresh_project_bootstrap') ON CONFLICT (version) DO NOTHING;
+INSERT INTO supabase_migrations.schema_migrations (version, name)
+  VALUES ('20260823150000', 'business_details') ON CONFLICT (version) DO NOTHING;
+INSERT INTO supabase_migrations.schema_migrations (version, name)
+  VALUES ('20260823170000', 'reply_to_address') ON CONFLICT (version) DO NOTHING;
+INSERT INTO supabase_migrations.schema_migrations (version, name)
+  VALUES ('20260824100000', 'email_delivery_events') ON CONFLICT (version) DO NOTHING;
+INSERT INTO supabase_migrations.schema_migrations (version, name)
+  VALUES ('20260826120000', 'monzo_bank_feed') ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
