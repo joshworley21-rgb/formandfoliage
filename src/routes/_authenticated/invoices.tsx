@@ -79,7 +79,7 @@ import {
 import { InvoicePreviewDoc } from "@/components/InvoicePreviewDoc";
 import { buildInvoicePdf, pdfToBase64 } from "@/lib/invoice-pdf";
 import { createInvoice, sendInvoiceEmail } from "@/lib/invoicing";
-import { filterBy, SEARCH_FROM } from "@/lib/search";
+import { filterBy } from "@/lib/search";
 
 export const Route = createFileRoute("/_authenticated/invoices")({
   // "Create invoice" on a reminder names the client it is nagging about, so
@@ -350,8 +350,10 @@ function InvoicesPage() {
       </div>
 
       {/* The total above always counts every unpaid invoice, searched or not:
-          a filtered list must never make the amount owed look smaller. */}
-      {invoices.length > SEARCH_FROM ? (
+          a filtered list must never make the amount owed look smaller. Shown
+          for any non-empty list — hiding it on short ones only made it look
+          missing. */}
+      {invoices.length > 0 ? (
         <div className="mb-3">
           <SearchField
             value={query}

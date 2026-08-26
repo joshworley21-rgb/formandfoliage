@@ -29,7 +29,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useClients, useDeleteClient, useSaveClient } from "@/hooks/use-crm";
 import { useIsStaff } from "@/hooks/use-workspace";
 import { money, type BillingMode, type Client } from "@/lib/crm";
-import { filterBy, SEARCH_FROM } from "@/lib/search";
+import { filterBy } from "@/lib/search";
 
 export const Route = createFileRoute("/_authenticated/clients")({
   head: () => ({
@@ -256,9 +256,10 @@ function ClientsPage() {
         )
       }
     >
-      {/* Only worth the space once there is enough here to lose something in.
-          Below that the list is the search. */}
-      {clients.length > SEARCH_FROM ? (
+      {/* Shown whenever there is a list at all. It used to appear only past
+          eight rows, which meant looking for the search and finding nothing —
+          a feature that hides itself reads as a broken one. */}
+      {clients.length > 0 ? (
         <div className="mb-3">
           <SearchField
             value={query}
