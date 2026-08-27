@@ -58,6 +58,25 @@ check "extra versions in the database are fine" 0 "up to date" \
 check "tells you how to fix it" 1 "Apply database migrations" \
   '20260815142242'
 
+# On a runner the reason has to reach the Annotations panel, not just the log.
+GITHUB_ACTIONS=true check "names the migration in a workflow annotation" 1 \
+  "::error title=Database is behind the code::" '20260815142242'
+GITHUB_ACTIONS=true check "the annotation lists the missing file" 1 \
+  "20260823150000_business_details.sql" '20260815142242'
+# and stays out of the way when it is not one. Its own assertion rather than a
+# check with an empty pattern: grep for "" matches anything, so that would have
+# been a test incapable of failing.
+refute() {
+  local name="$1" absent="$2" input="$3" out
+  out=$(printf '%s' "$input" | python3 scripts/check-migrations-applied.py "$DIR" 2>&1)
+  if printf '%s' "$out" | grep -q "$absent"; then
+    echo "  FAIL  $name (found \"$absent\")"; fail=$((fail+1))
+  else
+    echo "  ok    $name"; pass=$((pass+1))
+  fi
+}
+refute "no annotation outside Actions" "::error" '20260815142242'
+
 check "blank lines in psql output are ignored" 0 "up to date" \
   '20260815142242
 

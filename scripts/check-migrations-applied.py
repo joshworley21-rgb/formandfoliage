@@ -16,8 +16,37 @@ Usage:
       | python3 scripts/check-migrations-applied.py supabase/migrations
 """
 
+import os
 import sys
 from pathlib import Path
+
+
+def annotate(missing_files: list[str]) -> None:
+    """Put the reason on the run's summary, not only in the log.
+
+    stderr reaches the log, which is one tap further in than most people look —
+    the Annotations panel showed a bare "Process completed with exit code 1"
+    for a failure that already knew exactly what was wrong. A workflow command
+    on stdout is what puts it on the front page. Annotations are one line, so
+    the detail stays below and only the headline goes here.
+    """
+    if not os.environ.get("GITHUB_ACTIONS"):
+        return
+    listed = ", ".join(missing_files)
+    print(
+        f"::error title=Database is behind the code::{len(missing_files)} migration(s) "
+        f"not applied: {listed}. Fix: Actions -> Set up Supabase -> Run workflow, "
+        'with "Apply database migrations" ticked.'
+    )
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as handle:
+            handle.write("### Database is behind the code\n\n")
+            for name in missing_files:
+                handle.write(f"- `{name}`\n")
+            handle.write(
+                '\nRun **Set up Supabase** with "Apply database migrations" ticked.\n'
+            )
 
 
 def versions_in(directory: Path) -> list[str]:
@@ -64,6 +93,7 @@ def main() -> int:
         "Fix it: Actions tab -> Set up Supabase -> Run workflow, with\n"
         '"Apply database migrations" ticked.\n'
     )
+    annotate([names.get(version, version) for version in missing])
     return 1
 
 

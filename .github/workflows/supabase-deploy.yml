@@ -79,7 +79,9 @@ jobs:
             exit 1
           fi
 
-      - uses: supabase/setup-cli@v1
+      # v2 is a composite action: no Node runtime of its own, so it cannot be
+      # caught by the next runtime deprecation the way v1 was by Node 20.
+      - uses: supabase/setup-cli@v2
         with:
           version: latest
 
