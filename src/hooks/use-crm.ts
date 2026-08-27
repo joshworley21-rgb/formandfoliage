@@ -113,8 +113,14 @@ export function useSaveVisit() {
   return useMutation({
     mutationFn: async ({
       completesJobId,
+      jobOutcome = "done",
       ...input
-    }: Partial<Visit> & { client_id: string; completesJobId?: string | null }) => {
+    }: Partial<Visit> & {
+      client_id: string;
+      completesJobId?: string | null;
+      /** What the paired job becomes. A missed visit closes it as missed. */
+      jobOutcome?: "done" | "missed";
+    }) => {
       const user_id = await currentUserId();
       // Generate the id client-side so the visit can be linked (and queued) offline.
       const id = input.id ?? crypto.randomUUID();
@@ -133,7 +139,7 @@ export function useSaveVisit() {
         ops.push({
           kind: "update",
           table: "scheduled_jobs",
-          payload: { status: "done", visit_id: id },
+          payload: { status: jobOutcome, visit_id: id },
           match: { id: completesJobId },
         });
       }

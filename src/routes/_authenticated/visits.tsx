@@ -8,6 +8,7 @@ import { OwnerOnly } from "@/components/OwnerOnly";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -79,20 +80,24 @@ function VisitsPage() {
   const [hours, setHours] = useState("2");
   const [materials, setMaterials] = useState("0");
   const [description, setDescription] = useState("");
+  const [missed, setMissed] = useState(false);
   const [payMode, setPayMode] = useState<"hourly" | "day">("hourly");
   const [rate, setRate] = useState("0");
   const [days, setDays] = useState("1");
 
   const client = clients.find((c) => c.id === clientId);
   const materialsNum = Number(materials) || 0;
-  const computedAmount =
-    payMode === "day"
+  // A visit that did not happen is worth nothing, whatever is left in the rate
+  // and hours fields from the last one logged.
+  const computedAmount = missed
+    ? 0
+    : payMode === "day"
       ? (Number(rate) || 0) * (Number(days) || 0) + materialsNum
       : (Number(rate) || 0) * (Number(hours) || 0) + materialsNum;
   const preview = computedAmount;
 
   const totals = useMemo(() => {
-    const unbilled = visits.filter((v) => !v.billed);
+    const unbilled = visits.filter((v) => !v.billed && !v.missed);
     return {
       unbilledCount: unbilled.length,
       unbilledValue: unbilled.reduce((sum, v) => sum + Number(v.amount), 0),
@@ -128,6 +133,7 @@ function VisitsPage() {
     setHours("2");
     setMaterials("0");
     setDescription("");
+    setMissed(false);
     resetRate(first);
     setOpen(true);
   }
@@ -139,6 +145,7 @@ function VisitsPage() {
     setHours(String(visit.hours));
     setMaterials(String(visit.materials_cost));
     setDescription(visit.description ?? "");
+    setMissed(visit.missed);
     resetRate(clients.find((c) => c.id === visit.client_id));
     setOpen(true);
   }
@@ -160,19 +167,24 @@ function VisitsPage() {
         ...(editing ? { id: editing.id } : {}),
         client_id: client.id,
         visit_date: date,
-        hours: Number(hours) || 0,
-        materials_cost: Number(materials) || 0,
+        hours: missed ? 0 : Number(hours) || 0,
+        materials_cost: missed ? 0 : Number(materials) || 0,
         description: description || null,
         amount: computedAmount,
-        ...(jobDone ? { completesJobId: jobDone.id } : {}),
+        missed,
+        // The scheduled job still gets closed off, as missed rather than done,
+        // so the schedule agrees with the log instead of showing work still to do.
+        ...(jobDone ? { completesJobId: jobDone.id, jobOutcome: missed ? "missed" : "done" } : {}),
       });
 
       toast.success(
         editing
           ? "Visit updated"
           : jobDone
-            ? `Visit logged — ${client.name}'s job is marked complete`
-            : "Visit logged",
+            ? `${missed ? "Missed visit recorded" : "Visit logged"} — ${client.name}'s job is marked ${missed ? "missed" : "complete"}`
+            : missed
+              ? "Missed visit recorded"
+              : "Visit logged",
       );
       setOpen(false);
     } catch (error) {
@@ -227,16 +239,26 @@ function VisitsPage() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="font-semibold text-foreground">{name}</p>
-                      <Badge variant={visit.billed ? "secondary" : "default"}>
-                        {visit.billed ? "Invoiced" : "Unbilled"}
+                      {/* Missed comes first: it is the reason the row carries no
+                          money, and "Unbilled" on a visit that will never be
+                          billed reads as something still owing. */}
+                      <Badge
+                        variant={visit.missed ? "outline" : visit.billed ? "secondary" : "default"}
+                      >
+                        {visit.missed ? "Missed" : visit.billed ? "Invoiced" : "Unbilled"}
                       </Badge>
                     </div>
                     <p className="mt-0.5 text-sm text-muted-foreground">
-                      {format(parseISO(visit.visit_date), "EEE d MMM yyyy")} ·{" "}
-                      {hoursLabel(visit.hours)}
-                      {Number(visit.materials_cost) > 0
-                        ? ` · materials ${money(visit.materials_cost)}`
-                        : ""}
+                      {format(parseISO(visit.visit_date), "EEE d MMM yyyy")}
+                      {visit.missed ? null : (
+                        <>
+                          {" · "}
+                          {hoursLabel(visit.hours)}
+                          {Number(visit.materials_cost) > 0
+                            ? ` · materials ${money(visit.materials_cost)}`
+                            : ""}
+                        </>
+                      )}
                     </p>
                     {visit.description ? (
                       <p className="mt-1 line-clamp-2 text-sm text-foreground/80">
@@ -245,7 +267,9 @@ function VisitsPage() {
                     ) : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
-                    <span className="mr-1 font-semibold">{money(visit.amount)}</span>
+                    <span className="mr-1 font-semibold">
+                      {visit.missed ? "—" : money(visit.amount)}
+                    </span>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -302,16 +326,30 @@ function VisitsPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="date">Date</Label>
-                <Input
-                  id="date"
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                />
-              </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="date">Date</Label>
+              <Input id="date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            </div>
+
+            {/* Above everything about money, because ticking it makes all of
+                that irrelevant — and it is the first thing you know when you
+                are standing at a locked gate. */}
+            <label className="flex items-start gap-2.5 rounded-lg border border-border p-3 text-sm">
+              <Checkbox
+                checked={missed}
+                onCheckedChange={(value) => setMissed(Boolean(value))}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="font-medium">Missed visit</span>
+                <span className="block text-xs text-muted-foreground">
+                  Kept as a record, charged at nothing, and left out of invoices and everything
+                  waiting to be billed.
+                </span>
+              </span>
+            </label>
+
+            <div className={missed ? "hidden" : "grid gap-3 sm:grid-cols-2"}>
               <div className="space-y-1.5">
                 <Label htmlFor="hours">Hours</Label>
                 <Input
@@ -335,7 +373,7 @@ function VisitsPage() {
                 />
               </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className={missed ? "hidden" : "grid gap-3 sm:grid-cols-3"}>
               <div className="space-y-1.5">
                 <Label>Pay basis</Label>
                 <Select
@@ -385,25 +423,38 @@ function VisitsPage() {
               ) : null}
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="work">Work done</Label>
+              <Label htmlFor="work">{missed ? "What happened" : "Work done"}</Label>
               <Textarea
                 id="work"
                 rows={3}
-                placeholder="Mowed lawns, hedge trim, cleared beds…"
+                placeholder={
+                  missed
+                    ? "Gate locked, ground too wet, cancelled on the day…"
+                    : "Mowed lawns, hedge trim, cleared beds…"
+                }
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
               />
             </div>
             <p className="rounded-lg bg-secondary px-3 py-2 text-sm">
-              Charge: <span className="font-semibold">{money(preview)}</span>{" "}
-              <span className="text-muted-foreground">
-                ({payMode === "day" ? "day rate" : "hourly rate"} + materials)
-              </span>
+              {missed ? (
+                <>
+                  Charge: <span className="font-semibold">nothing</span>{" "}
+                  <span className="text-muted-foreground">(this visit did not happen)</span>
+                </>
+              ) : (
+                <>
+                  Charge: <span className="font-semibold">{money(preview)}</span>{" "}
+                  <span className="text-muted-foreground">
+                    ({payMode === "day" ? "day rate" : "hourly rate"} + materials)
+                  </span>
+                </>
+              )}
             </p>
 
             <DialogFooter>
               <Button type="submit" disabled={save.isPending}>
-                Save visit
+                {missed ? "Save missed visit" : "Save visit"}
               </Button>
             </DialogFooter>
           </form>

@@ -91,7 +91,7 @@ function RecurringPage() {
     setBusy(schedule.id);
     try {
       const visitIds = visits
-        .filter((v) => !v.billed && v.client_id === schedule.client_id)
+        .filter((v) => !v.billed && !v.missed && v.client_id === schedule.client_id)
         .map((v) => v.id);
       const result = (await createFn({
         data: {
