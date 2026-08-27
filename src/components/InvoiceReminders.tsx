@@ -55,7 +55,8 @@ export function useInvoiceReminders(): InvoiceReminder[] {
 
   const byClient = new Map<string, { visits: number; value: number; oldest: string }>();
   for (const visit of visits) {
-    if (visit.billed) continue;
+    // A visit that never happened is not work waiting to be invoiced.
+    if (visit.billed || visit.missed) continue;
     const current = byClient.get(visit.client_id) ?? {
       visits: 0,
       value: 0,

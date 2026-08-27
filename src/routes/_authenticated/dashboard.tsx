@@ -144,7 +144,7 @@ function DashboardPage() {
   const monthHours = monthVisits.reduce((s, v) => s + Number(v.hours ?? 0), 0);
   const monthValue = monthVisits.reduce((s, v) => s + Number(v.amount), 0);
 
-  const unbilled = visits.filter((v) => !v.billed);
+  const unbilled = visits.filter((v) => !v.billed && !v.missed);
   const unbilledTotal = unbilled.reduce((s, v) => s + Number(v.amount), 0);
   const outstandingTotal = invoices
     .filter((i) => i.status !== "paid")

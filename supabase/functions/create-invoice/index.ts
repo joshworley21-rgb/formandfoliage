@@ -25,6 +25,7 @@ type VisitRow = {
   materials_cost: number;
   amount: number;
   billed: boolean;
+  missed: boolean;
 };
 
 function validate(input: CreateInvoiceInput) {
@@ -64,11 +65,13 @@ Deno.serve(
     if (data.visitIds.length > 0) {
       const { data: rows, error } = await supabase
         .from("visits")
-        .select("id, visit_date, hours, description, materials_cost, amount, billed")
+        .select("id, visit_date, hours, description, materials_cost, amount, billed, missed")
         .in("id", data.visitIds)
         .eq("client_id", data.clientId);
       if (error) throw error;
-      visits = ((rows ?? []) as VisitRow[]).filter((v) => !v.billed);
+      // Missed visits are refused here too, not just hidden in the picker:
+      // the app is not the only thing that can call this.
+      visits = ((rows ?? []) as VisitRow[]).filter((v) => !v.billed && !v.missed);
     }
 
     if (visits.length === 0 && data.retainerAmount <= 0) {

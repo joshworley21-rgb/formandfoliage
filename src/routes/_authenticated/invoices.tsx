@@ -494,7 +494,7 @@ function InvoicesPage() {
           setCreating(v);
           if (!v) setPresetClient(null);
         }}
-        unbilledVisits={visits.filter((v) => !v.billed)}
+        unbilledVisits={visits.filter((v) => !v.billed && !v.missed)}
         create={async (input) => {
           const result = (await createFn({ data: input })) as { number: string };
           toast.success(`Invoice ${result.number} created`);

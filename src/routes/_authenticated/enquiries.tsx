@@ -1,26 +1,14 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import {
-  Copy,
-  ExternalLink,
-  FileSignature,
-  Mail,
-  Phone,
-  Settings as SettingsIcon,
-  Share2,
-  Trash2,
-  UserPlus,
-} from "lucide-react";
+import { FileSignature, Mail, Phone, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
-import { copyText } from "@/lib/clipboard";
 import { openReply, replyToEnquiry } from "@/lib/compose-email";
-import { isNativeApp, openOrShare } from "@/lib/native";
 import { QuoteDialog } from "@/components/QuoteDialog";
 import { OwnerOnly } from "@/components/OwnerOnly";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -33,14 +21,12 @@ import {
   useConvertEnquiry,
   useDeleteEnquiry,
   useEnquiries,
-  useEnquiryLink,
   useUpdateEnquiry,
   type Enquiry,
   type EnquiryStatus,
 } from "@/hooks/use-enquiries";
 import { quoteDraftFromEnquiry, type SaveQuoteInput } from "@/hooks/use-quotes";
 import { useSettings } from "@/hooks/use-crm";
-import { publicSiteUrl } from "@/lib/site";
 
 export const Route = createFileRoute("/_authenticated/enquiries")({
   head: () => ({
@@ -73,134 +59,27 @@ const STATUS_VARIANT: Record<EnquiryStatus, "default" | "secondary" | "outline">
 
 function EnquiriesPage() {
   const { data: enquiries = [], isLoading } = useEnquiries();
-  const { data: key } = useEnquiryLink();
   const update = useUpdateEnquiry();
   const remove = useDeleteEnquiry();
   const convert = useConvertEnquiry();
   const navigate = useNavigate();
   const [quoting, setQuoting] = useState<SaveQuoteInput | null>(null);
 
+  // Still needed: the reply templates put the business name in the email.
   const { data: settings } = useSettings();
-  const siteUrl = publicSiteUrl(settings?.public_site_url);
-  const formUrl = key && siteUrl ? `${siteUrl}/enquire/${key}` : null;
 
   return (
     <AppShell
       title="Enquiries"
       description="Everything sent from your website enquiry form lands here."
     >
-      <Card className="mb-4">
-        <CardHeader>
-          <CardTitle>Your website enquiry link</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            Link (or embed) this page from your website's "Get in touch" button. Every submission
-            appears below instead of just landing in your inbox.
-          </p>
-          {formUrl ? (
-            <div className="space-y-2">
-              {/*
-                select-all so a long press grabs the whole thing, and break-all
-                so it wraps instead of being cut off at the edge of the phone.
-              */}
-              <code className="block select-all break-all rounded-lg border border-border bg-muted px-3 py-2 text-xs">
-                {formUrl}
-              </code>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-10 flex-1"
-                  onClick={async () => {
-                    // Says which of the two happened. This used to await a
-                    // promise that rejects inside the app's WebView, with
-                    // nothing catching it, so the button appeared dead.
-                    if (await copyText(formUrl)) toast.success("Link copied");
-                    else toast.error("Could not copy — press and hold the link to select it");
-                  }}
-                >
-                  <Copy className="size-4" /> Copy link
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-10 flex-1"
-                  onClick={async () => {
-                    // target="_blank" opens nothing inside the app, and Share
-                    // is the more useful thing anyway: it puts the link into
-                    // whatever you are building the website in.
-                    try {
-                      await openOrShare(formUrl, "Your enquiry form");
-                    } catch (error) {
-                      toast.error(
-                        error instanceof Error ? error.message : "Could not open the link",
-                      );
-                    }
-                  }}
-                >
-                  {isNativeApp() ? (
-                    <>
-                      <Share2 className="size-4" /> Share
-                    </>
-                  ) : (
-                    <>
-                      <ExternalLink className="size-4" /> Preview
-                    </>
-                  )}
-                </Button>
-              </div>
-            </div>
-          ) : (
-            /*
-              The link needs a website to live on. Until one is saved there is
-              nothing to copy, and this used to be a disabled button beside a
-              line of grey text — which reads exactly like a broken button.
-            */
-            <div className="rounded-xl border border-dashed border-border p-4 text-center">
-              <p className="text-sm text-muted-foreground">
-                A ready-made enquiry page needs a website address to live on. Add yours in Settings
-                and the link will appear here.
-              </p>
-              <Button asChild variant="outline" size="sm" className="mt-3 h-10">
-                <Link to="/settings">
-                  <SettingsIcon className="size-4" /> Open Settings
-                </Link>
-              </Button>
-            </div>
-          )}
-
-          {key ? (
-            <div className="space-y-2 border-t border-border pt-3">
-              <p className="text-sm text-muted-foreground">
-                Already have a contact form on your website? It can post straight here instead. This
-                is your enquiry key — it says which business an enquiry belongs to.
-              </p>
-              <code className="block select-all break-all rounded-lg border border-border bg-muted px-3 py-2 text-xs">
-                {key}
-              </code>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-10 w-full"
-                onClick={async () => {
-                  if (await copyText(key)) toast.success("Key copied");
-                  else toast.error("Could not copy — press and hold the key to select it");
-                }}
-              >
-                <Copy className="size-4" /> Copy key
-              </Button>
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
-
       {isLoading ? (
         <p className="text-sm text-muted-foreground">Loading enquiries…</p>
       ) : enquiries.length === 0 ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            No enquiries yet. Point your website form at the link above and they'll appear here.
+            No enquiries yet. Your website enquiry link lives in Settings — point your website's
+            "Get in touch" button at it and submissions will appear here.
           </CardContent>
         </Card>
       ) : (
