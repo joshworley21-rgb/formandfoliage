@@ -105,7 +105,10 @@ function SchedulePage() {
   const [selectedDay, setSelectedDay] = useState(() => startOfDay(new Date()));
 
   const range = useMemo(() => {
-    if (view === "day") return { start: startOfDay(cursor), end: addDays(startOfDay(cursor), 1) };
+    // The day view is one day. `days` below walks start..end inclusive, so an
+    // end of "tomorrow" put tomorrow on the screen too, under its own heading —
+    // which made the Day tab look like a two-day view.
+    if (view === "day") return { start: startOfDay(cursor), end: startOfDay(cursor) };
     if (view === "week")
       return {
         start: startOfWeek(cursor, { weekStartsOn: 1 }),
@@ -130,7 +133,11 @@ function SchedulePage() {
   const [editingJob, setEditingJob] = useState<ScheduledJob | null>(null);
   const saveVisit = useSaveVisit();
 
-  const [bookingOpen, setBookingOpen] = useState(false);
+  // The day a new booking should start on, and the fact that one is being made
+  // at all. It is a date rather than a flag because the booking can now start
+  // from a day on the calendar, not only from the button in the header — and
+  // then the day it starts from is the one that was tapped.
+  const [bookingDate, setBookingDate] = useState<Date | null>(null);
   const [completing, setCompleting] = useState<ScheduledJob | null>(null);
 
   // Visits already claimed by a job, so two jobs on one day cannot both point
@@ -180,7 +187,10 @@ function SchedulePage() {
       description="Plan the round and tick jobs off as you go."
       actions={
         isStaff ? null : (
-          <Button onClick={() => setBookingOpen(true)} disabled={clients.length === 0}>
+          <Button
+            onClick={() => setBookingDate(view === "month" ? selectedDay : cursor)}
+            disabled={clients.length === 0}
+          >
             <Plus className="size-4" /> Book job
           </Button>
         )
@@ -206,74 +216,94 @@ function SchedulePage() {
       </div>
 
       {view === "month" ? (
-        <Card className="overflow-hidden py-0">
-          <div className="figure grid grid-cols-7 border-b border-border bg-secondary text-center text-[0.6rem] uppercase tracking-[0.1em] text-muted-foreground">
-            {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
-              <div key={d} className="py-2">
-                {d}
-              </div>
-            ))}
-          </div>
-          <div className="grid grid-cols-7">
-            {days.map((day) => {
-              const dayJobs = jobsOn(day);
-              const selected = isSameDay(day, selectedDay);
-              return (
-                <button
-                  key={day.toISOString()}
-                  type="button"
-                  onClick={() => setSelectedDay(day)}
-                  className={`min-h-20 border-b border-r border-border p-1.5 text-left align-top transition-colors last:border-r-0 hover:bg-accent/60 ${
-                    isSameMonth(day, cursor) ? "" : "bg-muted/40 text-muted-foreground"
-                  } ${selected ? "ring-2 ring-inset ring-primary" : ""}`}
-                >
-                  <span
-                    className={`figure inline-flex size-6 items-center justify-center rounded-full text-xs font-semibold ${
-                      isToday(day) ? "bg-primary text-primary-foreground" : ""
-                    }`}
+        <>
+          <Card className="overflow-hidden py-0">
+            <div className="figure grid grid-cols-7 border-b border-border bg-secondary text-center text-[0.6rem] uppercase tracking-[0.1em] text-muted-foreground">
+              {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
+                <div key={d} className="py-2">
+                  {d}
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7">
+              {days.map((day) => {
+                const dayJobs = jobsOn(day);
+                const selected = isSameDay(day, selectedDay);
+                return (
+                  <button
+                    key={day.toISOString()}
+                    type="button"
+                    /*
+                    The first tap picks the day — the list underneath is what
+                    most taps are after. The second tap, on the day already
+                    picked, books on it: the shortest route from "that Tuesday"
+                    to a job, without taking the first tap away from looking.
+                  */
+                    onClick={() => {
+                      if (selected && !isStaff && clients.length > 0) setBookingDate(day);
+                      else setSelectedDay(day);
+                    }}
+                    aria-label={`${format(day, "EEEE d MMMM")}${
+                      dayJobs.length ? `, ${dayJobs.length} booked` : ", nothing booked"
+                    }${selected && !isStaff ? " — tap again to book" : ""}`}
+                    className={`min-h-20 border-b border-r border-border p-1.5 text-left align-top transition-colors last:border-r-0 hover:bg-accent/60 ${
+                      isSameMonth(day, cursor) ? "" : "bg-muted/40 text-muted-foreground"
+                    } ${selected ? "ring-2 ring-inset ring-primary" : ""}`}
                   >
-                    {format(day, "d")}
-                  </span>
-                  {/*
+                    <span
+                      className={`figure inline-flex size-6 items-center justify-center rounded-full text-xs font-semibold ${
+                        isToday(day) ? "bg-primary text-primary-foreground" : ""
+                      }`}
+                    >
+                      {format(day, "d")}
+                    </span>
+                    {/*
                     A phone gives each cell about fifty pixels. A name truncated
                     to "09:…" tells you nothing, so on a phone the cell says only
                     how much work is on the day, as dots; the names appear from
                     the tablet breakpoint up, where they actually fit.
                   */}
-                  <div className="mt-1 flex gap-0.5 sm:hidden">
-                    {dayJobs.slice(0, 4).map((job) => (
-                      <span
-                        key={job.id}
-                        className={`size-1.5 rounded-full ${
-                          job.status === "done" ? "bg-primary" : "bg-lime"
-                        }`}
-                      />
-                    ))}
-                  </div>
-                  <div className="mt-1 hidden space-y-0.5 sm:block">
-                    {dayJobs.slice(0, 2).map((job) => (
-                      <p
-                        key={job.id}
-                        className={`truncate rounded px-1 py-0.5 text-[0.65rem] font-medium ${
-                          job.status === "done"
-                            ? "bg-secondary text-muted-foreground line-through"
-                            : "bg-lime/20 text-foreground"
-                        }`}
-                      >
-                        {format(parseISO(job.starts_at), "HH:mm")} {clientName(job.client_id)}
-                      </p>
-                    ))}
-                    {dayJobs.length > 2 ? (
-                      <p className="figure px-1 text-[0.6rem] text-muted-foreground">
-                        +{dayJobs.length - 2} more
-                      </p>
-                    ) : null}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </Card>
+                    <div className="mt-1 flex gap-0.5 sm:hidden">
+                      {dayJobs.slice(0, 4).map((job) => (
+                        <span
+                          key={job.id}
+                          className={`size-1.5 rounded-full ${
+                            job.status === "done" ? "bg-primary" : "bg-lime"
+                          }`}
+                        />
+                      ))}
+                    </div>
+                    <div className="mt-1 hidden space-y-0.5 sm:block">
+                      {dayJobs.slice(0, 2).map((job) => (
+                        <p
+                          key={job.id}
+                          className={`truncate rounded px-1 py-0.5 text-[0.65rem] font-medium ${
+                            job.status === "done"
+                              ? "bg-secondary text-muted-foreground line-through"
+                              : "bg-lime/20 text-foreground"
+                          }`}
+                        >
+                          {format(parseISO(job.starts_at), "HH:mm")} {clientName(job.client_id)}
+                        </p>
+                      ))}
+                      {dayJobs.length > 2 ? (
+                        <p className="figure px-1 text-[0.6rem] text-muted-foreground">
+                          +{dayJobs.length - 2} more
+                        </p>
+                      ) : null}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </Card>
+          {/* A gesture nobody is told about is a gesture nobody uses. */}
+          {isStaff || clients.length === 0 ? null : (
+            <p className="mt-2 text-center text-xs text-muted-foreground">
+              Tap a day to see it — tap it again to book on it.
+            </p>
+          )}
+        </>
       ) : null}
 
       <div className="mt-5 space-y-4">
@@ -281,24 +311,53 @@ function SchedulePage() {
           const dayJobs = jobsOn(day);
           return (
             <div key={day.toISOString()}>
-              {isToday(day) ? (
-                <div className="mb-2 flex items-baseline justify-between rounded-2xl bg-band px-4 py-3 text-band-foreground">
-                  <p className="figure text-[0.6rem] uppercase tracking-[0.14em] opacity-75">
-                    Today
-                  </p>
-                  <p className="font-display text-lg font-bold leading-none">
-                    {format(day, "EEE d MMM")}
-                  </p>
-                </div>
-              ) : (
-                <h2 className="figure mb-2 text-[0.65rem] uppercase tracking-[0.12em] text-muted-foreground">
-                  {format(day, "EEEE d MMMM")}
-                </h2>
-              )}
+              {/* Every day heading carries its own add button, so in week view
+                  the day you book on is the one you are looking at rather than
+                  whichever one the cursor happens to be on. */}
+              <div className="mb-2 flex items-center gap-2">
+                {isToday(day) ? (
+                  <div className="flex flex-1 items-baseline justify-between rounded-2xl bg-band px-4 py-3 text-band-foreground">
+                    <p className="figure text-[0.6rem] uppercase tracking-[0.14em] opacity-75">
+                      Today
+                    </p>
+                    <p className="font-display text-lg font-bold leading-none">
+                      {format(day, "EEE d MMM")}
+                    </p>
+                  </div>
+                ) : (
+                  <h2 className="figure flex-1 text-[0.65rem] uppercase tracking-[0.12em] text-muted-foreground">
+                    {format(day, "EEEE d MMMM")}
+                  </h2>
+                )}
+                {isStaff || clients.length === 0 ? null : (
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="size-10 shrink-0"
+                    aria-label={`Book a job on ${format(day, "EEEE d MMMM")}`}
+                    onClick={() => setBookingDate(day)}
+                  >
+                    <Plus className="size-4" />
+                  </Button>
+                )}
+              </div>
               {dayJobs.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                  Nothing booked.
-                </p>
+                isStaff || clients.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                    Nothing booked.
+                  </p>
+                ) : (
+                  /* An empty day is the one place where "book something" is
+                     certainly what you came for, so the empty state is the
+                     button rather than sitting next to one. */
+                  <button
+                    type="button"
+                    onClick={() => setBookingDate(day)}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border px-3 py-5 text-sm text-muted-foreground transition-colors hover:bg-accent/60 active:bg-accent"
+                  >
+                    <Plus className="size-4" /> Book a job on {format(day, "EEE d MMM")}
+                  </button>
+                )
               ) : (
                 <div className="space-y-2">
                   {dayJobs.map((job) => (
@@ -394,17 +453,17 @@ function SchedulePage() {
       </div>
 
       <JobDialog
-        open={bookingOpen || editingJob !== null}
+        open={bookingDate !== null || editingJob !== null}
         job={editingJob}
         onOpenChange={(v) => {
           if (!v) {
-            setBookingOpen(false);
+            setBookingDate(null);
             setEditingJob(null);
           }
         }}
-        defaultDate={view === "month" ? selectedDay : cursor}
+        defaultDate={bookingDate ?? (view === "month" ? selectedDay : cursor)}
         onSaved={() => {
-          setBookingOpen(false);
+          setBookingDate(null);
           setEditingJob(null);
         }}
         saveJob={saveJob.mutateAsync}
