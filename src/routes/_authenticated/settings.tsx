@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useSaveSettings, useSettings } from "@/hooks/use-crm";
 import { getResendStatus, sendTestEmail } from "@/lib/invoicing";
 import { EmailTemplatePreview } from "@/components/EmailTemplatePreview";
+import { EnquiryLinkCard } from "@/components/EnquiryLinkCard";
 import { MonzoConnection } from "@/components/MonzoConnection";
 import { useInviteMember, useRemoveMember, useTeam } from "@/hooks/use-workspace";
 
@@ -372,9 +373,11 @@ function SettingsPage() {
         </div>
       </form>
 
-      {/* Outside the settings form: these are actions against Monzo, not fields
-          waiting on Save. */}
+      {/* Outside the settings form: these are things to copy or act on, not
+          fields waiting on Save. The enquiry link comes first because it is
+          built from the website address in the form directly above it. */}
       <div className="mt-6 space-y-6">
+        <EnquiryLinkCard />
         <MonzoConnection />
         <TeamCard />
       </div>
