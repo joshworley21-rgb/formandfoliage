@@ -121,7 +121,9 @@ function VisitsPage() {
                           {" · "}
                           {hoursLabel(visit.hours)}
                           {Number(visit.materials_cost) > 0
-                            ? ` · materials ${money(visit.materials_cost)}`
+                            ? ` · materials ${money(visit.materials_cost)}${
+                                visit.materials_note ? ` (${visit.materials_note})` : ""
+                              }`
                             : ""}
                         </>
                       )}
