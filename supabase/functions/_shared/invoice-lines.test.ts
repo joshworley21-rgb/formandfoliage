@@ -4,7 +4,7 @@
 // that visit was always worth. Break the second and the invoice total stops
 // matching the books.
 import { expect, test } from "bun:test";
-import { linesForVisit, type VisitForInvoice } from "./invoice-lines.ts";
+import { invoiceTotals, linesForVisit, type VisitForInvoice } from "./invoice-lines.ts";
 
 const visit = (over: Partial<VisitForInvoice> = {}): VisitForInvoice => ({
   id: "v1",
@@ -108,4 +108,74 @@ test("both lines carry the visit they came from", () => {
   const lines = linesForVisit(visit({ materials_cost: 5, amount: 95 }), HOURLY);
   expect(lines.every((l) => l.visit_id === "v1")).toBe(true);
   expect(lines.every((l) => l.item_date === "2026-08-12")).toBe(true);
+});
+
+test("the totals are the lines, plus VAT when registered", () => {
+  expect(invoiceTotals([90, 5], 20)).toEqual({ subtotal: 95, vatAmount: 19, total: 114 });
+});
+
+test("no VAT rate means no VAT", () => {
+  expect(invoiceTotals([90, 5], 0)).toEqual({ subtotal: 95, vatAmount: 0, total: 95 });
+});
+
+test("splitting a visit into two lines does not change what it totals", () => {
+  // The whole safety property of the materials split, stated as a sum.
+  const v = visit({ materials_cost: 12.5, amount: 102.5 });
+  const split = invoiceTotals(
+    linesForVisit(v, HOURLY).map((l) => l.amount),
+    20,
+  );
+  const whole = invoiceTotals([v.amount], 20);
+  expect(split).toEqual(whole);
+});
+
+test("an empty invoice totals nothing rather than NaN", () => {
+  expect(invoiceTotals([], 20)).toEqual({ subtotal: 0, vatAmount: 0, total: 0 });
+});
+
+test("a rate that no longer accounts for the visit is not printed against it", () => {
+  // The client's rate went up to £35 after this visit was logged at £30.
+  // Printing 3 x £35.00 = £90.00 would be worse than printing no rate at all.
+  const [labour] = linesForVisit(visit({ hours: 3, amount: 90 }), {
+    fixedPrice: false,
+    hourlyRate: 35,
+  });
+  expect(labour!.quantity).toBe(1);
+  expect(labour!.unit_price).toBe(90);
+  expect(labour!.amount).toBe(90);
+});
+
+test("an overridden total falls back to one unit rather than lying about the hours", () => {
+  // Completing a job lets the total be set by hand; it need not be rate x hours.
+  const [labour] = linesForVisit(visit({ hours: 3, amount: 100 }), HOURLY);
+  expect(labour!.quantity).toBe(1);
+  expect(labour!.unit_price).toBe(100);
+});
+
+test("a visit with no hours never divides by them", () => {
+  const [labour] = linesForVisit(visit({ hours: 0, amount: 40 }), HOURLY);
+  expect(labour!.quantity).toBe(1);
+  expect(labour!.unit_price).toBe(40);
+  expect(labour!.amount).toBe(40);
+});
+
+test("every line multiplies out, whatever the visit and whatever the rate", () => {
+  const rates = [0, 30, 35, 12.5];
+  const cases = [
+    visit({ hours: 3, amount: 90 }),
+    visit({ hours: 2.5, materials_cost: 7.35, amount: 82.35 }),
+    visit({ hours: 0, amount: 40 }),
+    visit({ hours: 1, materials_cost: 100, amount: 130 }),
+    visit({ hours: 3.25, amount: 40.63 }),
+  ];
+  for (const rate of rates) {
+    for (const v of cases) {
+      for (const fixedPrice of [false, true]) {
+        for (const line of linesForVisit(v, { fixedPrice, hourlyRate: rate })) {
+          const product = Math.round(line.quantity * line.unit_price * 100) / 100;
+          expect(Math.abs(product - line.amount)).toBeLessThan(0.005);
+        }
+      }
+    }
+  }
 });

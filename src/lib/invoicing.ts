@@ -24,6 +24,18 @@ export function createInvoice({ data }: { data: CreateInvoiceInput }) {
   return invoke<CreateInvoiceResult>("create-invoice", data);
 }
 
+export type RebuildInvoiceResult = {
+  number: string;
+  lines: number;
+  released: number;
+  total: number;
+};
+
+/** Re-derives a draft invoice's lines from its visits. Refused once sent. */
+export function rebuildInvoice({ data }: { data: { invoiceId: string } }) {
+  return invoke<RebuildInvoiceResult>("rebuild-invoice", data);
+}
+
 export type SendInvoiceInput = {
   invoiceId: string;
   pdfBase64: string;

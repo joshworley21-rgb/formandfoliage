@@ -15,12 +15,14 @@ import {
   MailCheck,
   MinusCircle,
   MousePointerClick,
+  Pencil,
   Plus,
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import { DraftInvoiceDialog } from "@/components/DraftInvoiceDialog";
 import { InvoiceReminders } from "@/components/InvoiceReminders";
 import { PaymentsToReview } from "@/components/PaymentsToReview";
 import { SearchField } from "@/components/SearchField";
@@ -204,6 +206,8 @@ function InvoicesPage() {
   const { data: visits = [] } = useVisits();
   const { data: settings } = useSettings();
   const updateInvoice = useUpdateInvoice();
+  // The draft being corrected before it goes anywhere.
+  const [editingDraft, setEditingDraft] = useState<Invoice | null>(null);
   const deleteInvoice = useDeleteInvoice();
   const { client: clientFromLink } = Route.useSearch();
   const navigate = useNavigate();
@@ -410,6 +414,13 @@ function InvoicesPage() {
 
               {/* Everything else stays small, because it is not what you came for. */}
               <div className="flex flex-wrap items-center gap-1">
+                {/* Only a draft. A sent invoice has to go on matching the copy
+                    the customer is holding. */}
+                {invoice.status === "draft" ? (
+                  <Button variant="ghost" size="sm" onClick={() => setEditingDraft(invoice)}>
+                    <Pencil className="size-4" /> Edit
+                  </Button>
+                ) : null}
                 {invoice.status !== "paid" ? (
                   <Button
                     variant="ghost"
@@ -486,6 +497,8 @@ function InvoicesPage() {
           ))}
         </div>
       )}
+
+      <DraftInvoiceDialog invoice={editingDraft} onClose={() => setEditingDraft(null)} />
 
       <NewInvoiceDialog
         open={creating}

@@ -5,10 +5,13 @@
 // visit log, and edit it there — for work you were looking straight at. It is
 // a component now so the job you have just completed can open it directly.
 //
-// One rule it enforces that the old inline version did not: an invoiced visit
-// is not a working document. Its money is locked, because the invoice keeps
-// its own copy of every line and changing the visit afterwards would leave the
-// two disagreeing with nothing to say so.
+// One rule it enforces that the old inline version did not: a visit whose
+// invoice has been sent is not a working document. Its money is locked,
+// because the invoice keeps its own copy of every line and changing the visit
+// afterwards would leave the two disagreeing with nothing to say so.
+//
+// A draft invoice is not that. Nobody has seen it, so the visit behind it stays
+// editable and the invoice is rebuilt from it afterwards.
 import { format } from "date-fns";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -31,7 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { useClients, useJobs, useSaveVisit } from "@/hooks/use-crm";
+import { useClients, useInvoices, useJobs, useSaveVisit } from "@/hooks/use-crm";
 import { money, type Visit } from "@/lib/crm";
 import { findJobForVisit } from "@/lib/job-visit-link";
 import { visitAmount, visitMoneyFields } from "@/lib/visit-fields";
@@ -71,6 +74,7 @@ export function VisitDialog({
 }) {
   const { data: clients = [] } = useClients();
   const save = useSaveVisit();
+  const { data: invoices = [] } = useInvoices();
 
   // Jobs around today, to spot the one a visit finishes off. Bounded rather
   // than every job ever, and memoised so the query key does not change on
@@ -96,9 +100,19 @@ export function VisitDialog({
   const [days, setDays] = useState("1");
 
   const client = clients.find((c) => c.id === clientId);
-  // Already on an invoice the customer has been sent. The description stays
-  // editable — it is a note to yourself — but nothing that moves the total.
-  const locked = Boolean(visit?.billed);
+
+  // A visit is frozen once its invoice has actually gone out, not merely
+  // because an invoice exists. A draft is a document nobody has seen, so
+  // correcting the visit behind it is finishing the job rather than rewriting
+  // history — and "Rebuild from visits" on the invoice picks the change up.
+  //
+  // Unknown counts as locked: if the invoice cannot be found, the safe reading
+  // is that it was sent, because the cost of being wrong that way is a stale
+  // figure in the app rather than a bill that no longer matches the one the
+  // customer is holding.
+  const invoiceStatus = invoices.find((i) => i.id === visit?.invoice_id)?.status;
+  const onDraft = Boolean(visit?.invoice_id) && invoiceStatus === "draft";
+  const locked = Boolean(visit?.billed) && !onDraft;
 
   function resetRate(source?: RateSource | null) {
     const mode: "hourly" | "day" = source?.billing_mode === "fixed" ? "day" : "hourly";
@@ -193,9 +207,14 @@ export function VisitDialog({
           */}
           {locked ? (
             <p className="rounded-lg border border-border bg-secondary px-3 py-2 text-xs">
-              This visit is on an invoice, so its hours, materials and charge are fixed at what the
-              invoice says. You can still change what the work was. To bill something extra, log it
-              as its own visit.
+              This visit is on an invoice that has been sent, so its hours, materials and charge are
+              fixed at what the customer was billed. You can still change what the work was. To bill
+              something extra, log it as its own visit.
+            </p>
+          ) : onDraft ? (
+            <p className="rounded-lg border border-border bg-secondary px-3 py-2 text-xs">
+              This visit is on a draft invoice, so it can still be changed. Afterwards, tap{" "}
+              <strong>Rebuild</strong> on that invoice so its lines catch up.
             </p>
           ) : null}
 
