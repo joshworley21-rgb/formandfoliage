@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { requireUserId } from "@/lib/session";
-import { runOrQueue } from "@/lib/offline-queue";
+import { runOrQueue, type QueuedOp } from "@/lib/offline-queue";
 import { workspaceQueryOptions } from "@/hooks/use-workspace";
 import type {
   Client,
+  Frequency,
   Invoice,
   InvoiceEmailEvent,
   InvoiceItem,
@@ -213,6 +214,108 @@ export function useDeleteJob() {
         return;
       }
       await runOrQueue("Delete job", [{ kind: "delete", table: "scheduled_jobs", match: { id } }]);
+    },
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+/**
+ * Every job in one repeating run, whatever its state and whenever it falls.
+ *
+ * The schedule only ever loads the month it is showing, which is no use for a
+ * question about the whole run: how many visits are left, when it ends, what a
+ * change would touch.
+ */
+export function useSeriesJobs(seriesId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["series_jobs", seriesId],
+    enabled: Boolean(seriesId),
+    queryFn: async (): Promise<ScheduledJob[]> => {
+      const { data, error } = await supabase
+        .from("scheduled_jobs")
+        .select("*")
+        .eq("series_id", seriesId!)
+        .order("starts_at");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+}
+
+/**
+ * Applies one change across every visit still to come in a run.
+ *
+ * The new times are worked out by the caller (see lib/series), so this is only
+ * the writing: one update per visit plus the series row itself, in a single
+ * batch, so a lost connection replays them together rather than leaving half a
+ * round moved.
+ */
+export function useSaveSeries() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      seriesId: string;
+      visits: { id: string; starts_at: string }[];
+      durationMinutes: number;
+      notes: string | null;
+      frequency: Frequency;
+      startTime: string;
+    }) => {
+      const ops: QueuedOp[] = input.visits.map((visit) => ({
+        kind: "update",
+        table: "scheduled_jobs",
+        payload: {
+          starts_at: visit.starts_at,
+          duration_minutes: input.durationMinutes,
+          notes: input.notes,
+        },
+        match: { id: visit.id },
+      }));
+      // Kept in step so a later extension carries on with the same shape.
+      ops.push({
+        kind: "update",
+        table: "job_series",
+        payload: {
+          frequency: input.frequency,
+          start_time: input.startTime,
+          duration_minutes: input.durationMinutes,
+          notes: input.notes,
+        },
+        match: { id: input.seriesId },
+      });
+      await runOrQueue("Series update", ops);
+    },
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+/** Books more visits onto the end of a run that is about to run out. */
+export function useExtendSeries() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      seriesId: string;
+      clientId: string;
+      startsAt: string[];
+      durationMinutes: number;
+      notes: string | null;
+    }) => {
+      const user_id = await currentUserId();
+      await runOrQueue(
+        "Extend series",
+        input.startsAt.map((starts_at) => ({
+          kind: "insert",
+          table: "scheduled_jobs",
+          payload: {
+            user_id,
+            client_id: input.clientId,
+            series_id: input.seriesId,
+            starts_at,
+            duration_minutes: input.durationMinutes,
+            notes: input.notes,
+          },
+        })),
+      );
     },
     onSuccess: () => qc.invalidateQueries(),
   });

@@ -21,6 +21,7 @@ import {
   ClipboardList,
   Pencil,
   Plus,
+  Repeat,
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -69,6 +70,8 @@ import {
   type Visit,
 } from "@/lib/crm";
 import { findVisitForJob } from "@/lib/job-visit-link";
+import { FREQ_STEP } from "@/lib/series";
+import { SeriesDialog } from "@/components/SeriesDialog";
 import { currentUser } from "@/lib/session";
 
 export const Route = createFileRoute("/_authenticated/schedule")({
@@ -90,14 +93,6 @@ export const Route = createFileRoute("/_authenticated/schedule")({
 });
 
 type View = "month" | "week" | "day";
-
-const FREQ_STEP: Record<Frequency, (d: Date, i: number) => Date> = {
-  weekly: (d, i) => addWeeks(d, i),
-  fortnightly: (d, i) => addWeeks(d, i * 2),
-  four_weekly: (d, i) => addWeeks(d, i * 4),
-  monthly: (d, i) => addMonths(d, i),
-  quarterly: (d, i) => addMonths(d, i * 3),
-};
 
 function SchedulePage() {
   const [view, setView] = useState<View>("month");
@@ -150,6 +145,8 @@ function SchedulePage() {
     ? findVisitForJob(visits, completing.client_id, completing.starts_at, claimedVisitIds)
     : null;
   const [sheetJob, setSheetJob] = useState<ScheduledJob | null>(null);
+  // A job out of the run being edited as a run, rather than as one visit.
+  const [seriesJob, setSeriesJob] = useState<ScheduledJob | null>(null);
 
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name ?? "Client";
 
@@ -466,7 +463,20 @@ function SchedulePage() {
           setBookingDate(null);
           setEditingJob(null);
         }}
+        onEditSeries={(job) => {
+          // One dialog at a time: this replaces the single-visit edit rather
+          // than stacking on top of it.
+          setEditingJob(null);
+          setBookingDate(null);
+          setSeriesJob(job);
+        }}
         saveJob={saveJob.mutateAsync}
+      />
+
+      <SeriesDialog
+        job={seriesJob}
+        clientName={seriesJob ? clientName(seriesJob.client_id) : ""}
+        onClose={() => setSeriesJob(null)}
       />
 
       <JobSheetDialog
@@ -555,6 +565,7 @@ function JobDialog({
   onOpenChange,
   defaultDate,
   onSaved,
+  onEditSeries,
   saveJob,
 }: {
   open: boolean;
@@ -562,6 +573,7 @@ function JobDialog({
   onOpenChange: (v: boolean) => void;
   defaultDate: Date;
   onSaved: () => void;
+  onEditSeries: (job: ScheduledJob) => void;
   saveJob: (input: {
     id?: string;
     client_id: string;
@@ -776,10 +788,25 @@ function JobDialog({
           </div>
           {job ? (
             job.series_id ? (
-              <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                This visit is part of a repeating series. Changes here apply to this visit only —
-                the rest of the series is left as it is.
-              </p>
+              /*
+                The sentence explaining the limit is exactly where someone finds
+                out about it, so it is also where the way past it belongs.
+              */
+              <div className="space-y-2 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+                <p className="text-xs text-muted-foreground">
+                  This visit is part of a repeating run. Changes here apply to this visit only — the
+                  rest of the run is left as it is.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-10 w-full"
+                  onClick={() => onEditSeries(job)}
+                >
+                  <Repeat className="size-4" /> Edit the whole run instead
+                </Button>
+              </div>
             ) : null
           ) : (
             <label className="flex items-center gap-2 text-sm font-medium">
