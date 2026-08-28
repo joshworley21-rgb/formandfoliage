@@ -401,7 +401,7 @@ function TeamCard() {
         <p className="text-sm text-muted-foreground">
           Invite an employee by email. When they sign up with that email they can see the schedule,
           job sheets, photos and client addresses, and mark jobs complete. They can never see rates,
-          visits, invoices, recurring billing or these settings.
+          visits, invoices, retainers or these settings.
         </p>
         <form
           className="flex flex-wrap items-end gap-2"

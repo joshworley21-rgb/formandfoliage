@@ -21,6 +21,7 @@ import {
   ChevronRight,
   ClipboardList,
   Pencil,
+  MoreHorizontal,
   Plus,
   Receipt,
   Repeat,
@@ -34,6 +35,13 @@ import { JobSheetDialog } from "@/components/JobSheetDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -436,45 +444,65 @@ function SchedulePage() {
                               <Receipt className="size-4" /> Edit visit
                             </Button>
                           ) : null}
-                          {job.status !== "done" && !isStaff ? (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="size-10 shrink-0"
-                              aria-label="Move job to another day"
-                              onClick={() => setMovingJob(job)}
-                            >
-                              <CalendarClock className="size-4" />
-                            </Button>
-                          ) : null}
+                          {/*
+                            Everything occasional behind one button. Moving,
+                            editing and deleting used to sit out here competing
+                            for thumb space with the two things you actually
+                            touch mid-job, and the row had grown to five
+                            controls — which is how a card stops being readable
+                            at arm's length in a garden.
+                          */}
                           {isStaff ? null : (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="size-10 shrink-0"
-                              aria-label="Edit job"
-                              onClick={() => setEditingJob(job)}
-                            >
-                              <Pencil className="size-4" />
-                            </Button>
-                          )}
-                          {isStaff ? null : (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="size-10 shrink-0"
-                              aria-label="Delete job"
-                              onClick={async () => {
-                                const wholeSeries =
-                                  job.series_id && confirm("Delete the whole repeating series?")
-                                    ? job.series_id
-                                    : null;
-                                await deleteJob.mutateAsync({ id: job.id, wholeSeries });
-                                toast.success("Job removed");
-                              }}
-                            >
-                              <Trash2 className="size-4 text-destructive" />
-                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-10 shrink-0"
+                                  aria-label={`More for ${clientName(job.client_id)}'s job`}
+                                >
+                                  <MoreHorizontal className="size-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-56">
+                                {job.status !== "done" ? (
+                                  <DropdownMenuItem
+                                    className="h-11"
+                                    onSelect={() => setMovingJob(job)}
+                                  >
+                                    <CalendarClock className="size-4" /> Move to another day
+                                  </DropdownMenuItem>
+                                ) : null}
+                                <DropdownMenuItem
+                                  className="h-11"
+                                  onSelect={() => setEditingJob(job)}
+                                >
+                                  <Pencil className="size-4" /> Edit this job
+                                </DropdownMenuItem>
+                                {job.series_id ? (
+                                  <DropdownMenuItem
+                                    className="h-11"
+                                    onSelect={() => setSeriesJob(job)}
+                                  >
+                                    <Repeat className="size-4" /> Edit the whole run
+                                  </DropdownMenuItem>
+                                ) : null}
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="h-11 text-destructive focus:text-destructive"
+                                  onSelect={async () => {
+                                    const wholeSeries =
+                                      job.series_id && confirm("Delete the whole repeating run?")
+                                        ? job.series_id
+                                        : null;
+                                    await deleteJob.mutateAsync({ id: job.id, wholeSeries });
+                                    toast.success("Job removed");
+                                  }}
+                                >
+                                  <Trash2 className="size-4" /> Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           )}
                         </div>
                       </CardContent>
