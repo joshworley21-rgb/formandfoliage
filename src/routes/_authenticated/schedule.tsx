@@ -16,11 +16,13 @@ import {
 } from "date-fns";
 import {
   CalendarCheck,
+  CalendarClock,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
   Pencil,
   Plus,
+  Receipt,
   Repeat,
   Trash2,
 } from "lucide-react";
@@ -71,7 +73,9 @@ import {
 } from "@/lib/crm";
 import { findVisitForJob } from "@/lib/job-visit-link";
 import { FREQ_STEP } from "@/lib/series";
+import { MoveJobDialog } from "@/components/MoveJobDialog";
 import { SeriesDialog } from "@/components/SeriesDialog";
+import { VisitDialog } from "@/components/VisitDialog";
 import { currentUser } from "@/lib/session";
 
 export const Route = createFileRoute("/_authenticated/schedule")({
@@ -147,6 +151,12 @@ function SchedulePage() {
   const [sheetJob, setSheetJob] = useState<ScheduledJob | null>(null);
   // A job out of the run being edited as a run, rather than as one visit.
   const [seriesJob, setSeriesJob] = useState<ScheduledJob | null>(null);
+  const [movingJob, setMovingJob] = useState<ScheduledJob | null>(null);
+  const [editingVisit, setEditingVisit] = useState<Visit | null>(null);
+
+  /** The visit a completed job wrote, so its materials can be corrected here. */
+  const visitOf = (job: ScheduledJob) =>
+    job.visit_id ? (visits.find((v) => v.id === job.visit_id) ?? null) : null;
 
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name ?? "Client";
 
@@ -391,7 +401,7 @@ function SchedulePage() {
                           <p className="line-clamp-2 text-sm text-muted-foreground">{job.notes}</p>
                         ) : null}
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <Button
                             variant="outline"
                             size="sm"
@@ -407,6 +417,34 @@ function SchedulePage() {
                               onClick={() => setCompleting(job)}
                             >
                               <CalendarCheck className="size-4" /> Complete
+                            </Button>
+                          ) : null}
+                          {/*
+                            A done job has no Complete button, which leaves the
+                            room for the thing actually wanted afterwards: the
+                            materials you forgot. Without this the only route to
+                            them was the Visits screen, for work on the card in
+                            front of you.
+                          */}
+                          {job.status === "done" && !isStaff && visitOf(job) ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-10 flex-1"
+                              onClick={() => setEditingVisit(visitOf(job)!)}
+                            >
+                              <Receipt className="size-4" /> Edit visit
+                            </Button>
+                          ) : null}
+                          {job.status !== "done" && !isStaff ? (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-10 shrink-0"
+                              aria-label="Move job to another day"
+                              onClick={() => setMovingJob(job)}
+                            >
+                              <CalendarClock className="size-4" />
                             </Button>
                           ) : null}
                           {isStaff ? null : (
@@ -477,6 +515,20 @@ function SchedulePage() {
         job={seriesJob}
         clientName={seriesJob ? clientName(seriesJob.client_id) : ""}
         onClose={() => setSeriesJob(null)}
+      />
+
+      <MoveJobDialog
+        job={movingJob}
+        clientName={movingJob ? clientName(movingJob.client_id) : ""}
+        onClose={() => setMovingJob(null)}
+      />
+
+      <VisitDialog
+        open={editingVisit !== null}
+        visit={editingVisit}
+        onOpenChange={(v) => {
+          if (!v) setEditingVisit(null);
+        }}
       />
 
       <JobSheetDialog
