@@ -8,27 +8,9 @@ import { OwnerOnly } from "@/components/OwnerOnly";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { useClients, useDeleteVisit, useJobs, useSaveVisit, useVisits } from "@/hooks/use-crm";
-import { hoursLabel, money, priceVisit, type Visit } from "@/lib/crm";
-import { findJobForVisit } from "@/lib/job-visit-link";
+import { VisitDialog } from "@/components/VisitDialog";
+import { useClients, useDeleteVisit, useVisits } from "@/hooks/use-crm";
+import { hoursLabel, money, type Visit } from "@/lib/crm";
 
 export const Route = createFileRoute("/_authenticated/visits")({
   head: () => ({
@@ -49,52 +31,14 @@ export const Route = createFileRoute("/_authenticated/visits")({
   ),
 });
 
-function todayISO() {
-  return format(new Date(), "yyyy-MM-dd");
-}
-
 function VisitsPage() {
   const { data: clients = [] } = useClients();
   const { data: visits = [], isLoading } = useVisits();
 
-  // Jobs around today, to spot the one a visit finishes off. Bounded rather
-  // than every job ever, and memoised so the query key does not change on
-  // every render. A visit dated outside this window simply links nothing,
-  // which is the same as the old behaviour.
-  const jobWindow = useMemo(() => {
-    const now = new Date();
-    return {
-      from: new Date(now.getTime() - 90 * 86400000).toISOString(),
-      to: new Date(now.getTime() + 30 * 86400000).toISOString(),
-    };
-  }, []);
-  const { data: jobs = [] } = useJobs(jobWindow);
-
-  const save = useSaveVisit();
   const remove = useDeleteVisit();
 
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Visit | null>(null);
-  const [clientId, setClientId] = useState("");
-  const [date, setDate] = useState(todayISO());
-  const [hours, setHours] = useState("2");
-  const [materials, setMaterials] = useState("0");
-  const [description, setDescription] = useState("");
-  const [missed, setMissed] = useState(false);
-  const [payMode, setPayMode] = useState<"hourly" | "day">("hourly");
-  const [rate, setRate] = useState("0");
-  const [days, setDays] = useState("1");
-
-  const client = clients.find((c) => c.id === clientId);
-  const materialsNum = Number(materials) || 0;
-  // A visit that did not happen is worth nothing, whatever is left in the rate
-  // and hours fields from the last one logged.
-  const computedAmount = missed
-    ? 0
-    : payMode === "day"
-      ? (Number(rate) || 0) * (Number(days) || 0) + materialsNum
-      : (Number(rate) || 0) * (Number(hours) || 0) + materialsNum;
-  const preview = computedAmount;
 
   const totals = useMemo(() => {
     const unbilled = visits.filter((v) => !v.billed && !v.missed);
@@ -104,92 +48,14 @@ function VisitsPage() {
     };
   }, [visits]);
 
-  /** Rates come straight from the client record. */
-  function rateFor(
-    c: { hourly_rate?: number | string; fixed_price?: number | string } | null | undefined,
-    mode: "hourly" | "day",
-  ) {
-    return String(Number((mode === "day" ? c?.fixed_price : c?.hourly_rate) ?? 0));
-  }
-
-  function resetRate(
-    c?: {
-      billing_mode?: string;
-      hourly_rate?: number | string;
-      fixed_price?: number | string;
-    } | null,
-  ) {
-    const mode: "hourly" | "day" = c?.billing_mode === "fixed" ? "day" : "hourly";
-    setPayMode(mode);
-    setRate(rateFor(c, mode));
-    setDays("1");
-  }
-
   function openNew() {
     setEditing(null);
-    const first = clients[0];
-    setClientId(first?.id ?? "");
-    setDate(todayISO());
-    setHours("2");
-    setMaterials("0");
-    setDescription("");
-    setMissed(false);
-    resetRate(first);
     setOpen(true);
   }
 
   function openEdit(visit: Visit) {
     setEditing(visit);
-    setClientId(visit.client_id);
-    setDate(visit.visit_date);
-    setHours(String(visit.hours));
-    setMaterials(String(visit.materials_cost));
-    setDescription(visit.description ?? "");
-    setMissed(visit.missed);
-    resetRate(clients.find((c) => c.id === visit.client_id));
     setOpen(true);
-  }
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!client) {
-      toast.error("Pick a client first");
-      return;
-    }
-
-    // A visit logged for a day this client was booked in is that job, done.
-    // Only on a new visit: editing one months later should not quietly tick
-    // something off the schedule.
-    const jobDone = editing ? null : findJobForVisit(jobs, client.id, date);
-
-    try {
-      await save.mutateAsync({
-        ...(editing ? { id: editing.id } : {}),
-        client_id: client.id,
-        visit_date: date,
-        hours: missed ? 0 : Number(hours) || 0,
-        materials_cost: missed ? 0 : Number(materials) || 0,
-        description: description || null,
-        amount: computedAmount,
-        missed,
-        // The scheduled job still gets closed off, as missed rather than done,
-        // so the schedule agrees with the log instead of showing work still to do.
-        ...(jobDone ? { completesJobId: jobDone.id, jobOutcome: missed ? "missed" : "done" } : {}),
-      });
-
-      toast.success(
-        editing
-          ? "Visit updated"
-          : jobDone
-            ? `${missed ? "Missed visit recorded" : "Visit logged"} — ${client.name}'s job is marked ${missed ? "missed" : "complete"}`
-            : missed
-              ? "Missed visit recorded"
-              : "Visit logged",
-      );
-      setOpen(false);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not save visit");
-    }
   }
 
   return (
@@ -298,168 +164,7 @@ function VisitsPage() {
         </div>
       )}
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editing ? "Edit visit" : "Log a visit"}</DialogTitle>
-          </DialogHeader>
-          <form className="space-y-3" onSubmit={submit}>
-            <div className="space-y-1.5">
-              <Label>Client</Label>
-              <Select
-                value={clientId}
-                onValueChange={(v) => {
-                  setClientId(v);
-                  const c = clients.find((x) => x.id === v);
-                  if (c) resetRate(c);
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose client" />
-                </SelectTrigger>
-                <SelectContent>
-                  {clients.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="date">Date</Label>
-              <Input id="date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-            </div>
-
-            {/* Above everything about money, because ticking it makes all of
-                that irrelevant — and it is the first thing you know when you
-                are standing at a locked gate. */}
-            <label className="flex items-start gap-2.5 rounded-lg border border-border p-3 text-sm">
-              <Checkbox
-                checked={missed}
-                onCheckedChange={(value) => setMissed(Boolean(value))}
-                className="mt-0.5"
-              />
-              <span>
-                <span className="font-medium">Missed visit</span>
-                <span className="block text-xs text-muted-foreground">
-                  Kept as a record, charged at nothing, and left out of invoices and everything
-                  waiting to be billed.
-                </span>
-              </span>
-            </label>
-
-            <div className={missed ? "hidden" : "grid gap-3 sm:grid-cols-2"}>
-              <div className="space-y-1.5">
-                <Label htmlFor="hours">Hours</Label>
-                <Input
-                  id="hours"
-                  type="number"
-                  step="0.25"
-                  min="0"
-                  value={hours}
-                  onChange={(e) => setHours(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="materials">Materials (£)</Label>
-                <Input
-                  id="materials"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={materials}
-                  onChange={(e) => setMaterials(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className={missed ? "hidden" : "grid gap-3 sm:grid-cols-3"}>
-              <div className="space-y-1.5">
-                <Label>Pay basis</Label>
-                <Select
-                  value={payMode}
-                  onValueChange={(v) => {
-                    const mode = v as "hourly" | "day";
-                    setPayMode(mode);
-                    setRate(rateFor(client, mode));
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="hourly">Hourly rate</SelectItem>
-                    <SelectItem value="day">Day rate</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="vrate">
-                  {payMode === "day" ? "Day rate (£)" : "Hourly rate (£)"}
-                </Label>
-                <Input
-                  id="vrate"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={rate}
-                  onChange={(e) => setRate(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">From the client record</p>
-              </div>
-
-              {payMode === "day" ? (
-                <div className="space-y-1.5">
-                  <Label htmlFor="vdays">Days worked</Label>
-                  <Input
-                    id="vdays"
-                    type="number"
-                    step="0.5"
-                    min="0"
-                    value={days}
-                    onChange={(e) => setDays(e.target.value)}
-                  />
-                </div>
-              ) : null}
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="work">{missed ? "What happened" : "Work done"}</Label>
-              <Textarea
-                id="work"
-                rows={3}
-                placeholder={
-                  missed
-                    ? "Gate locked, ground too wet, cancelled on the day…"
-                    : "Mowed lawns, hedge trim, cleared beds…"
-                }
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-            </div>
-            <p className="rounded-lg bg-secondary px-3 py-2 text-sm">
-              {missed ? (
-                <>
-                  Charge: <span className="font-semibold">nothing</span>{" "}
-                  <span className="text-muted-foreground">(this visit did not happen)</span>
-                </>
-              ) : (
-                <>
-                  Charge: <span className="font-semibold">{money(preview)}</span>{" "}
-                  <span className="text-muted-foreground">
-                    ({payMode === "day" ? "day rate" : "hourly rate"} + materials)
-                  </span>
-                </>
-              )}
-            </p>
-
-            <DialogFooter>
-              <Button type="submit" disabled={save.isPending}>
-                {missed ? "Save missed visit" : "Save visit"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <VisitDialog open={open} visit={editing} onOpenChange={setOpen} />
     </AppShell>
   );
 }
