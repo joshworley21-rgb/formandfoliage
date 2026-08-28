@@ -889,9 +889,25 @@ function JobDialog({
               </div>
             ) : null
           ) : (
-            <label className="flex items-center gap-2 text-sm font-medium">
-              <Checkbox checked={repeats} onCheckedChange={(v) => setRepeats(Boolean(v))} />
-              Repeats
+            /*
+              "Repeats" on its own said nothing about what it would do, and a
+              regular round is the normal case rather than the exotic one —
+              someone went looking for weekly and fortnightly on an entirely
+              different screen. It now says what ticking it books.
+            */
+            <label className="flex items-start gap-2.5 rounded-lg border border-border p-3 text-sm">
+              <Checkbox
+                checked={repeats}
+                onCheckedChange={(v) => setRepeats(Boolean(v))}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="font-medium">Repeats</span>
+                <span className="block text-xs text-muted-foreground">
+                  Book this client in weekly, fortnightly or monthly and the whole run goes on the
+                  calendar at once.
+                </span>
+              </span>
             </label>
           )}
           {!job && repeats ? (

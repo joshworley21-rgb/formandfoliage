@@ -9,7 +9,6 @@ import {
   LayoutDashboard,
   LogOut,
   MoreHorizontal,
-  Repeat,
   Settings as SettingsIcon,
   Users,
 } from "lucide-react";
@@ -30,13 +29,18 @@ const NAV = [
   { to: "/quotes", label: "Quotes", icon: FileSignature },
   { to: "/visits", label: "Visits", icon: ClipboardList },
   { to: "/invoices", label: "Invoices", icon: FileText },
-  { to: "/recurring", label: "Retainers", icon: Repeat },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ] as const;
 
+// Retainers — invoicing a flat amount every cycle whether or not you visited —
+// is not how this business bills, so it is not in the navigation. The screen,
+// the route and the table all still exist and /recurring still opens it; only
+// the standing offer of it is gone. Repeating work is a repeating job on the
+// schedule, which is a different feature and the one actually used.
+
 const STAFF_NAV_PATHS = ["/schedule", "/clients"];
 
-// The phone has room for five things along the bottom, and there are nine.
+// The phone has room for five things along the bottom, and there are eight.
 // These four are the ones wanted mid-job; everything else lives behind More,
 // which is what stops the rest — Settings and Invoices among them — from being
 // silently unreachable on a phone.
