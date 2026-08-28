@@ -88,6 +88,7 @@ export function VisitDialog({
   const [date, setDate] = useState(todayISO());
   const [hours, setHours] = useState("2");
   const [materials, setMaterials] = useState("0");
+  const [materialsNote, setMaterialsNote] = useState("");
   const [description, setDescription] = useState("");
   const [missed, setMissed] = useState(false);
   const [payMode, setPayMode] = useState<"hourly" | "day">("hourly");
@@ -115,6 +116,7 @@ export function VisitDialog({
       setDate(visit.visit_date);
       setHours(String(visit.hours));
       setMaterials(String(visit.materials_cost));
+      setMaterialsNote(visit.materials_note ?? "");
       setDescription(visit.description ?? "");
       setMissed(visit.missed);
       resetRate(clients.find((c) => c.id === visit.client_id));
@@ -125,6 +127,7 @@ export function VisitDialog({
     setDate(defaultDate ?? todayISO());
     setHours("2");
     setMaterials("0");
+    setMaterialsNote("");
     setDescription("");
     setMissed(false);
     resetRate(first);
@@ -156,6 +159,7 @@ export function VisitDialog({
         // Empty for an invoiced visit, so the update leaves the billed figures
         // exactly as the invoice has them.
         ...visitMoneyFields(moneyInput),
+        ...(locked ? {} : { materials_note: materialsNote.trim() || null }),
         description: description || null,
         ...(jobDone ? { completesJobId: jobDone.id, jobOutcome: missed ? "missed" : "done" } : {}),
       });
@@ -275,6 +279,27 @@ export function VisitDialog({
               />
             </div>
           </div>
+          {/*
+            Only once there is a figure to explain. An empty box asking what
+            the materials were, on a visit that had none, is a question with no
+            answer — and this is a form filled in at the end of a long day.
+          */}
+          {!missed && Number(materials) > 0 ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="matnote">What the materials were</Label>
+              <Input
+                id="matnote"
+                value={materialsNote}
+                disabled={locked}
+                placeholder="2 bags compost, bark chippings"
+                onChange={(e) => setMaterialsNote(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Goes on the invoice as its own line, so the customer can see what they are paying
+                for.
+              </p>
+            </div>
+          ) : null}
           <div className={missed || locked ? "hidden" : "grid gap-3 sm:grid-cols-3"}>
             <div className="space-y-1.5">
               <Label>Pay basis</Label>

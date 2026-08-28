@@ -6,6 +6,7 @@
 // caller's own client so RLS still applies.
 import { requireUser, adminClient } from "../_shared/supabase.ts";
 import { json, serveJson } from "../_shared/http.ts";
+import { linesForVisit } from "../_shared/invoice-lines.ts";
 
 type CreateInvoiceInput = {
   clientId?: string;
@@ -23,6 +24,7 @@ type VisitRow = {
   hours: number;
   description: string | null;
   materials_cost: number;
+  materials_note: string | null;
   amount: number;
   billed: boolean;
   missed: boolean;
@@ -65,7 +67,9 @@ Deno.serve(
     if (data.visitIds.length > 0) {
       const { data: rows, error } = await supabase
         .from("visits")
-        .select("id, visit_date, hours, description, materials_cost, amount, billed, missed")
+        .select(
+          "id, visit_date, hours, description, materials_cost, materials_note, amount, billed, missed",
+        )
         .in("id", data.visitIds)
         .eq("client_id", data.clientId);
       if (error) throw error;
@@ -114,19 +118,16 @@ Deno.serve(
       .single();
     if (invoiceError) throw invoiceError;
 
-    const items = visits.map((v) => ({
-      user_id: userId,
-      invoice_id: invoice.id,
-      visit_id: v.id as string | null,
-      item_date: v.visit_date,
-      description:
-        v.description?.trim() ||
-        (client.billing_mode === "fixed" ? "Garden maintenance visit" : "Garden maintenance"),
-      quantity: client.billing_mode === "fixed" ? 1 : Number(v.hours),
-      unit_price:
-        client.billing_mode === "fixed" ? Number(v.amount) : Number(client.hourly_rate ?? 0),
-      amount: Number(v.amount),
-    }));
+    // Materials get a line of their own rather than being folded into the
+    // labour one, so both lines multiply out and the materials can be named.
+    // The two still sum to the visit, so subtotal, VAT and total are untouched.
+    // The arithmetic lives in _shared/invoice-lines, where it is tested.
+    const items = visits.flatMap((v) =>
+      linesForVisit(v, {
+        fixedPrice: client.billing_mode === "fixed",
+        hourlyRate: Number(client.hourly_rate ?? 0),
+      }).map((line) => ({ user_id: userId, invoice_id: invoice.id, ...line })),
+    );
 
     if (data.retainerAmount > 0) {
       items.push({

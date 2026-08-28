@@ -925,6 +925,7 @@ export type Database = {
           id: string;
           invoice_id: string | null;
           materials_cost: number;
+          materials_note: string | null;
           missed: boolean;
           updated_at: string;
           user_id: string;
@@ -940,6 +941,7 @@ export type Database = {
           id?: string;
           invoice_id?: string | null;
           materials_cost?: number;
+          materials_note?: string | null;
           missed?: boolean;
           updated_at?: string;
           user_id: string;
@@ -955,6 +957,7 @@ export type Database = {
           id?: string;
           invoice_id?: string | null;
           materials_cost?: number;
+          materials_note?: string | null;
           missed?: boolean;
           updated_at?: string;
           user_id?: string;
