@@ -12,6 +12,11 @@ project_id = "ugbjwgfmsrkclrzpfwgz"
 [functions.create-invoice]
 verify_jwt = true
 
+# Re-derives a draft invoice's lines. Signed in only: it rewrites the money on
+# a document, and refuses outright once that document has been sent.
+[functions.rebuild-invoice]
+verify_jwt = true
+
 [functions.send-invoice-email]
 verify_jwt = true
 

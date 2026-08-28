@@ -45,6 +45,21 @@ export function linesForVisit(
   const materials = Math.max(0, Number(visit.materials_cost) || 0);
   const labour = round2(Number(visit.amount) - materials);
 
+  // What a visit is worth is decided when it is logged and stored on the visit.
+  // The hourly rate lives on the client and can be put up next spring. Print
+  // the two together and the line stops multiplying out — the same fault the
+  // materials split was fixing, arriving through a different door, and one
+  // rebuilding an old draft after a price rise would walk straight into.
+  //
+  // So the rate is only shown when it genuinely accounts for the figure. When
+  // it does not — the rate has moved, the visit was priced by the day, the
+  // total was overridden on completion — the line is one unit at what it came
+  // to. Less detail, and true.
+  const hours = Number(visit.hours) || 0;
+  const rate = Number(opts.hourlyRate) || 0;
+  const rateExplainsIt =
+    !opts.fixedPrice && hours > 0 && Math.abs(round2(hours * rate) - labour) < 0.005;
+
   const lines: InvoiceLine[] = [
     {
       visit_id: visit.id,
@@ -52,8 +67,8 @@ export function linesForVisit(
       description:
         visit.description?.trim() ||
         (opts.fixedPrice ? "Garden maintenance visit" : "Garden maintenance"),
-      quantity: opts.fixedPrice ? 1 : Number(visit.hours),
-      unit_price: opts.fixedPrice ? labour : Number(opts.hourlyRate ?? 0),
+      quantity: rateExplainsIt ? hours : 1,
+      unit_price: rateExplainsIt ? rate : labour,
       amount: labour,
     },
   ];
@@ -73,4 +88,20 @@ export function linesForVisit(
   }
 
   return lines;
+}
+
+/**
+ * What an invoice adds up to, given every line on it.
+ *
+ * Shared so that rebuilding a draft cannot drift from how it was first
+ * costed — two implementations of the same sum is how a total starts
+ * disagreeing with the lines above it.
+ */
+export function invoiceTotals(
+  amounts: number[],
+  vatRate: number,
+): { subtotal: number; vatAmount: number; total: number } {
+  const subtotal = round2(amounts.reduce((sum, n) => sum + (Number(n) || 0), 0));
+  const vatAmount = round2(subtotal * ((Number(vatRate) || 0) / 100));
+  return { subtotal, vatAmount, total: round2(subtotal + vatAmount) };
 }
