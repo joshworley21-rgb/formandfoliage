@@ -350,7 +350,7 @@ function InvoicesPage() {
           is more urgent than money not yet asked for. */}
       <div className="mb-3 space-y-3">
         <PaymentsToReview />
-        <InvoiceReminders compact />
+        <InvoiceReminders />
       </div>
 
       {/* The total above always counts every unpaid invoice, searched or not:

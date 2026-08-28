@@ -85,7 +85,7 @@ export function useInvoiceReminders(): InvoiceReminder[] {
     .sort((a, b) => b.visits / b.threshold - a.visits / a.threshold);
 }
 
-export function InvoiceReminders({ compact = false }: { compact?: boolean }) {
+export function InvoiceReminders() {
   const reminders = useInvoiceReminders();
   if (reminders.length === 0) return null;
 
@@ -123,16 +123,23 @@ export function InvoiceReminders({ compact = false }: { compact?: boolean }) {
                 </p>
               </div>
               <p className="font-display text-lg">{money(r.value)}</p>
-              {compact ? null : (
-                <Button asChild size="sm" variant="outline">
-                  {/* Naming the client means the invoice opens on them with
-                      their visits already ticked, rather than landing on the
-                      list and asking again. */}
-                  <Link to="/invoices" search={{ client: r.clientId }}>
-                    Create invoice
-                  </Link>
-                </Button>
-              )}
+              {/*
+                Naming the client means the invoice opens on them with their
+                visits already ticked, rather than landing on the list and
+                asking again.
+
+                This used to be hidden on the Invoices screen, on the grounds
+                that the page already has a New invoice button. It does — and
+                that one opens with no client chosen, so you then pick the
+                client and tick the visits by hand. They were never the same
+                thing, and the shortcut was missing from the one screen where
+                somebody has already decided to do some invoicing.
+              */}
+              <Button asChild size="sm" variant="outline">
+                <Link to="/invoices" search={{ client: r.clientId }}>
+                  Create invoice
+                </Link>
+              </Button>
             </li>
           ))}
         </ul>
