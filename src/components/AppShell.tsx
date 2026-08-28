@@ -30,7 +30,7 @@ const NAV = [
   { to: "/quotes", label: "Quotes", icon: FileSignature },
   { to: "/visits", label: "Visits", icon: ClipboardList },
   { to: "/invoices", label: "Invoices", icon: FileText },
-  { to: "/recurring", label: "Recurring", icon: Repeat },
+  { to: "/recurring", label: "Retainers", icon: Repeat },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ] as const;
 

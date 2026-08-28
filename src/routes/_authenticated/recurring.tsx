@@ -39,12 +39,12 @@ import { createInvoice } from "@/lib/invoicing";
 export const Route = createFileRoute("/_authenticated/recurring")({
   head: () => ({
     meta: [
-      { title: "Recurring billing — JW Garden Services CRM" },
+      { title: "Retainers — JW Garden Services CRM" },
       {
         name: "description",
         content: "Set clients on weekly, fortnightly, monthly or quarterly invoice schedules.",
       },
-      { property: "og:title", content: "Recurring billing — JW Garden Services CRM" },
+      { property: "og:title", content: "Retainers — JW Garden Services CRM" },
       {
         property: "og:description",
         content: "Set clients on weekly, fortnightly, monthly or quarterly invoice schedules.",
@@ -116,10 +116,14 @@ function RecurringPage() {
     }
   }
 
+  // Called "Recurring billing" until it sat one nav item away from the
+  // schedule's "Repeats", which creates repeating jobs. Two different features
+  // whose names were near enough that you had to open one to tell which. The
+  // data has always called it a retainer.
   return (
     <AppShell
-      title="Recurring billing"
-      description="Put regular clients on a repeating invoice cycle."
+      title="Retainers"
+      description="Invoice a regular client the same amount every cycle."
       actions={
         <Button
           onClick={() => {
@@ -137,7 +141,7 @@ function RecurringPage() {
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <Repeat className="size-8 text-muted-foreground" />
             <p className="text-sm text-muted-foreground">
-              No recurring schedules yet. Add one to invoice a client automatically each cycle.
+              No retainers yet. Add one to invoice a client the same amount every cycle.
             </p>
           </CardContent>
         </Card>
@@ -240,7 +244,7 @@ function ScheduleDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{schedule ? "Edit schedule" : "New recurring schedule"}</DialogTitle>
+          <DialogTitle>{schedule ? "Edit retainer" : "New retainer"}</DialogTitle>
           <DialogDescription>
             On each run the app builds an invoice from that client's unbilled visits plus any
             retainer.
