@@ -80,7 +80,8 @@ export function InvoicePreviewDoc({ invoice, items, client, settings }: Props) {
             {items.map((item) => (
               <tr key={item.id} className="border-b border-neutral-200 align-top">
                 <td className="px-3 py-3">
-                  {item.item_date ? `${prettyDate(item.item_date)} — ` : ""}
+                  {/* Grouped lines list their own dates — see invoice-pdf. */}
+                  {item.item_date && !item.grouped ? `${prettyDate(item.item_date)} — ` : ""}
                   {item.description}
                 </td>
                 <td className="px-3 py-3 text-right">{Number(item.quantity)}</td>

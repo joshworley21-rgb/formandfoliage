@@ -186,9 +186,13 @@ export async function buildInvoicePdf({
   y = headerTop + 48;
 
   for (const item of items) {
-    const desc = item.item_date
-      ? `${prettyDate(item.item_date)} — ${item.description}`
-      : item.description;
+    // A grouped line carries a date so the invoice can sort on it, but names
+    // every day it covers in its own description. Printing the date here as
+    // well would put the first of them twice on one line.
+    const desc =
+      item.item_date && !item.grouped
+        ? `${prettyDate(item.item_date)} — ${item.description}`
+        : item.description;
     const lines = doc.splitTextToSize(desc, colQty - left - 30) as string[];
     const rowHeight = Math.max(26, lines.length * 13 + 14);
     if (y + rowHeight > 740) {

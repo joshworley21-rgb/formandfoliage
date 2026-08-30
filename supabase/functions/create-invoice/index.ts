@@ -141,6 +141,7 @@ Deno.serve(
         quantity: 1,
         unit_price: data.retainerAmount,
         amount: data.retainerAmount,
+        grouped: false,
       });
     }
 
