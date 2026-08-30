@@ -6,7 +6,7 @@
 // caller's own client so RLS still applies.
 import { requireUser, adminClient } from "../_shared/supabase.ts";
 import { json, serveJson } from "../_shared/http.ts";
-import { linesForVisit } from "../_shared/invoice-lines.ts";
+import { groupLines, linesForVisit } from "../_shared/invoice-lines.ts";
 
 type CreateInvoiceInput = {
   clientId?: string;
@@ -122,12 +122,14 @@ Deno.serve(
     // labour one, so both lines multiply out and the materials can be named.
     // The two still sum to the visit, so subtotal, VAT and total are untouched.
     // The arithmetic lives in _shared/invoice-lines, where it is tested.
-    const items = visits.flatMap((v) =>
-      linesForVisit(v, {
-        fixedPrice: client.billing_mode === "fixed",
-        hourlyRate: Number(client.hourly_rate ?? 0),
-      }).map((line) => ({ user_id: userId, invoice_id: invoice.id, ...line })),
-    );
+    const items = groupLines(
+      visits.flatMap((v) =>
+        linesForVisit(v, {
+          fixedPrice: client.billing_mode === "fixed",
+          hourlyRate: Number(client.hourly_rate ?? 0),
+        }),
+      ),
+    ).map((line) => ({ user_id: userId, invoice_id: invoice.id, ...line }));
 
     if (data.retainerAmount > 0) {
       items.push({

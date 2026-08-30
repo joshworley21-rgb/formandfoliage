@@ -23,7 +23,9 @@ export type VisitForInvoice = {
 
 export type InvoiceLine = {
   visit_id: string | null;
-  item_date: string;
+  /** Null on a grouped line, which covers several days and names them in its
+   *  description instead. */
+  item_date: string | null;
   description: string;
   quantity: number;
   unit_price: number;
@@ -104,4 +106,99 @@ export function invoiceTotals(
   const subtotal = round2(amounts.reduce((sum, n) => sum + (Number(n) || 0), 0));
   const vatAmount = round2(subtotal * ((Number(vatRate) || 0) / 100));
   return { subtotal, vatAmount, total: round2(subtotal + vatAmount) };
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "5 Aug" from a yyyy-MM-dd. No date library: this runs on the edge. */
+function dayMonth(iso: string): string {
+  const [, month, day] = iso.split("-");
+  return `${Number(day)} ${MONTHS[Number(month) - 1] ?? ""}`.trim();
+}
+
+/**
+ * Which days a grouped line covers, in the fewest words that still answer
+ * "did he actually come?".
+ *
+ * Listed while a list is readable, and a range once it is not. Someone
+ * checking a month of visits wants the dates; someone looking at a year of
+ * them wants to know it is a year.
+ */
+export function datesLabel(dates: string[], maxListed = 6): string {
+  const sorted = [...dates].filter(Boolean).sort();
+  if (sorted.length === 0) return "";
+  if (sorted.length > maxListed) {
+    return `${dayMonth(sorted[0]!)} to ${dayMonth(sorted[sorted.length - 1]!)}`;
+  }
+  // All within one month reads better as "5, 12, 19 Aug" than the month thrice.
+  const months = new Set(sorted.map((d) => d.slice(0, 7)));
+  if (months.size === 1) {
+    const [, month] = sorted[0]!.split("-");
+    const days = sorted.map((d) => Number(d.split("-")[2]));
+    return `${days.join(", ")} ${MONTHS[Number(month) - 1] ?? ""}`.trim();
+  }
+  return sorted.map(dayMonth).join(", ");
+}
+
+/**
+ * Collapses repeat visits that cost the same into one line with a quantity.
+ *
+ * A fortnightly round produced a line per visit, all saying the same thing for
+ * the same money: six rows to say "six mows". They become "4 visits" at the
+ * price of one, which is how anybody would write it out by hand.
+ *
+ * Two lines merge only when their wording and their figures both match. Same
+ * money is not enough on its own — a full day and a normal visit that happen
+ * to come to the same total are different work, and so are two visits
+ * described differently. Anything that does not match is left exactly as it
+ * was, which is what keeps the odd one out visible.
+ *
+ * The grouped line keeps one of its visits' ids. It has to keep a real one: a
+ * null visit_id is how a typed retainer line is told apart from a computed
+ * one, and a grouped line that looked typed would survive a rebuild while its
+ * replacements were inserted alongside it.
+ */
+export function groupLines(lines: InvoiceLine[]): InvoiceLine[] {
+  const groups = new Map<string, InvoiceLine[]>();
+  for (const line of lines) {
+    const key = `${line.description}|${line.amount}|${line.unit_price}|${line.quantity}`;
+    const existing = groups.get(key);
+    if (existing) existing.push(line);
+    else groups.set(key, [line]);
+  }
+
+  const merged = [...groups.values()].map((group) => {
+    const first = group[0]!;
+    if (group.length === 1) return first;
+    // Sorted, because item_date below takes the first of these and "first"
+    // has to mean earliest rather than whichever visit was loaded first.
+    const dates = group
+      .map((l) => l.item_date)
+      .filter((d): d is string => Boolean(d))
+      .sort();
+    const label = datesLabel(dates);
+    return {
+      visit_id: first.visit_id,
+      // The earliest of the days it covers, rather than nothing. A grouped
+      // line has no single date, but item_date is the only thing an invoice's
+      // lines are ordered by — and Postgres sorts nulls last, so a null here
+      // would drop the whole round to the bottom of the invoice, underneath
+      // work that happened after it. Every date is named in the description
+      // regardless.
+      item_date: dates[0] ?? first.item_date,
+      description: `${first.description} — ${group.length} visits${label ? `: ${label}` : ""}`,
+      quantity: group.length,
+      unit_price: first.amount,
+      amount: round2(first.amount * group.length),
+    };
+  });
+
+  // Still in date order, so the invoice reads down the month as it did before.
+  const sortKeys = [...groups.values()].map(
+    (group) => group.map((l) => l.item_date ?? "").sort()[0] ?? "",
+  );
+  return merged
+    .map((line, i) => ({ line, at: sortKeys[i] ?? "" }))
+    .sort((a, b) => a.at.localeCompare(b.at))
+    .map((entry) => entry.line);
 }
