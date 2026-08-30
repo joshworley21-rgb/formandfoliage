@@ -13,6 +13,7 @@ import {
   History,
   Mail,
   MailCheck,
+  MessageSquare,
   MinusCircle,
   MousePointerClick,
   Pencil,
@@ -79,6 +80,7 @@ import {
   type InvoiceItem,
 } from "@/lib/crm";
 import { InvoicePreviewDoc } from "@/components/InvoicePreviewDoc";
+import { SendInvoiceDialog, type SendInvoiceDraft } from "@/components/SendInvoiceDialog";
 import { buildInvoicePdf, pdfToBase64 } from "@/lib/invoice-pdf";
 import { createInvoice, sendInvoiceEmail } from "@/lib/invoicing";
 import { filterBy } from "@/lib/search";
@@ -232,6 +234,8 @@ function InvoicesPage() {
     items: InvoiceItem[];
     intent: "download" | "send";
   } | null>(null);
+  // The invoice whose email is being worded before it goes out.
+  const [composing, setComposing] = useState<{ invoice: Invoice; client: Client } | null>(null);
 
   const queryClient = useQueryClient();
 
@@ -289,12 +293,30 @@ function InvoicesPage() {
     setPreview(null);
   }
 
-  async function sendOneClick(invoice: Invoice) {
+  /** Opens the email for wording. Nothing is sent until Send in the dialog. */
+  function compose(invoice: Invoice) {
+    const client = clients.find((c) => c.id === invoice.client_id);
+    if (!client) {
+      toast.error("This invoice has no client on it");
+      return;
+    }
+    setComposing({ invoice, client });
+  }
+
+  // With no draft this is the one-tap send it has always been: the saved
+  // template, filled in on the server. A draft replaces the wording for this
+  // send only.
+  async function sendOneClick(invoice: Invoice, draft?: SendInvoiceDraft) {
     try {
       setBusyId(invoice.id);
       const doc = await buildPdf(invoice);
       const result = (await sendFn({
-        data: { invoiceId: invoice.id, pdfBase64: pdfToBase64(doc) },
+        data: {
+          invoiceId: invoice.id,
+          pdfBase64: pdfToBase64(doc),
+          subject: draft?.subject ?? null,
+          message: draft?.message ?? null,
+        },
       })) as { sent: boolean; to?: string; reason?: string };
       if (result.sent) toast.success(`Invoice emailed to ${result.to}`);
       else toast.warning(result.reason ?? "Email is not set up yet");
@@ -414,6 +436,17 @@ function InvoicesPage() {
 
               {/* Everything else stays small, because it is not what you came for. */}
               <div className="flex flex-wrap items-center gap-1">
+                {/* Send above stays one tap. This is the same send with the
+                    wording opened first, for the invoice that needs a line on
+                    it. */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busyId === invoice.id}
+                  onClick={() => compose(invoice)}
+                >
+                  <MessageSquare className="size-4" /> Message
+                </Button>
                 {/* Only a draft. A sent invoice has to go on matching the copy
                     the customer is holding. */}
                 {invoice.status === "draft" ? (
@@ -499,6 +532,26 @@ function InvoicesPage() {
       )}
 
       <DraftInvoiceDialog invoice={editingDraft} onClose={() => setEditingDraft(null)} />
+
+      {/* Keyed on the invoice, so each one is composed on a fresh dialog rather
+          than in a box that has to remember to empty itself. */}
+      <SendInvoiceDialog
+        key={composing?.invoice.id ?? "none"}
+        invoice={composing?.invoice ?? null}
+        client={composing?.client ?? null}
+        settings={settings ?? null}
+        busy={busyId === composing?.invoice.id}
+        onClose={() => setComposing(null)}
+        onSend={async (draft) => {
+          if (!composing) return;
+          const invoice = composing.invoice;
+          // Closed before sending, as Send in the preview does: the toast is
+          // what reports the outcome, and a dialog left open over it reads as
+          // though nothing happened.
+          setComposing(null);
+          await sendOneClick(invoice, draft);
+        }}
+      />
 
       <NewInvoiceDialog
         open={creating}

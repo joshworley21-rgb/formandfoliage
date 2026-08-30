@@ -12,12 +12,17 @@ import {
   NO_SENDER_MESSAGE,
   DEFAULT_SUBJECT_TEMPLATE,
   fillTemplate,
+  firstNonBlank,
   textToHtml,
 } from "../_shared/templates.ts";
 
 type SendInvoiceInput = {
   invoiceId?: string;
   pdfBase64?: string;
+  // Both are finished text when the app has let them be edited on the way out,
+  // not templates. They still go through fillTemplate below, so a {{token}}
+  // typed by hand resolves rather than being posted to a customer verbatim.
+  subject?: string | null;
   message?: string | null;
 };
 
@@ -30,6 +35,7 @@ Deno.serve(
     const data = {
       invoiceId: input.invoiceId,
       pdfBase64: input.pdfBase64,
+      subject: input.subject?.trim() || null,
       message: input.message ?? null,
     };
 
@@ -106,12 +112,14 @@ Deno.serve(
       bank_details: settings?.bank_details ?? "",
     };
 
+    // firstNonBlank rather than ||: a template cleared to a stray space in
+    // Settings is truthy, and would otherwise send an email with nothing in it.
     const subject = fillTemplate(
-      settings?.email_subject_template || DEFAULT_SUBJECT_TEMPLATE,
+      firstNonBlank(data.subject, settings?.email_subject_template, DEFAULT_SUBJECT_TEMPLATE),
       tokens,
     );
     const textBody = fillTemplate(
-      data.message || settings?.email_body_template || DEFAULT_BODY_TEMPLATE,
+      firstNonBlank(data.message, settings?.email_body_template, DEFAULT_BODY_TEMPLATE),
       tokens,
     );
     const htmlBody = textToHtml(textBody);

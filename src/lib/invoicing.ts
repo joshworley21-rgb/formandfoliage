@@ -39,6 +39,8 @@ export function rebuildInvoice({ data }: { data: { invoiceId: string } }) {
 export type SendInvoiceInput = {
   invoiceId: string;
   pdfBase64: string;
+  /** Finished text, not a template. Omitted to use the one saved in Settings. */
+  subject?: string | null;
   message?: string | null;
 };
 
