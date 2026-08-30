@@ -16,7 +16,12 @@
 // that can call this.
 import { requireUser } from "../_shared/supabase.ts";
 import { json, serveJson } from "../_shared/http.ts";
-import { invoiceTotals, linesForVisit, type VisitForInvoice } from "../_shared/invoice-lines.ts";
+import {
+  groupLines,
+  invoiceTotals,
+  linesForVisit,
+  type VisitForInvoice,
+} from "../_shared/invoice-lines.ts";
 
 type VisitRow = VisitForInvoice & { billed: boolean; missed: boolean };
 
@@ -77,11 +82,13 @@ Deno.serve(
     if (extrasError) throw extrasError;
     const extras = extraRows ?? [];
 
-    const lines = billable.flatMap((visit) =>
-      linesForVisit(visit, {
-        fixedPrice: client.billing_mode === "fixed",
-        hourlyRate: Number(client.hourly_rate ?? 0),
-      }),
+    const lines = groupLines(
+      billable.flatMap((visit) =>
+        linesForVisit(visit, {
+          fixedPrice: client.billing_mode === "fixed",
+          hourlyRate: Number(client.hourly_rate ?? 0),
+        }),
+      ),
     );
 
     if (lines.length === 0 && extras.length === 0) {
