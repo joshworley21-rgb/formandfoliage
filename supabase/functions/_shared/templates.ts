@@ -4,6 +4,21 @@ export function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/**
+ * The first candidate that has anything in it, whitespace not counting.
+ *
+ * A template saved in Settings and later cleared to a stray space is truthy,
+ * so a plain `||` chain walks past the default and sends an email with nothing
+ * in it. The text is returned untrimmed — a trailing newline someone typed is
+ * theirs to keep; it is only the emptiness test that ignores spaces.
+ *
+ * Mirrored in src/lib/email-template.ts, which decides what the app shows
+ * before sending. The two must agree.
+ */
+export function firstNonBlank(...candidates: Array<string | null | undefined>): string {
+  return candidates.find((c) => c && c.trim() !== "") ?? "";
+}
+
 /** Replace {{token}} placeholders from a lookup table; unknown tokens become "". */
 export function fillTemplate(template: string, tokens: Record<string, string>): string {
   return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_match, key: string) => tokens[key] ?? "");

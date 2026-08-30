@@ -9,6 +9,7 @@ import {
   NO_SENDER_MESSAGE,
   DEFAULT_SUBJECT_TEMPLATE,
   fillTemplate,
+  firstNonBlank,
   textToHtml,
 } from "../_shared/templates.ts";
 
@@ -60,12 +61,20 @@ Deno.serve(
       bank_details: settings?.bank_details ?? "",
     };
 
+    // The test send exists to show what a real one would look like, so it has
+    // to fall back exactly as send-invoice-email does — including past a
+    // template cleared to a stray space, which is truthy and would otherwise
+    // report an empty email as working.
     const subject = `[Test] ${fillTemplate(
-      input.subjectTemplate || settings?.email_subject_template || DEFAULT_SUBJECT_TEMPLATE,
+      firstNonBlank(
+        input.subjectTemplate,
+        settings?.email_subject_template,
+        DEFAULT_SUBJECT_TEMPLATE,
+      ),
       tokens,
     )}`;
     const textBody = fillTemplate(
-      input.bodyTemplate || settings?.email_body_template || DEFAULT_BODY_TEMPLATE,
+      firstNonBlank(input.bodyTemplate, settings?.email_body_template, DEFAULT_BODY_TEMPLATE),
       tokens,
     );
     const html = textToHtml(textBody, TEST_FOOTER);
