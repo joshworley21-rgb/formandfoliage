@@ -290,6 +290,7 @@ export type Database = {
           amount: number;
           created_at: string;
           description: string;
+          grouped: boolean;
           id: string;
           invoice_id: string;
           item_date: string | null;
@@ -302,6 +303,7 @@ export type Database = {
           amount?: number;
           created_at?: string;
           description: string;
+          grouped?: boolean;
           id?: string;
           invoice_id: string;
           item_date?: string | null;
@@ -314,6 +316,7 @@ export type Database = {
           amount?: number;
           created_at?: string;
           description?: string;
+          grouped?: boolean;
           id?: string;
           invoice_id?: string;
           item_date?: string | null;

@@ -23,13 +23,18 @@ export type VisitForInvoice = {
 
 export type InvoiceLine = {
   visit_id: string | null;
-  /** Null on a grouped line, which covers several days and names them in its
-   *  description instead. */
+  /** The day the line is for, and on a grouped line the earliest day it
+   *  covers. Kept even when it is not printed, because it is what the lines
+   *  are ordered by. */
   item_date: string | null;
   description: string;
   quantity: number;
   unit_price: number;
   amount: number;
+  /** True when this line stands for several visits and lists their dates in
+   *  its own description. The invoice leaves the date column off these, so the
+   *  first date is not printed twice. */
+  grouped: boolean;
 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -72,6 +77,7 @@ export function linesForVisit(
       quantity: rateExplainsIt ? hours : 1,
       unit_price: rateExplainsIt ? rate : labour,
       amount: labour,
+      grouped: false,
     },
   ];
 
@@ -86,6 +92,7 @@ export function linesForVisit(
       quantity: 1,
       unit_price: materials,
       amount: materials,
+      grouped: false,
     });
   }
 
@@ -183,13 +190,17 @@ export function groupLines(lines: InvoiceLine[]): InvoiceLine[] {
       // line has no single date, but item_date is the only thing an invoice's
       // lines are ordered by — and Postgres sorts nulls last, so a null here
       // would drop the whole round to the bottom of the invoice, underneath
-      // work that happened after it. Every date is named in the description
-      // regardless.
+      // work that happened after it.
+      //
+      // It is sorted on and not printed: the description below already names
+      // every date, so printing this one too would say the fifth of August
+      // twice in one line. `grouped` is what tells the invoice that.
       item_date: dates[0] ?? first.item_date,
       description: `${first.description} — ${group.length} visits${label ? `: ${label}` : ""}`,
       quantity: group.length,
       unit_price: first.amount,
       amount: round2(first.amount * group.length),
+      grouped: true,
     };
   });
 

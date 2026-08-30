@@ -195,6 +195,7 @@ const labour = (id: string, date: string, amount: number, description = "Mow, ed
   quantity: 1,
   unit_price: amount,
   amount,
+  grouped: false,
 });
 
 test("visits that cost the same and read the same become one line", () => {
@@ -236,6 +237,34 @@ test("same money but different work is not merged", () => {
 test("a single visit is left exactly as it was", () => {
   const one = labour("a", "2026-08-05", 60);
   expect(groupLines([one])).toEqual([one]);
+});
+
+test("a grouped line keeps a date to sort on but is flagged not to print it", () => {
+  // Both halves matter. Without the date the round sinks to the bottom of the
+  // invoice; without the flag the fifth of August is printed twice on one line.
+  const out = groupLines([labour("a", "2026-08-05", 60), labour("b", "2026-08-12", 60)]);
+  expect(out[0]!.grouped).toBe(true);
+  expect(out[0]!.item_date).toBe("2026-08-05");
+  expect(out[0]!.description).toContain("5, 12 Aug");
+});
+
+test("a line that stayed on its own still prints its date", () => {
+  const out = groupLines([
+    labour("a", "2026-08-05", 60),
+    labour("b", "2026-08-12", 60),
+    labour("c", "2026-08-19", 240, "Full day"),
+  ]);
+  expect(out[1]!.grouped).toBe(false);
+  expect(out[1]!.item_date).toBe("2026-08-19");
+});
+
+test("the lines for one visit are never flagged as grouped", () => {
+  const lines = linesForVisit(
+    visit({ hours: 3, materials_cost: 12, materials_note: "compost", amount: 102 }),
+    { fixedPrice: false, hourlyRate: 30 },
+  );
+  expect(lines).toHaveLength(2);
+  expect(lines.every((l) => l.grouped === false)).toBe(true);
 });
 
 test("grouping never changes what the invoice comes to", () => {
@@ -294,6 +323,7 @@ test("materials lines group by their note as well as their price", () => {
     quantity: 1,
     unit_price: amount,
     amount,
+    grouped: false,
   });
   const out = groupLines([
     materials("a", "2026-08-05", "compost", 12),

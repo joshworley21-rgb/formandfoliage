@@ -927,6 +927,27 @@ ALTER TABLE public.visits
   ADD COLUMN IF NOT EXISTS materials_note text;
 
 -- ─────────────────────────────────────────────────────────────────────
+-- 20260830060000_grouped_invoice_lines.sql
+-- ─────────────────────────────────────────────────────────────────────
+
+-- Marks an invoice line that stands for several visits at once.
+--
+-- A grouped line names every day it covers in its own description
+-- ("Mow, edge — 4 visits: 5, 12, 19, 26 Aug"). It still carries an item_date,
+-- the earliest of those days, because item_date is the only thing invoice
+-- lines are ordered by and a null would drop a whole round to the bottom of
+-- the invoice, underneath work that happened after it.
+--
+-- Which meant the first date printed twice: once in the line's date column and
+-- again at the head of its own list. This flag lets the invoice sort on the
+-- date while leaving it off the page.
+--
+-- Lines already written are ungrouped by definition of the default: a draft
+-- can be rebuilt to pick the flag up, and a sent invoice must not change.
+ALTER TABLE public.invoice_items
+  ADD COLUMN IF NOT EXISTS grouped boolean NOT NULL DEFAULT false;
+
+-- ─────────────────────────────────────────────────────────────────────
 -- Mark these migrations as applied, so the CLI agrees with reality if it
 -- is ever used against this project.
 -- ─────────────────────────────────────────────────────────────────────
@@ -980,5 +1001,7 @@ INSERT INTO supabase_migrations.schema_migrations (version, name)
   VALUES ('20260826180000', 'missed_visits') ON CONFLICT (version) DO NOTHING;
 INSERT INTO supabase_migrations.schema_migrations (version, name)
   VALUES ('20260828180000', 'materials_note') ON CONFLICT (version) DO NOTHING;
+INSERT INTO supabase_migrations.schema_migrations (version, name)
+  VALUES ('20260830060000', 'grouped_invoice_lines') ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
