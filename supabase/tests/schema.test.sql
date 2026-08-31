@@ -159,6 +159,43 @@ EXCEPTION WHEN insufficient_privilege THEN
   NULL;
 END $$;
 
+-- Nobody is chased about money unless somebody said so.
+--
+-- payment-reminders runs unattended and emails a customer. It used to chase
+-- every client with an unpaid invoice, decided by nothing but the dates, and
+-- the first anyone knew was a customer mentioning they had had one. A client
+-- written the old way — no mention of the column at all — must come out opted
+-- OUT, because those rows are precisely the people who were being chased
+-- without anyone choosing to. A default of true here would keep every one of
+-- them chased while looking like a fix.
+DO $$
+DECLARE _chased boolean; _nullable text; _me uuid := auth.uid();
+BEGIN
+  -- As whoever is acting by this point in the file, so row-level security
+  -- lets the insert through however the tests above left things.
+  INSERT INTO public.clients (user_id, name, email)
+    VALUES (_me, 'Chasing default', 'c@example.com');
+
+  SELECT payment_reminders INTO _chased FROM public.clients
+    WHERE user_id = _me AND name = 'Chasing default';
+  IF _chased IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'a client written without mentioning payment_reminders came out as % — they would be chased automatically', _chased;
+  END IF;
+
+  -- NOT NULL as well, so there is no third state for the sweep to guess at.
+  SELECT is_nullable INTO _nullable FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'clients'
+      AND column_name = 'payment_reminders';
+  IF _nullable IS NULL THEN
+    RAISE EXCEPTION 'clients.payment_reminders is missing';
+  END IF;
+  IF _nullable <> 'NO' THEN
+    RAISE EXCEPTION 'clients.payment_reminders is nullable';
+  END IF;
+
+  DELETE FROM public.clients WHERE user_id = _me AND name = 'Chasing default';
+END $$;
+
 -- The delivery statuses the Resend webhook writes have to exist, or every
 -- report it receives fails on insert and the log silently stops at "sent".
 DO $$

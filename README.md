@@ -57,6 +57,12 @@ and a tap confirms it. Nothing is ever marked paid on its own — a wrongly
 settled invoice stops being chased, which costs more than a tap. Setup, and the
 limits of Monzo's developer API, are in `supabase/functions/README.md`.
 
+Chasing is per client and off by default: tick **Chase this client about unpaid
+invoices** on the client to let the daily sweep email them once an invoice is
+past its due date — or a fortnight after sending, for an invoice with no due
+date — and then weekly until it is paid. Invoices you send by hand are
+unaffected either way.
+
 ## Setting up Supabase from scratch
 
 `supabase/SETUP.md` walks through a new project end to end: schema, auth
