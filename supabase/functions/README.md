@@ -70,9 +70,15 @@ supabase functions deploy send-invoice-email
 
 ## Scheduling the payment reminders
 
-The reminder sweep used to be a webhook someone had to call. Schedule it in the
-database instead — run this once in the SQL editor, replacing the placeholder
-with your service-role key:
+The sweep only chases clients with `clients.payment_reminders` set, which is off
+for everyone until it is ticked on the client. It used to chase everybody, which
+meant a scheduled run emailed customers nobody had decided to chase; a run now
+reports `optedOut` alongside `sent` and `skipped` so "nothing went out" can be
+told apart from "nothing is switched on".
+
+The sweep used to be a webhook someone had to call. Schedule it in the database
+instead — run this once in the SQL editor, replacing the placeholder with your
+service-role key:
 
 ```sql
 create extension if not exists pg_cron;

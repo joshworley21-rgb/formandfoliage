@@ -3,13 +3,18 @@
 //
 // Deployed with verify_jwt = false and guarded by the service-role key instead,
 // so only the scheduled job (or you, with the service key) can trigger a run.
+//
+// Only clients with payment_reminders switched on are chased. It used to be
+// everybody: this runs unattended and emails somebody else's customer, and the
+// first anyone knew of it was a client mentioning they had had a reminder. The
+// decision itself lives in _shared/chasing, where it is tested, because there
+// is nobody watching a scheduled run to catch it getting that wrong.
 import { adminClient, requireServiceRole } from "../_shared/supabase.ts";
 import { json, serveJson } from "../_shared/http.ts";
 import { isEmailConfigured, sendEmail } from "../_shared/email.ts";
 import { DEFAULT_BUSINESS_NAME, NO_SENDER_MESSAGE, textToHtml } from "../_shared/templates.ts";
+import { shouldChase } from "../_shared/chasing.ts";
 
-const REMINDER_AFTER_DAYS = 14;
-const REPEAT_EVERY_DAYS = 7;
 const REMINDER_TAG = "[reminder]";
 
 type InvoiceRow = {
@@ -20,7 +25,7 @@ type InvoiceRow = {
   due_date: string | null;
   sent_at: string;
   client_id: string;
-  clients: { name: string; email: string | null } | null;
+  clients: { name: string; email: string | null; payment_reminders: boolean } | null;
 };
 
 Deno.serve(
@@ -32,38 +37,29 @@ Deno.serve(
     }
 
     const supabaseAdmin = adminClient();
-    const now = Date.now();
-    const todayIso = new Date(now).toISOString().slice(0, 10);
+    const now = new Date();
 
     const { data: invoices, error } = await supabaseAdmin
       .from("invoices")
-      .select("id, user_id, number, total, due_date, sent_at, client_id, clients(name, email)")
+      .select(
+        "id, user_id, number, total, due_date, sent_at, client_id, clients(name, email, payment_reminders)",
+      )
       .eq("status", "sent")
       .not("sent_at", "is", null);
     if (error) throw error;
 
     let sent = 0;
     let skipped = 0;
+    let optedOut = 0;
 
     for (const invoice of (invoices ?? []) as unknown as InvoiceRow[]) {
       const client = invoice.clients;
-      if (!client?.email) {
-        skipped++;
-        continue;
-      }
 
-      // Overdue = past its due date. Otherwise fall back to the "unpaid for
-      // N days since sending" rule for invoices with no due date set.
-      const overdueDays = invoice.due_date
-        ? Math.floor(
-            (new Date(`${todayIso}T00:00:00Z`).getTime() -
-              new Date(`${invoice.due_date}T00:00:00Z`).getTime()) /
-              86400000,
-          )
-        : 0;
-      const daysSinceSent = Math.floor((now - new Date(invoice.sent_at).getTime()) / 86400000);
-      const isOverdue = Boolean(invoice.due_date) && overdueDays > 0;
-      if (!isOverdue && daysSinceSent < REMINDER_AFTER_DAYS) {
+      // Checked before the reminder history is looked up: a client nobody
+      // opted in is not a candidate, so there is no reason to ask the database
+      // when they were last chased.
+      if (!client?.payment_reminders) {
+        if (client) optedOut++;
         skipped++;
         continue;
       }
@@ -77,11 +73,19 @@ Deno.serve(
         .order("created_at", { ascending: false })
         .limit(1);
 
-      const last = lastReminders?.[0];
-      if (last && now - new Date(last.created_at).getTime() < REPEAT_EVERY_DAYS * 86400000) {
+      const decision = shouldChase({
+        optedIn: client.payment_reminders,
+        email: client.email,
+        sentAt: invoice.sent_at,
+        dueDate: invoice.due_date,
+        lastChasedAt: lastReminders?.[0]?.created_at ?? null,
+        now,
+      });
+      if (!decision.chase) {
         skipped++;
         continue;
       }
+      const { email: to, overdue: isOverdue, overdueDays, daysSinceSent } = decision;
 
       const { data: settings } = await supabaseAdmin
         .from("settings")
@@ -98,7 +102,7 @@ Deno.serve(
           user_id: invoice.user_id,
           invoice_id: invoice.id,
           status: "skipped",
-          recipient: client.email,
+          recipient: to,
           detail: `${REMINDER_TAG} ${NO_SENDER_MESSAGE}`.slice(0, 500),
         });
         skipped++;
@@ -124,7 +128,7 @@ Deno.serve(
       const result = await sendEmail({
         from: `${businessName} <${fromEmail}>`,
         replyTo,
-        to: client.email,
+        to,
         subject: isOverdue
           ? `Overdue invoice ${invoice.number} — payment reminder`
           : `Payment reminder — invoice ${invoice.number}`,
@@ -137,7 +141,7 @@ Deno.serve(
           user_id: invoice.user_id,
           invoice_id: invoice.id,
           status: "failed",
-          recipient: client.email,
+          recipient: to,
           detail: `${REMINDER_TAG} ${result.detail}`.slice(0, 500),
         });
         continue;
@@ -147,13 +151,16 @@ Deno.serve(
         user_id: invoice.user_id,
         invoice_id: invoice.id,
         status: "sent",
-        recipient: client.email,
+        recipient: to,
         provider_message_id: result.id,
-        detail: `${REMINDER_TAG} ${isOverdue ? `Overdue reminder sent to ${client.email} (${overdueDays} days past due)` : `Payment reminder sent to ${client.email} (${daysSinceSent} days unpaid)`}`,
+        detail: `${REMINDER_TAG} ${isOverdue ? `Overdue reminder sent to ${to} (${overdueDays} days past due)` : `Payment reminder sent to ${to} (${daysSinceSent} days unpaid)`}`,
       });
       sent++;
     }
 
-    return json({ ok: true, checked: invoices?.length ?? 0, sent, skipped });
+    // optedOut is reported separately from skipped so a run that sends nothing
+    // says why: "none of them are opted in" and "none of them are due yet" are
+    // different states, and only one of them is a setting.
+    return json({ ok: true, checked: invoices?.length ?? 0, sent, skipped, optedOut });
   }),
 );

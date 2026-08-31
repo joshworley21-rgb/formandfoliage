@@ -16,6 +16,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -58,6 +59,9 @@ const EMPTY = {
   billing_mode: "hourly" as BillingMode,
   hourly_rate: "0",
   fixed_price: "0",
+  // Off for a new client, as it is for every existing one. Chasing somebody
+  // for money is a decision about a relationship, not a default.
+  payment_reminders: false,
 };
 
 function ClientsPage() {
@@ -99,6 +103,7 @@ function ClientsPage() {
       billing_mode: client.billing_mode,
       hourly_rate: String(client.hourly_rate ?? 0),
       fixed_price: String(client.fixed_price ?? 0),
+      payment_reminders: client.payment_reminders,
     });
     setOpen(true);
   }
@@ -116,6 +121,7 @@ function ClientsPage() {
         billing_mode: form.billing_mode,
         hourly_rate: Number(form.hourly_rate) || 0,
         fixed_price: Number(form.fixed_price) || 0,
+        payment_reminders: form.payment_reminders,
       });
       toast.success(editing ? "Client updated" : "Client added");
       setOpen(false);
@@ -244,6 +250,25 @@ function ClientsPage() {
                     value={form.notes}
                     onChange={(e) => setForm({ ...form, notes: e.target.value })}
                   />
+                </div>
+
+                {/* Off unless it is turned on here. The app used to chase every
+                    client automatically with nothing on any screen saying so,
+                    which is how a customer came to mention having had one. */}
+                <div className="rounded-lg border border-border bg-muted/40 p-3">
+                  <label className="flex items-start gap-2.5 text-sm font-medium">
+                    <Checkbox
+                      className="mt-0.5"
+                      checked={form.payment_reminders}
+                      onCheckedChange={(v) => setForm({ ...form, payment_reminders: Boolean(v) })}
+                    />
+                    Chase this client about unpaid invoices
+                  </label>
+                  <p className="mt-1.5 pl-[26px] text-xs text-muted-foreground">
+                    {form.payment_reminders
+                      ? "They will be emailed once an invoice is past its due date, or a fortnight after it was sent if it has no due date, and then weekly until it is paid."
+                      : "Nothing is sent automatically. Invoices you send by hand are unaffected either way."}
+                  </p>
                 </div>
                 <DialogFooter>
                   <Button type="submit" disabled={save.isPending}>

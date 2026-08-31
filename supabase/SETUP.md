@@ -115,6 +115,10 @@ in Resend, then set the business email in the CRM's Settings page.
 
 ## 7. Schedule the payment reminders
 
+Nobody is chased until you say so. Each client has a **Chase this client about
+unpaid invoices** tick box, off by default, and the scheduled job below skips
+everyone without it. Scheduling it does not, on its own, email anybody.
+
 In the SQL editor, with your service-role key pasted in:
 
 ```sql

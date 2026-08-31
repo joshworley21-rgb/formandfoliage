@@ -948,6 +948,27 @@ ALTER TABLE public.invoice_items
   ADD COLUMN IF NOT EXISTS grouped boolean NOT NULL DEFAULT false;
 
 -- ─────────────────────────────────────────────────────────────────────
+-- 20260831070000_payment_reminders_opt_in.sql
+-- ─────────────────────────────────────────────────────────────────────
+
+-- Whether this client may be chased about an unpaid invoice.
+--
+-- payment-reminders runs on a schedule and, until now, emailed every client
+-- with an unpaid invoice: fourteen days after it was sent, then every seven
+-- days after that, for as long as it stayed unpaid. Nobody chose that per
+-- customer and nothing in the app said it was happening — the first anyone
+-- knew was a client mentioning they had had a reminder.
+--
+-- So it is off, and stays off, until it is turned on for a particular client.
+-- Default false rather than true: the existing rows are exactly the customers
+-- who were being chased without anyone deciding to, and defaulting to true
+-- would keep every one of them chased while claiming to have fixed it.
+--
+-- Sending an invoice by hand is untouched. This is only the automatic chasing.
+ALTER TABLE public.clients
+  ADD COLUMN IF NOT EXISTS payment_reminders boolean NOT NULL DEFAULT false;
+
+-- ─────────────────────────────────────────────────────────────────────
 -- Mark these migrations as applied, so the CLI agrees with reality if it
 -- is ever used against this project.
 -- ─────────────────────────────────────────────────────────────────────
@@ -1003,5 +1024,7 @@ INSERT INTO supabase_migrations.schema_migrations (version, name)
   VALUES ('20260828180000', 'materials_note') ON CONFLICT (version) DO NOTHING;
 INSERT INTO supabase_migrations.schema_migrations (version, name)
   VALUES ('20260830060000', 'grouped_invoice_lines') ON CONFLICT (version) DO NOTHING;
+INSERT INTO supabase_migrations.schema_migrations (version, name)
+  VALUES ('20260831070000', 'payment_reminders_opt_in') ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
