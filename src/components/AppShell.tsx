@@ -88,7 +88,7 @@ export function AppShell({
                 key={item.to}
                 to={item.to}
                 className={cn(
-                  "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                  "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-sidebar-foreground/70 outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring",
                   "data-[status=active]:bg-sidebar-primary data-[status=active]:font-semibold data-[status=active]:text-sidebar-primary-foreground data-[status=active]:hover:bg-sidebar-primary",
                 )}
               >
@@ -171,7 +171,7 @@ export function AppShell({
                 key={item.to}
                 to={item.to}
                 className={cn(
-                  "flex flex-col items-center gap-1 rounded-full py-2 font-mono text-[0.6rem] uppercase tracking-[0.05em] text-sidebar-foreground/55",
+                  "flex flex-col items-center gap-1 rounded-full py-2 font-mono text-[0.6rem] uppercase tracking-[0.05em] text-sidebar-foreground/55 outline-none transition-transform duration-150 ease-spring active:scale-90 focus-visible:ring-2 focus-visible:ring-sidebar-ring",
                   // The router sets data-status itself. Colouring off it beats
                   // activeProps, whose class merely joins the base one and
                   // leaves CSS source order to decide which colour wins.
@@ -186,7 +186,7 @@ export function AppShell({
               <button
                 type="button"
                 onClick={() => setMoreOpen(true)}
-                className="flex flex-col items-center gap-1 rounded-full py-2 font-mono text-[0.6rem] uppercase tracking-[0.05em] text-sidebar-foreground/60"
+                className="flex flex-col items-center gap-1 rounded-full py-2 font-mono text-[0.6rem] uppercase tracking-[0.05em] text-sidebar-foreground/60 outline-none transition-transform duration-150 ease-spring active:scale-90 focus-visible:ring-2 focus-visible:ring-sidebar-ring"
               >
                 <MoreHorizontal className="size-5" />
                 More
@@ -206,7 +206,7 @@ export function AppShell({
                   <Link
                     to={item.to}
                     className={cn(
-                      "flex flex-col items-center gap-2 rounded-xl border border-border bg-card px-2 py-4 text-xs font-medium text-foreground",
+                      "flex flex-col items-center gap-2 rounded-xl border border-border bg-card px-2 py-4 text-xs font-medium text-foreground outline-none transition-[transform,background-color,border-color] duration-150 ease-spring active:scale-95 focus-visible:ring-2 focus-visible:ring-ring",
                       "data-[status=active]:border-primary data-[status=active]:bg-primary/10 data-[status=active]:font-semibold data-[status=active]:text-primary",
                     )}
                   >

@@ -7,6 +7,9 @@
   --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
   /* Figures only. Tabular by default, so money columns line up. */
   --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+  /* A press has a little give in it before it settles — every interactive
+     element uses this instead of the browser's linear default. */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 @custom-variant dark (&:is(.dark *));
@@ -183,6 +186,46 @@
     color: var(--color-foreground);
     /* Keeps the browser's own overscroll out of the way of pull-to-refresh. */
     overscroll-behavior-y: contain;
+    position: relative;
+  }
+
+  /* Removes the ~300ms double-tap-zoom delay on every tap — felt on every
+     button and link in the Android WebView, where taps are quick and
+     repeated all day. */
+  a,
+  button,
+  [role="button"] {
+    touch-action: manipulation;
+  }
+
+  /*
+   * A trace of paper grain over the flat colour — felt, not seen. Fixed and
+   * pointer-events-none so it never repaints on scroll (a blur or noise layer
+   * on a scrolling container is a mobile frame-rate killer).
+   */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    /* Negative, not 0: a fixed z-index:0 layer paints above ordinary static
+       content (it's a later stacking layer), which would put grain on top of
+       the whole app. Negative keeps it under everything in body's own
+       stacking context while staying above the page background. */
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.025;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 
@@ -194,6 +237,18 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
+}
+
+/*
+ * A soft, hue-tinted lift for the one or two moments per page that should
+ * read as physically raised off the surface — never a flat grey shadow at a
+ * fixed opacity, which is the tell of a default-shadcn card. Reserved for
+ * the single highest-value block on a page; everything else stays flat.
+ */
+@utility lift {
+  box-shadow:
+    0 1px 2px color-mix(in oklch, var(--color-foreground) 6%, transparent),
+    0 16px 32px -12px color-mix(in oklch, var(--color-primary) 30%, transparent);
 }
 
 /*
