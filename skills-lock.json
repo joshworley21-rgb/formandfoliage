@@ -13,10 +13,10 @@
       "skillPath": ".claude/skills/brand/SKILL.md",
       "computedHash": "cc9ad76540d39da19ea1d5ba9aa3a1a3008117df29ef50c185cc2061998b9366"
     },
-    "design": {
+    "design-suite": {
       "source": "nextlevelbuilder/ui-ux-pro-max-skill",
       "sourceType": "github",
-      "skillPath": ".claude/skills/design/SKILL.md",
+      "skillPath": ".claude/skills/design-suite/SKILL.md",
       "computedHash": "2cbb22aa51b82ff498bdc8acf603ac412a4eb92906d70d0888db6bc982c56d22"
     },
     "design-system": {
