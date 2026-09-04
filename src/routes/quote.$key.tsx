@@ -70,7 +70,13 @@ function PublicQuotePage() {
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-2xl flex-col gap-6 px-5 py-10">
-      <img src={LOGO_URL} alt="" className="h-12 w-auto self-start" />
+      <img
+        src={LOGO_URL}
+        alt="JW Garden Services logo"
+        className="h-12 w-auto self-start"
+        width={48}
+        height={48}
+      />
 
       {state === "loading" ? (
         <p className="text-sm text-muted-foreground">Loading your quote…</p>

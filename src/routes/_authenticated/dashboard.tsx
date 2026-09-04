@@ -171,7 +171,7 @@ function DashboardPage() {
         1. Today. This is the question actually being asked at 7am, so it leads
         the page as a solid block — countable at arm's length, in daylight.
       */}
-      <section className="rounded-3xl bg-band p-5 text-band-foreground">
+      <section className="lift relative overflow-hidden rounded-3xl bg-band p-5 text-band-foreground ring-1 ring-inset ring-white/10">
         <div className="flex items-baseline justify-between gap-3">
           <p className="figure text-[0.65rem] uppercase tracking-[0.14em] opacity-75">
             {format(today, "EEE d MMMM")}
@@ -183,7 +183,7 @@ function DashboardPage() {
           ) : null}
         </div>
 
-        <h2 className="mt-2 font-display text-4xl font-extrabold leading-none">
+        <h2 className="mt-2 font-display text-[2.75rem] font-extrabold leading-none tracking-tight sm:text-5xl">
           {todayJobs.length === 0 ? (
             "Nothing booked"
           ) : (

@@ -331,7 +331,7 @@ function SchedulePage() {
                   whichever one the cursor happens to be on. */}
               <div className="mb-2 flex items-center gap-2">
                 {isToday(day) ? (
-                  <div className="flex flex-1 items-baseline justify-between rounded-2xl bg-band px-4 py-3 text-band-foreground">
+                  <div className="lift flex flex-1 items-baseline justify-between rounded-2xl bg-band px-4 py-3 text-band-foreground ring-1 ring-inset ring-white/10">
                     <p className="figure text-[0.6rem] uppercase tracking-[0.14em] opacity-75">
                       Today
                     </p>
