@@ -1,6 +1,8 @@
 package uk.co.jwgardenservices.crm.ui.schedule
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +29,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -67,7 +71,9 @@ private data class DragState(val job: ScheduledJob, val position: Offset)
 fun MonthCalendar(
     jobs: Map<LocalDate, List<ScheduledJob>>,
     month: YearMonth,
+    selectedDay: LocalDate,
     onMonthChange: (YearMonth) -> Unit,
+    onSelectDay: (LocalDate) -> Unit,
     canDrag: Boolean,
     clientName: (String) -> String,
     onMove: (ScheduledJob, LocalDate) -> Unit,
@@ -137,6 +143,15 @@ fun MonthCalendar(
                                     .onGloballyPositioned { coordinates ->
                                         dayBounds[day] = coordinates.boundsInRoot()
                                     }
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(
+                                        if (day == selectedDay) {
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+                                        } else {
+                                            Color.Transparent
+                                        },
+                                    )
+                                    .clickable { onSelectDay(day) }
                                     .padding(2.dp),
                             ) {
                                 Text(
@@ -192,14 +207,16 @@ fun MonthCalendar(
                     }
                 }
 
-                if (canDrag) {
-                    Text(
-                        text = "Long-press a job to move it to another day.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 6.dp),
-                    )
-                }
+                Text(
+                    text = if (canDrag) {
+                        "Tap a day to see its jobs. Long-press a job to move it."
+                    } else {
+                        "Tap a day to see its jobs."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
             }
 
             drag?.let { state ->

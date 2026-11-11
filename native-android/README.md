@@ -41,9 +41,10 @@ The foundation is in place:
   logged that day, mark it missed, and delete one job or the whole run.
 - Move a job quickly with Next day / In 2 days / Next week presets or a date
   picker. The time of day is carried over, and a series visit moves alone.
-- Month grid: browse months and long-press a job to drag it onto another day.
-  Staff can view the grid but not drag. Days with more than two jobs show `+N`;
-  the agenda below still lists every job.
+- Month grid: tap a day to show its jobs in the agenda, drag the month
+  backwards/forwards, and long-press a job to move it onto another day. Staff
+  can view and select days but cannot drag. Days with more than two jobs show
+  `+N`; the agenda below lists every job from the selected day onward.
 - Native Material date pickers are used for visit dates, job dates, invoice and
   draft-invoice due dates, and quote validity, while still storing ISO
   yyyy-MM-dd values.
@@ -68,13 +69,8 @@ The foundation is in place:
   Sending freezes the invoice at what the customer received.
 - Invoice email history: each invoice shows its last attempt and an expandable
   history of sent/delivered/opened/clicked/failed events, cached in Room.
-- Payments to review: money that has arrived in Monzo, with the matcher's
-  suggestion and reasoning, an invoice picker and Confirm / Not an invoice.
-  Confirming marks the invoice paid and both writes are queued offline. Only
-  unreviewed rows are cached.
-- Monzo connection: connect in the browser, approve access in the Monzo app,
-  sync now, change account and disconnect from Settings. Status, approval and
-  last-sync errors are shown; the app can only read from the account.
+- Monzo is not included in this native build for now. Invoices can still be
+  marked paid by hand; the bank feed remains available in the web app.
 - Quotes: create and edit draft quotes for a client or free text, with lines,
   VAT totals and server-generated numbering; send through the existing
   `send-quote-email` Edge Function with the public accept link; share the link;
@@ -100,7 +96,8 @@ The foundation is in place:
 
 ## Remaining polish
 
-Everything in the original rewrite plan is now native. The smaller known gaps:
+Everything in the original rewrite plan is now native, except Monzo which is
+deliberately left on the web for now. The smaller known gaps:
 
 - The month grid shows at most two job chips per day; `+N` points at the agenda.
 - Drag-to-move does not auto-scroll near the edges of a long month.

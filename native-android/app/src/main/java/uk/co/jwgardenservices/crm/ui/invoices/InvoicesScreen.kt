@@ -21,7 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
-import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -52,7 +51,6 @@ import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import uk.co.jwgardenservices.crm.data.model.BankTransaction
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.Invoice
 import uk.co.jwgardenservices.crm.data.model.InvoiceEmailEvent
@@ -60,7 +58,6 @@ import uk.co.jwgardenservices.crm.data.model.NewInvoiceInput
 import uk.co.jwgardenservices.crm.data.model.Settings
 import uk.co.jwgardenservices.crm.data.model.Visit
 import uk.co.jwgardenservices.crm.domain.formatDateTime
-import uk.co.jwgardenservices.crm.domain.formatDayMonth
 import uk.co.jwgardenservices.crm.domain.formatDayMonthYear
 import uk.co.jwgardenservices.crm.domain.money
 import uk.co.jwgardenservices.crm.domain.parseDate
@@ -206,17 +203,6 @@ fun InvoicesScreen(viewModel: CrmViewModel) {
 
         item { OwedBand(owed = owed, count = unpaid.size) }
 
-        if (state.paymentsToReview.isNotEmpty()) {
-            item {
-                PaymentsToReview(
-                    viewModel = viewModel,
-                    payments = state.paymentsToReview,
-                    unpaid = unpaid,
-                    clients = state.clients,
-                )
-            }
-        }
-
         if (invoices.isEmpty()) {
             item {
                 EmptyState(
@@ -340,167 +326,6 @@ fun InvoicesScreen(viewModel: CrmViewModel) {
                 TextButton(onClick = { deleting = null }) { Text("Cancel") }
             },
         )
-    }
-}
-
-@Composable
-private fun PaymentsToReview(
-    viewModel: CrmViewModel,
-    payments: List<BankTransaction>,
-    unpaid: List<Invoice>,
-    clients: List<Client>,
-) {
-    if (payments.isEmpty()) return
-
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var chosen by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    var busyId by remember { mutableStateOf<String?>(null) }
-    val clientNames = remember(clients) { clients.associate { it.id to it.name } }
-
-    fun toast(message: String) {
-        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-    }
-
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.06f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Row(verticalAlignment = Alignment.Top) {
-                Icon(
-                    imageVector = Icons.Outlined.AccountBalance,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(Modifier.width(10.dp))
-                Column {
-                    Text(
-                        text = if (payments.size == 1) {
-                            "A payment has arrived"
-                        } else {
-                            "${payments.size} payments have arrived"
-                        },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = "Money paid into your Monzo account. Confirm what each one settles and the invoice is marked paid.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            payments.forEachIndexed { index, payment ->
-                if (index > 0) HorizontalDivider()
-                val selectedId = chosen[payment.id] ?: payment.suggestedInvoiceId.orEmpty()
-                val selectedInvoice = unpaid.firstOrNull { it.id == selectedId }
-                val busy = busyId == payment.id
-
-                Column(
-                    modifier = Modifier.padding(vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = money(payment.amount),
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            text = payment.counterparty ?: payment.description ?: "Payment in",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            text = parseTimestamp(payment.postedAt)?.formatDayMonth() ?: "",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-
-                    if (!payment.reference.isNullOrBlank()) {
-                        Text(
-                            text = "Reference: ${payment.reference}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Text(
-                        text = payment.matchReason ?: "Nothing here says which invoice this is for.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-
-                    OptionPicker(
-                        options = unpaid,
-                        selected = selectedInvoice,
-                        label = { invoice ->
-                            if (invoice == null) {
-                                "Choose an invoice"
-                            } else {
-                                "${invoice.number} · ${clientNames[invoice.clientId] ?: "Client"} · ${money(invoice.total)}"
-                            }
-                        },
-                        enabled = unpaid.isNotEmpty() && !busy,
-                        onSelect = { invoice ->
-                            chosen = chosen + (payment.id to invoice.id)
-                        },
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    busyId = payment.id
-                                    try {
-                                        viewModel.confirmPayment(payment.id, selectedId)
-                                        toast("${selectedInvoice?.number ?: "Invoice"} marked paid")
-                                    } catch (error: Exception) {
-                                        toast(error.message ?: "Could not match the payment")
-                                    } finally {
-                                        busyId = null
-                                    }
-                                }
-                            },
-                            enabled = selectedId.isNotBlank() && !busy,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text("Confirm")
-                        }
-                        TextButton(
-                            onClick = {
-                                scope.launch {
-                                    busyId = payment.id
-                                    try {
-                                        viewModel.ignorePayment(payment.id)
-                                        toast("Payment dismissed")
-                                    } catch (error: Exception) {
-                                        toast(error.message ?: "Could not dismiss it")
-                                    } finally {
-                                        busyId = null
-                                    }
-                                }
-                            },
-                            enabled = !busy,
-                        ) {
-                            Text("Not an invoice")
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 

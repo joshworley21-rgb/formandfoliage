@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import uk.co.jwgardenservices.crm.data.model.BankTransaction
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.Enquiry
 import uk.co.jwgardenservices.crm.data.model.Invoice
@@ -21,7 +20,6 @@ import uk.co.jwgardenservices.crm.data.model.Visit
 @Database(
     entities = [
         Client::class,
-        BankTransaction::class,
         Enquiry::class,
         Visit::class,
         ScheduledJob::class,
@@ -35,12 +33,11 @@ import uk.co.jwgardenservices.crm.data.model.Visit
         TeamMember::class,
         OutboxEntry::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 abstract class CrmDatabase : RoomDatabase() {
     abstract fun clientDao(): ClientDao
-    abstract fun bankTransactionDao(): BankTransactionDao
     abstract fun enquiryDao(): EnquiryDao
     abstract fun visitDao(): VisitDao
     abstract fun scheduledJobDao(): ScheduledJobDao

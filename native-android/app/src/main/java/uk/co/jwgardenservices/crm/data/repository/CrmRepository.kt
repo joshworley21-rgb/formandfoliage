@@ -7,7 +7,6 @@ import io.github.jan.supabase.functions.functions
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Order
-import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.storage.storage
 import io.ktor.http.ContentType
 import io.ktor.client.statement.bodyAsText
@@ -35,7 +34,6 @@ import kotlinx.serialization.json.put
 import uk.co.jwgardenservices.crm.data.local.CrmDatabase
 import uk.co.jwgardenservices.crm.data.local.OutboxEntry
 import uk.co.jwgardenservices.crm.data.local.QueuedOpDto
-import uk.co.jwgardenservices.crm.data.model.BankTransaction
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.ClientDraft
 import uk.co.jwgardenservices.crm.data.model.CreateInvoiceResult
@@ -47,11 +45,6 @@ import uk.co.jwgardenservices.crm.data.model.JobDraft
 import uk.co.jwgardenservices.crm.data.model.JobPhoto
 import uk.co.jwgardenservices.crm.data.model.JobPhotoWithUrl
 import uk.co.jwgardenservices.crm.data.model.JobTask
-import uk.co.jwgardenservices.crm.data.model.MonzoAccount
-import uk.co.jwgardenservices.crm.data.model.MonzoAccountList
-import uk.co.jwgardenservices.crm.data.model.MonzoStart
-import uk.co.jwgardenservices.crm.data.model.MonzoStatus
-import uk.co.jwgardenservices.crm.data.model.MonzoSyncResult
 import uk.co.jwgardenservices.crm.data.model.NewInvoiceInput
 import uk.co.jwgardenservices.crm.data.model.RebuildInvoiceResult
 import uk.co.jwgardenservices.crm.data.model.Quote
@@ -100,7 +93,6 @@ class CrmRepository(
 ) {
     private val clients = database.clientDao()
     private val enquiries = database.enquiryDao()
-    private val bankTransactions = database.bankTransactionDao()
     private val team = database.teamMemberDao()
     private val jobTasks = database.jobTaskDao()
     private val visits = database.visitDao()
@@ -122,7 +114,6 @@ class CrmRepository(
     fun observeQuotes(): Flow<List<Quote>> = quotes.observeAll()
     fun observeEnquiries(): Flow<List<Enquiry>> = enquiries.observeAll()
     fun observeInvoiceEmailEvents(): Flow<List<InvoiceEmailEvent>> = emailEvents.observeAll()
-    fun observePaymentsToReview(): Flow<List<BankTransaction>> = bankTransactions.observeReview()
     fun observeTeam(): Flow<List<TeamMember>> = team.observeAll()
     fun observeJobTasks(jobId: String): Flow<List<JobTask>> = jobTasks.observeByJob(jobId)
 
@@ -188,7 +179,6 @@ class CrmRepository(
                 quoteLines.clear()
                 enquiries.clear()
                 emailEvents.clear()
-                bankTransactions.clear()
                 team.clear()
 
                 clients.clear()
@@ -241,15 +231,6 @@ class CrmRepository(
                     order("created_at", order = Order.DESCENDING)
                 }.decodeList<InvoiceEmailEvent>()
             }
-            val paymentRows = async {
-                client.from("bank_transactions").select {
-                    filter {
-                        eq("ignored", false)
-                        filter("reviewed_at", FilterOperator.IS, null)
-                    }
-                    order("posted_at", order = Order.DESCENDING)
-                }.decodeList<BankTransaction>()
-            }
             val teamRows = async {
                 client.from("team_members").select {
                     order("created_at", order = Order.ASCENDING)
@@ -278,7 +259,6 @@ class CrmRepository(
                 quoteItems = quoteItemRows.await(),
                 enquiries = enquiryRows.await(),
                 invoiceEmailEvents = emailEventRows.await(),
-                paymentsToReview = paymentRows.await(),
                 team = teamRows.await(),
                 jobs = jobs.await(),
                 settings = settingsRow.await(),
@@ -308,8 +288,6 @@ class CrmRepository(
             enquiries.upsertAll(snapshot.enquiries)
             emailEvents.clear()
             emailEvents.upsertAll(snapshot.invoiceEmailEvents)
-            bankTransactions.clear()
-            bankTransactions.upsertAll(snapshot.paymentsToReview)
             team.clear()
             team.upsertAll(snapshot.team)
             jobs.clear()
@@ -913,63 +891,6 @@ class CrmRepository(
         onQueued()
     }
 
-    suspend fun confirmPayment(transactionId: String, invoiceId: String) {
-        val invoice = invoices.findById(invoiceId) ?: error("Invoice not found")
-        val now = Instant.now().toString()
-        database.withTransaction {
-            bankTransactions.deleteById(transactionId)
-            invoices.upsert(invoice.copy(status = "paid", paidAt = now, updatedAt = null))
-            enqueue(
-                label = "Payment matched to invoice",
-                ops = listOf(
-                    QueuedOpDto(
-                        kind = QueuedOpDto.UPDATE,
-                        table = "bank_transactions",
-                        payload = buildJsonObject {
-                            put("invoice_id", invoiceId)
-                            put("matched_at", now)
-                            put("reviewed_at", now)
-                            put("suggested_invoice_id", JsonNull)
-                        },
-                        match = idMatch(transactionId),
-                    ),
-                    QueuedOpDto(
-                        kind = QueuedOpDto.UPDATE,
-                        table = "invoices",
-                        payload = buildJsonObject {
-                            put("status", "paid")
-                            put("paid_at", now)
-                        },
-                        match = idMatch(invoiceId),
-                    ),
-                ),
-            )
-        }
-        onQueued()
-    }
-
-    suspend fun ignorePayment(transactionId: String) {
-        val now = Instant.now().toString()
-        database.withTransaction {
-            bankTransactions.deleteById(transactionId)
-            enqueue(
-                label = "Payment dismissed",
-                ops = listOf(
-                    QueuedOpDto(
-                        kind = QueuedOpDto.UPDATE,
-                        table = "bank_transactions",
-                        payload = buildJsonObject {
-                            put("ignored", true)
-                            put("reviewed_at", now)
-                        },
-                        match = idMatch(transactionId),
-                    ),
-                ),
-            )
-        }
-        onQueued()
-    }
-
     suspend fun inviteMember(email: String, name: String?) {
         val uid = userId()
         val member = TeamMember(
@@ -1013,43 +934,6 @@ class CrmRepository(
             )
         }
         onQueued()
-    }
-
-    suspend fun monzoStatus(): MonzoStatus =
-        OfflineJson.decodeFromString(
-            invokeFunction("monzo-connect", buildJsonObject { put("action", "status") }),
-        )
-
-    suspend fun monzoStart(): String =
-        OfflineJson.decodeFromString<MonzoStart>(
-            invokeFunction("monzo-connect", buildJsonObject { put("action", "start") }),
-        ).url
-
-    suspend fun monzoAccounts(): List<MonzoAccount> =
-        OfflineJson.decodeFromString<MonzoAccountList>(
-            invokeFunction("monzo-connect", buildJsonObject { put("action", "accounts") }),
-        ).accounts
-
-    suspend fun monzoSelect(accountId: String) {
-        invokeFunction(
-            "monzo-connect",
-            buildJsonObject {
-                put("action", "select")
-                put("accountId", accountId)
-            },
-        )
-    }
-
-    suspend fun monzoDisconnect() {
-        invokeFunction("monzo-connect", buildJsonObject { put("action", "disconnect") })
-    }
-
-    suspend fun syncMonzo(): MonzoSyncResult {
-        val result = OfflineJson.decodeFromString<MonzoSyncResult>(
-            invokeFunction("monzo-sync", buildJsonObject {}),
-        )
-        runCatching { refreshAll("owner") }
-        return result
     }
 
     private suspend fun workspaceOwnerId(): String =
@@ -1625,7 +1509,6 @@ class CrmRepository(
         val quoteItems: List<QuoteItem>,
         val enquiries: List<Enquiry>,
         val invoiceEmailEvents: List<InvoiceEmailEvent>,
-        val paymentsToReview: List<BankTransaction>,
         val team: List<TeamMember>,
         val jobs: List<ScheduledJob>,
         val settings: Settings?,

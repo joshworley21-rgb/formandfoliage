@@ -5,7 +5,6 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
-import uk.co.jwgardenservices.crm.data.model.BankTransaction
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.Enquiry
 import uk.co.jwgardenservices.crm.data.model.Invoice
@@ -244,21 +243,6 @@ interface InvoiceEmailEventDao {
     suspend fun deleteByInvoice(invoiceId: String)
 
     @Query("DELETE FROM invoice_email_events")
-    suspend fun clear()
-}
-
-@Dao
-interface BankTransactionDao {
-    @Query("SELECT * FROM bank_transactions WHERE reviewedAt IS NULL AND ignored = 0 ORDER BY postedAt DESC")
-    fun observeReview(): Flow<List<BankTransaction>>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertAll(items: List<BankTransaction>)
-
-    @Query("DELETE FROM bank_transactions WHERE id = :id")
-    suspend fun deleteById(id: String)
-
-    @Query("DELETE FROM bank_transactions")
     suspend fun clear()
 }
 

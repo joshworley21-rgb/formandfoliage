@@ -363,29 +363,6 @@ data class InvoiceEmailEvent(
 )
 
 @Serializable
-@Entity(tableName = "bank_transactions", indices = [Index("postedAt"), Index("reviewedAt")])
-data class BankTransaction(
-    @PrimaryKey val id: String,
-    @SerialName("user_id") val userId: String,
-    val amount: Double,
-    val currency: String = "GBP",
-    val counterparty: String? = null,
-    val description: String? = null,
-    val reference: String? = null,
-    @SerialName("posted_at") val postedAt: String,
-    @SerialName("suggested_invoice_id") val suggestedInvoiceId: String? = null,
-    @SerialName("match_reason") val matchReason: String? = null,
-    val ignored: Boolean = false,
-    @SerialName("invoice_id") val invoiceId: String? = null,
-    @SerialName("matched_at") val matchedAt: String? = null,
-    @SerialName("reviewed_at") val reviewedAt: String? = null,
-    @SerialName("settled_at") val settledAt: String? = null,
-    @SerialName("provider_transaction_id") val providerTransactionId: String? = null,
-    @SerialName("created_at") val createdAt: String? = null,
-    @SerialName("updated_at") val updatedAt: String? = null,
-)
-
-@Serializable
 data class WorkspaceRow(
     @SerialName("owner_id") val ownerId: String,
     val role: String,
@@ -411,41 +388,6 @@ data class TeamMember(
     @SerialName("user_id") val userId: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null,
-)
-
-@Serializable
-data class MonzoStatus(
-    val configured: Boolean = false,
-    val connected: Boolean = false,
-    val accountName: String? = null,
-    val accountType: String? = null,
-    val accountChosen: Boolean = false,
-    val approved: Boolean = false,
-    val businessAccount: Boolean = false,
-    val lastSyncedAt: String? = null,
-    val lastSyncError: String? = null,
-    val webhookRegistered: Boolean = false,
-)
-
-@Serializable
-data class MonzoStart(val url: String)
-
-@Serializable
-data class MonzoAccount(
-    val id: String,
-    val name: String,
-    val type: String? = null,
-    val selected: Boolean = false,
-)
-
-@Serializable
-data class MonzoAccountList(val accounts: List<MonzoAccount> = emptyList())
-
-@Serializable
-data class MonzoSyncResult(
-    val added: Int = 0,
-    val awaitingApproval: Boolean = false,
-    val reason: String? = null,
 )
 
 @Serializable

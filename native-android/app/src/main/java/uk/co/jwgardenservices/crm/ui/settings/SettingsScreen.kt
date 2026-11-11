@@ -1,7 +1,5 @@
 package uk.co.jwgardenservices.crm.ui.settings
 
-import android.content.Intent
-import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,7 +14,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -43,14 +40,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import uk.co.jwgardenservices.crm.data.model.MonzoAccount
-import uk.co.jwgardenservices.crm.data.model.MonzoStatus
 import uk.co.jwgardenservices.crm.data.model.Settings
 import uk.co.jwgardenservices.crm.data.model.TeamMember
 import uk.co.jwgardenservices.crm.data.model.SettingsDraft
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
-import uk.co.jwgardenservices.crm.domain.formatDateTime
-import uk.co.jwgardenservices.crm.domain.parseTimestamp
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
 import uk.co.jwgardenservices.crm.ui.common.OptionPicker
 import uk.co.jwgardenservices.crm.ui.common.PageHeader
@@ -121,107 +114,11 @@ fun SettingsScreen(viewModel: CrmViewModel) {
     val themeMode = LocalThemeMode.current
     val setThemeMode = LocalSetThemeMode.current
 
-    var monzo by remember { mutableStateOf<MonzoStatus?>(null) }
-    var monzoError by remember { mutableStateOf<String?>(null) }
-    var monzoBusy by remember { mutableStateOf(false) }
-    var monzoAccounts by remember { mutableStateOf<List<MonzoAccount>?>(null) }
-    var disconnectMonzoConfirm by remember { mutableStateOf(false) }
-
-    suspend fun loadMonzoStatus() {
-        monzoBusy = true
-        try {
-            monzo = viewModel.monzoStatus()
-            monzoError = null
-        } catch (failure: Exception) {
-            monzoError = failure.message ?: "Could not check the Monzo connection"
-        } finally {
-            monzoBusy = false
-        }
-    }
-
-    suspend fun connectMonzo() {
-        monzoBusy = true
-        try {
-            val url = viewModel.monzoStart()
-            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-        } catch (failure: Exception) {
-            monzoError = failure.message ?: "Could not open Monzo"
-        } finally {
-            monzoBusy = false
-        }
-    }
-
-    suspend fun syncMonzoNow() {
-        monzoBusy = true
-        try {
-            val result = viewModel.syncMonzo()
-            val message = when {
-                result.awaitingApproval -> "Approve access in the Monzo app, then sync again"
-                !result.reason.isNullOrBlank() -> result.reason
-                result.added == 1 -> "1 payment added"
-                else -> "${result.added} payments added"
-            }
-            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-            monzo = viewModel.monzoStatus()
-            monzoError = null
-        } catch (failure: Exception) {
-            monzoError = failure.message ?: "Could not sync Monzo"
-        } finally {
-            monzoBusy = false
-        }
-    }
-
-    suspend fun loadMonzoAccounts() {
-        monzoBusy = true
-        try {
-            monzoAccounts = viewModel.monzoAccounts()
-            monzoError = null
-        } catch (failure: Exception) {
-            monzoError = failure.message ?: "Could not load Monzo accounts"
-        } finally {
-            monzoBusy = false
-        }
-    }
-
-    suspend fun selectMonzoAccount(account: MonzoAccount) {
-        monzoBusy = true
-        try {
-            viewModel.monzoSelect(account.id)
-            monzoAccounts = null
-            Toast.makeText(context, "Account changed to ${account.name}", Toast.LENGTH_SHORT).show()
-            monzo = viewModel.monzoStatus()
-            monzoError = null
-        } catch (failure: Exception) {
-            monzoError = failure.message ?: "Could not change the Monzo account"
-        } finally {
-            monzoBusy = false
-        }
-    }
-
-    suspend fun disconnectMonzo() {
-        monzoBusy = true
-        try {
-            viewModel.monzoDisconnect()
-            monzoAccounts = null
-            Toast.makeText(context, "Monzo disconnected", Toast.LENGTH_SHORT).show()
-            monzo = viewModel.monzoStatus()
-            monzoError = null
-        } catch (failure: Exception) {
-            monzoError = failure.message ?: "Could not disconnect Monzo"
-        } finally {
-            monzoBusy = false
-        }
-    }
-
     LaunchedEffect(state.settings) {
         if (!initialised && state.settings != null) {
             form = formOf(state.settings)
             initialised = true
         }
-    }
-
-    LaunchedEffect(Unit) {
-        loadMonzoStatus()
     }
 
     fun invite() {
@@ -571,185 +468,6 @@ fun SettingsScreen(viewModel: CrmViewModel) {
         }
 
         item {
-            SectionCard(title = "Monzo bank feed") {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.Top) {
-                        Icon(
-                            imageVector = Icons.Outlined.AccountBalance,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "Payments into Monzo appear on Invoices for review.",
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Text(
-                                text = "Nothing is ever marked paid without you confirming it, and the CRM can only read from the account.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-
-                    val status = monzo
-                    when {
-                        monzoBusy && status == null -> Text(
-                            text = "Checking…",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-
-                        monzoError != null -> {
-                            Text(
-                                text = monzoError.orEmpty(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                            OutlinedButton(
-                                onClick = { scope.launch { loadMonzoStatus() } },
-                                enabled = !monzoBusy,
-                            ) {
-                                Text("Try again")
-                            }
-                        }
-
-                        status == null -> Unit
-
-                        !status.configured -> Text(
-                            text = "Monzo is not set up on the server yet. Register a confidential OAuth client at developers.monzo.com and add MONZO_CLIENT_ID and MONZO_CLIENT_SECRET to the Edge Function secrets.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-
-                        !status.connected -> {
-                            Text(
-                                text = "Connect your Monzo account to see payments here. The connection is made in your browser and approved in the Monzo app.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Button(
-                                onClick = { scope.launch { connectMonzo() } },
-                                enabled = !monzoBusy,
-                            ) {
-                                Text("Connect Monzo")
-                            }
-                            OutlinedButton(
-                                onClick = { scope.launch { loadMonzoStatus() } },
-                                enabled = !monzoBusy,
-                            ) {
-                                Text("Refresh status")
-                            }
-                        }
-
-                        else -> {
-                            Text(
-                                text = if (status.accountChosen) {
-                                    "Connected to ${status.accountName}."
-                                } else {
-                                    "Signed in to Monzo. Waiting for Monzo to release your account details."
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            if (!status.approved) {
-                                Text(
-                                    text = "Open your Monzo app and approve access. Monzo holds back transactions until you do, then tap Sync now.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                            if (status.businessAccount &&
-                                (!status.approved || status.lastSyncError != null)
-                            ) {
-                                Text(
-                                    text = "This is a business account. Monzo documents its developer API for personal accounts, so if it stays stuck that is the likeliest cause. Invoices can still be marked paid by hand.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            status.lastSyncedAt?.let {
-                                Text(
-                                    text = "Last checked ${parseTimestamp(it)?.formatDateTime() ?: it}.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            status.lastSyncError?.let {
-                                Text(
-                                    text = it,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                            }
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Button(
-                                    onClick = { scope.launch { syncMonzoNow() } },
-                                    enabled = !monzoBusy,
-                                    modifier = Modifier.weight(1f),
-                                ) {
-                                    Text(if (monzoBusy) "Working…" else "Sync now")
-                                }
-                                OutlinedButton(
-                                    onClick = { scope.launch { loadMonzoStatus() } },
-                                    enabled = !monzoBusy,
-                                    modifier = Modifier.weight(1f),
-                                ) {
-                                    Text("Refresh status")
-                                }
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                OutlinedButton(
-                                    onClick = { scope.launch { loadMonzoAccounts() } },
-                                    enabled = !monzoBusy,
-                                ) {
-                                    Text("Change account")
-                                }
-                                Spacer(Modifier.weight(1f))
-                                TextButton(
-                                    onClick = { disconnectMonzoConfirm = true },
-                                    enabled = !monzoBusy,
-                                ) {
-                                    Text("Disconnect", color = MaterialTheme.colorScheme.error)
-                                }
-                            }
-
-                            monzoAccounts?.let { accounts ->
-                                if (accounts.isEmpty()) {
-                                    Text(
-                                        text = "No accounts found yet.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                } else {
-                                    OptionPicker(
-                                        options = accounts,
-                                        selected = accounts.find { it.selected },
-                                        label = { it?.name ?: "Choose account" },
-                                        enabled = !monzoBusy,
-                                        onSelect = { account ->
-                                            scope.launch { selectMonzoAccount(account) }
-                                        },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        item {
             SectionCard(title = "Invoice email") {
                 Column(
                     modifier = Modifier.padding(20.dp),
@@ -810,7 +528,7 @@ fun SettingsScreen(viewModel: CrmViewModel) {
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Text(
-                        text = "Email templates, team access and the Monzo bank feed are still managed in the web app.",
+                        text = "The Monzo bank feed is not included in this build. Invoices can still be marked paid by hand.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -854,24 +572,4 @@ fun SettingsScreen(viewModel: CrmViewModel) {
         )
     }
 
-    if (disconnectMonzoConfirm) {
-        AlertDialog(
-            onDismissRequest = { disconnectMonzoConfirm = false },
-            title = { Text("Disconnect Monzo?") },
-            text = { Text("Payments already matched to invoices stay where they are.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        disconnectMonzoConfirm = false
-                        scope.launch { disconnectMonzo() }
-                    },
-                ) {
-                    Text("Disconnect", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { disconnectMonzoConfirm = false }) { Text("Cancel") }
-            },
-        )
-    }
 }

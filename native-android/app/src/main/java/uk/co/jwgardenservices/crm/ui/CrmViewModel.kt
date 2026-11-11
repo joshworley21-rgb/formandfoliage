@@ -11,16 +11,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import uk.co.jwgardenservices.crm.data.model.BankTransaction
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.ClientDraft
 import uk.co.jwgardenservices.crm.data.model.CreateInvoiceResult
 import uk.co.jwgardenservices.crm.data.model.Enquiry
 import uk.co.jwgardenservices.crm.data.model.Invoice
 import uk.co.jwgardenservices.crm.data.model.InvoiceEmailEvent
-import uk.co.jwgardenservices.crm.data.model.MonzoAccount
-import uk.co.jwgardenservices.crm.data.model.MonzoStatus
-import uk.co.jwgardenservices.crm.data.model.MonzoSyncResult
 import uk.co.jwgardenservices.crm.data.model.InvoiceItem
 import uk.co.jwgardenservices.crm.data.model.JobDraft
 import uk.co.jwgardenservices.crm.data.model.JobPhotoWithUrl
@@ -52,7 +48,6 @@ data class CrmUiState(
     val visits: List<Visit> = emptyList(),
     val invoices: List<Invoice> = emptyList(),
     val invoiceEmailEvents: List<InvoiceEmailEvent> = emptyList(),
-    val paymentsToReview: List<BankTransaction> = emptyList(),
     val team: List<TeamMember> = emptyList(),
     val quotes: List<Quote> = emptyList(),
     val enquiries: List<Enquiry> = emptyList(),
@@ -98,13 +93,11 @@ class CrmViewModel(
         repository.observeQuotes(),
         repository.observeEnquiries(),
         repository.observeInvoiceEmailEvents(),
-        repository.observePaymentsToReview(),
-    ) { snapshot, quotes, enquiries, emailEvents, payments ->
+    ) { snapshot, quotes, enquiries, emailEvents ->
         snapshot.copy(
             quotes = quotes,
             enquiries = enquiries,
             invoiceEmailEvents = emailEvents,
-            paymentsToReview = payments,
         )
     }
 
@@ -130,7 +123,6 @@ class CrmViewModel(
             visits = snapshot.visits,
             invoices = snapshot.invoices,
             invoiceEmailEvents = snapshot.invoiceEmailEvents,
-            paymentsToReview = snapshot.paymentsToReview,
             team = snapshot.team,
             quotes = snapshot.quotes,
             enquiries = snapshot.enquiries,
@@ -259,14 +251,6 @@ class CrmViewModel(
         withSaving { repository.markInvoicePaid(id) }
     }
 
-    suspend fun confirmPayment(transactionId: String, invoiceId: String) {
-        withSaving { repository.confirmPayment(transactionId, invoiceId) }
-    }
-
-    suspend fun ignorePayment(transactionId: String) {
-        withSaving { repository.ignorePayment(transactionId) }
-    }
-
     suspend fun updateInvoiceDraft(id: String, dueDate: String?, notes: String?) {
         withSaving { repository.updateInvoiceDraft(id, dueDate, notes) }
     }
@@ -348,24 +332,6 @@ class CrmViewModel(
         withSaving { repository.removeMember(id) }
     }
 
-    suspend fun monzoStatus(): MonzoStatus = repository.monzoStatus()
-
-    suspend fun monzoStart(): String = repository.monzoStart()
-
-    suspend fun monzoAccounts(): List<MonzoAccount> = repository.monzoAccounts()
-
-    suspend fun monzoSelect(accountId: String) {
-        withSaving { repository.monzoSelect(accountId) }
-    }
-
-    suspend fun monzoDisconnect() {
-        withSaving { repository.monzoDisconnect() }
-    }
-
-    suspend fun syncMonzo(): MonzoSyncResult = withSavingResult {
-        repository.syncMonzo()
-    }
-
     suspend fun saveSettings(draft: SettingsDraft) {
         withSaving {
             repository.saveSettings(draft)
@@ -404,8 +370,7 @@ class CrmViewModel(
         val quotes: List<Quote> = emptyList(),
         val enquiries: List<Enquiry> = emptyList(),
         val invoiceEmailEvents: List<InvoiceEmailEvent> = emptyList(),
-        val paymentsToReview: List<BankTransaction> = emptyList(),
-        val team: List<TeamMember> = emptyList(),
+            val team: List<TeamMember> = emptyList(),
     )
 
     private data class SyncStatus(

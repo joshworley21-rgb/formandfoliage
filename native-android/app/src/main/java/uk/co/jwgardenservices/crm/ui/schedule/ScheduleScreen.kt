@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -102,8 +103,11 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val today = LocalDate.now()
+    var selectedDay by remember { mutableStateOf(LocalDate.now()) }
 
-    val days = remember(today) { (0..20).map { today.plusDays(it.toLong()) } }
+    val days = remember(selectedDay) {
+        (0..20).map { selectedDay.plusDays(it.toLong()) }
+    }
     val jobsByDay: Map<LocalDate, List<ScheduledJob>> = remember(state.jobs) {
         state.jobs
             .filter { it.status != "cancelled" }
@@ -126,6 +130,7 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
     var sheetJob by remember { mutableStateOf<ScheduledJob?>(null) }
     var saveError by remember { mutableStateOf<String?>(null) }
     var monthCursor by remember { mutableStateOf(YearMonth.now()) }
+    val listState = rememberLazyListState()
     val appContext = LocalContext.current
 
     fun moveJobTo(job: ScheduledJob, day: LocalDate) {
@@ -176,6 +181,7 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
     }
 
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -206,7 +212,13 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
             MonthCalendar(
                 jobs = jobsByDay,
                 month = monthCursor,
+                selectedDay = selectedDay,
                 onMonthChange = { monthCursor = it },
+                onSelectDay = { day ->
+                    selectedDay = day
+                    monthCursor = YearMonth.from(day)
+                    scope.launch { listState.animateScrollToItem(2) }
+                },
                 canDrag = !isStaff,
                 clientName = { id -> clientNames[id] ?: "Client" },
                 onMove = { job, day -> moveJobTo(job, day) },
@@ -244,12 +256,12 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
 
         days.forEach { day ->
             val jobs = jobsByDay[day].orEmpty().sortedBy { it.startsAt }
-            if (day == today || jobs.isNotEmpty()) {
+            if (day == selectedDay || jobs.isNotEmpty()) {
                 item(key = "day-$day") { DayHeading(day = day, isToday = day == today) }
                 if (jobs.isEmpty()) {
                     item(key = "empty-$day") {
                         Text(
-                            text = "Nothing booked today.",
+                            text = "Nothing booked on this day.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
