@@ -49,6 +49,10 @@ import uk.co.jwgardenservices.crm.ui.common.ErrorState
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
 import uk.co.jwgardenservices.crm.ui.common.PageHeader
 import uk.co.jwgardenservices.crm.ui.common.SectionCard
+import uk.co.jwgardenservices.crm.core.TaxReservePrefs
+import uk.co.jwgardenservices.crm.domain.taxSetAside
+import uk.co.jwgardenservices.crm.domain.ukTaxYearContaining
+import uk.co.jwgardenservices.crm.domain.ukTaxYearLabel
 import uk.co.jwgardenservices.crm.ui.common.StatCard
 import uk.co.jwgardenservices.crm.ui.common.StatusChip
 import uk.co.jwgardenservices.crm.ui.onDay
@@ -61,6 +65,7 @@ fun DashboardScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val today = LocalDate.now()
+    val taxRate by TaxReservePrefs.ratePercent.collectAsStateWithLifecycle()
 
     val scheduled = state.jobs.filter { it.status == "scheduled" }
     val todayJobs = scheduled.onDay(today)
@@ -113,6 +118,8 @@ fun DashboardScreen(
         }
 
         item { TodayBand(today = today, jobs = todayJobs, todayMinutes = todayMinutes) }
+
+        item { TaxPotBand(ratePercent = taxRate, invoices = state.invoices, today = today) }
 
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -370,4 +377,35 @@ private fun invoiceColors(status: String): Pair<Color, Color> = when (status) {
     "paid" -> MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
     "sent" -> MaterialTheme.colorScheme.onSurfaceVariant to MaterialTheme.colorScheme.secondary
     else -> MaterialTheme.colorScheme.onSurfaceVariant to MaterialTheme.colorScheme.secondary
+}
+
+/** The running tax pot for the current UK self-assessment year (6 April - 5 April). */
+@Composable
+private fun TaxPotBand(ratePercent: Double, invoices: List<Invoice>, today: LocalDate) {
+    val pot = remember(invoices, ratePercent, today) { taxSetAside(invoices, ratePercent, today) }
+    if (ratePercent <= 0.0 || pot <= 0.0) return
+    val year = remember(today) { ukTaxYearContaining(today) }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Tax to set aside: ${money(pot)}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "${if (ratePercent % 1.0 == 0.0) ratePercent.toInt() else ratePercent}% of invoiced this tax year " +
+                            "(${ukTaxYearLabel(year)}) · adjust in Settings",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+    }
 }

@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import uk.co.jwgardenservices.crm.core.TaxReservePrefs
 import androidx.compose.material3.Switch
 import uk.co.jwgardenservices.crm.domain.invoicesCsv
 import uk.co.jwgardenservices.crm.domain.visitsCsv
@@ -116,6 +117,7 @@ fun SettingsScreen(viewModel: CrmViewModel) {
     var removing by remember { mutableStateOf<TeamMember?>(null) }
 
     var appLockOn by remember { mutableStateOf(AppLock.isEnabled(context)) }
+    val taxRate by TaxReservePrefs.ratePercent.collectAsStateWithLifecycle()
     val themeMode = LocalThemeMode.current
     val setThemeMode = LocalSetThemeMode.current
 
@@ -466,6 +468,36 @@ fun SettingsScreen(viewModel: CrmViewModel) {
                         label = { Text("Bank details") },
                         placeholder = { Text("Sort code 00-00-00\nAccount 12345678") },
                         minLines = 3,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
+
+        item {
+            SectionCard(title = "Tax") {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = "How much of each invoice to put aside for self-assessment tax. " +
+                            "Tax is on profit, so set this after your running costs — 25-30% is typical.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    var rateText by remember(taxRate) { mutableStateOf(taxRate.toString()) }
+                    OutlinedTextField(
+                        value = rateText,
+                        onValueChange = { text ->
+                            rateText = text
+                            text.toDoubleOrNull()?.let { TaxReservePrefs.set(context, it) }
+                        },
+                        label = { Text("Set aside %") },
+                        singleLine = true,
+                        supportingText = {
+                            Text("Shown on every invoice and as a tax-year pot on the dashboard.")
+                        },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }

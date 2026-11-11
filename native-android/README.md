@@ -94,6 +94,15 @@ The foundation is in place:
   details. They complete jobs through `staff_complete_job`; owner-only screens
   and cached owner data are hidden and cleared on a staff device.
 
+## Tax set aside
+
+- Every non-draft invoice shows "Save for tax: ~£X" at the rate chosen in
+  Settings → Tax (default 30%, stored on the device).
+- The dashboard shows a tax-year pot: 30% of invoiced for the current UK
+  self-assessment year (6 April – 5 April), drafts excluded.
+- The percentage is a rule of thumb — tax is on profit, so the knob absorbs
+  running costs. It is guidance, not a calculation.
+
 ## Reliability and extras
 
 - Sync safety: a change the server rejects is kept as "failed" (red banner, tap

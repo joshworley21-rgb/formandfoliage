@@ -4,6 +4,7 @@ import android.app.Application
 import uk.co.jwgardenservices.crm.core.AppLock
 import io.sentry.android.core.SentryAndroid
 import uk.co.jwgardenservices.crm.core.CrashLog
+import uk.co.jwgardenservices.crm.core.TaxReservePrefs
 import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
 
 class JwCrmApplication : Application() {
@@ -14,6 +15,7 @@ class JwCrmApplication : Application() {
         // here would also stop the crash report from ever reaching the screen.
         runCatching { ServiceLocator.init(this) }
             .onFailure { CrashLog.record(this, it, "ServiceLocator.init") }
+        TaxReservePrefs.load(this)
         runCatching { AppLock.init(this) }
             .onFailure { CrashLog.record(this, it, "AppLock.init") }
         // Init happens here, never via Sentry's auto-start providers: a failure

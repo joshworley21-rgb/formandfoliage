@@ -63,6 +63,8 @@ import uk.co.jwgardenservices.crm.domain.formatDateTime
 import uk.co.jwgardenservices.crm.domain.daysOverdue
 import uk.co.jwgardenservices.crm.domain.formatDayMonth
 import uk.co.jwgardenservices.crm.domain.formatDayMonthYear
+import uk.co.jwgardenservices.crm.core.TaxReservePrefs
+import uk.co.jwgardenservices.crm.domain.taxReserveAmount
 import uk.co.jwgardenservices.crm.domain.money
 import uk.co.jwgardenservices.crm.domain.parseDate
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
@@ -88,6 +90,7 @@ fun InvoicesScreen(viewModel: CrmViewModel) {
     val owed = unpaid.sumOf { it.total }
     val clientNames = remember(state.clients) { state.clients.associate { it.id to it.name } }
     val warning = if (isSystemInDarkTheme()) DarkWarning else LightWarning
+    val taxRate by TaxReservePrefs.ratePercent.collectAsStateWithLifecycle()
 
     var creating by remember { mutableStateOf(false) }
     var createError by remember { mutableStateOf<String?>(null) }
@@ -244,6 +247,7 @@ fun InvoicesScreen(viewModel: CrmViewModel) {
                 invoice = invoice,
                 clientName = clientNames[invoice.clientId] ?: "Client",
                 warning = warning,
+                taxRatePercent = taxRate,
                 busy = busyId == invoice.id,
                 lastEvent = state.invoiceEmailEvents.firstOrNull { it.invoiceId == invoice.id },
                 events = state.invoiceEmailEvents.filter { it.invoiceId == invoice.id },
@@ -385,6 +389,7 @@ private fun InvoiceCard(
     invoice: Invoice,
     clientName: String,
     warning: androidx.compose.ui.graphics.Color,
+    taxRatePercent: Double,
     busy: Boolean,
     lastEvent: InvoiceEmailEvent?,
     events: List<InvoiceEmailEvent>,
@@ -425,6 +430,23 @@ private fun InvoiceCard(
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                 )
+            }
+
+            if (invoice.status != "draft" && taxRatePercent > 0.0) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Save for tax: ~" + money(taxReserveAmount(invoice.subtotal, taxRatePercent)),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = "${if (taxRatePercent % 1.0 == 0.0) taxRatePercent.toInt() else taxRatePercent}% of net",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             Spacer(Modifier.padding(top = 10.dp))
