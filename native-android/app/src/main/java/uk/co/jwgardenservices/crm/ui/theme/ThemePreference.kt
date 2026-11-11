@@ -19,7 +19,7 @@ private val THEME_KEY = stringPreferencesKey("theme_mode")
 
 object ThemePreferences {
     fun flow(context: Context): Flow<ThemeMode> = context.themeDataStore.data.map { preferences ->
-        ThemeMode.entries.firstOrNull { it.name == preferences[THEME_KEY] } ?: ThemeMode.SYSTEM
+        ThemeMode.entries.firstOrNull { it.name == preferences[THEME_KEY] } ?: ThemeMode.LIGHT
     }
 
     suspend fun set(context: Context, mode: ThemeMode) {
@@ -29,5 +29,5 @@ object ThemePreferences {
     }
 }
 
-val LocalThemeMode = staticCompositionLocalOf { ThemeMode.SYSTEM }
+val LocalThemeMode = staticCompositionLocalOf { ThemeMode.LIGHT }
 val LocalSetThemeMode = staticCompositionLocalOf<(ThemeMode) -> Unit> { {} }
