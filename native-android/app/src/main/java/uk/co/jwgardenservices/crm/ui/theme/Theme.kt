@@ -1,0 +1,81 @@
+package uk.co.jwgardenservices.crm.ui.theme
+
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.unit.dp
+
+private val LightColors = lightColorScheme(
+    primary = LightPrimary,
+    onPrimary = LightPrimaryForeground,
+    primaryContainer = LightSecondary,
+    onPrimaryContainer = LightForeground,
+    secondary = LightSecondary,
+    onSecondary = LightForeground,
+    secondaryContainer = LightSecondary,
+    onSecondaryContainer = LightForeground,
+    tertiary = LightLime,
+    onTertiary = LightLimeForeground,
+    background = LightBackground,
+    onBackground = LightForeground,
+    surface = LightCard,
+    onSurface = LightForeground,
+    surfaceVariant = LightSecondary,
+    onSurfaceVariant = LightMutedForeground,
+    outline = LightBorder,
+    outlineVariant = LightBorder,
+    error = LightDestructive,
+    onError = LightDestructiveForeground,
+    errorContainer = LightDestructive,
+    onErrorContainer = LightDestructiveForeground,
+)
+
+private val DarkColors = darkColorScheme(
+    primary = DarkPrimary,
+    onPrimary = DarkPrimaryForeground,
+    primaryContainer = DarkSecondary,
+    onPrimaryContainer = DarkForeground,
+    secondary = DarkSecondary,
+    onSecondary = DarkForeground,
+    secondaryContainer = DarkSecondary,
+    onSecondaryContainer = DarkForeground,
+    tertiary = DarkLime,
+    onTertiary = DarkLimeForeground,
+    background = DarkBackground,
+    onBackground = DarkForeground,
+    surface = DarkCard,
+    onSurface = DarkForeground,
+    surfaceVariant = DarkSecondary,
+    onSurfaceVariant = DarkMutedForeground,
+    outline = DarkBorder,
+    outlineVariant = DarkBorder,
+    error = DarkDestructive,
+    onError = DarkDestructiveForeground,
+    errorContainer = DarkDestructive,
+    onErrorContainer = DarkDestructiveForeground,
+)
+
+private val JwShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(22.dp),
+    extraLarge = RoundedCornerShape(28.dp),
+)
+
+@Composable
+fun JwCrmTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    content: @Composable () -> Unit,
+) {
+    MaterialTheme(
+        colorScheme = if (darkTheme) DarkColors else LightColors,
+        typography = JwTypography,
+        shapes = JwShapes,
+        content = content,
+    )
+}

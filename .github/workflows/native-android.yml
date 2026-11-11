@@ -1,0 +1,125 @@
+name: Native Android APK
+
+# Builds the Kotlin/Jetpack Compose rewrite on GitHub's runners, so the APK
+# does not need to be compiled on the small local machine.
+#
+# Signing: the native app uses the same application id as the Capacitor app
+# (`uk.co.jwgardenservices.crm`), so it can reuse the committed signing key at
+# android/keystore/release.jks. If that key is present (and the password secret
+# is set), this produces a signed release APK that installs over previous
+# builds. Without a key it falls back to a debug APK.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "native-android/**"
+      - ".github/workflows/native-android.yml"
+  pull_request:
+    paths:
+      - "native-android/**"
+      - ".github/workflows/native-android.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      COMMITTED_KEYSTORE: android/keystore/release.jks
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Find the signing key
+        # Pull requests from forks cannot read repository secrets. Build a debug
+        # APK there rather than failing the whole check.
+        if: github.event_name != 'pull_request'
+        run: |
+          if [ -f "$COMMITTED_KEYSTORE" ]; then
+            cp "$COMMITTED_KEYSTORE" "$RUNNER_TEMP/release.jks"
+            echo "Signing with the key in the repository."
+          elif [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "Signing with the key from ANDROID_KEYSTORE_BASE64."
+          else
+            echo "No signing key — building a debug APK."
+            exit 0
+          fi
+          if [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::A signing key is present but ANDROID_KEYSTORE_PASSWORD is not set."
+            exit 1
+          fi
+          echo "SIGNED=true" >> "$GITHUB_ENV"
+
+      - name: Unit tests
+        working-directory: native-android
+        run: ./gradlew :app:testDebugUnitTest --no-daemon -Dorg.gradle.jvmargs="-Xmx2048m -XX:MaxMetaspaceSize=512m"
+
+      - name: Build signed release APK
+        if: env.SIGNED == 'true'
+        working-directory: native-android
+        run: |
+          ./gradlew :app:assembleRelease --no-daemon \
+            -Dorg.gradle.jvmargs="-Xmx2048m -XX:MaxMetaspaceSize=512m" \
+            -PappVersionCode=${{ github.run_number }} \
+            -PappVersionName=2.0.${{ github.run_number }} \
+            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/release.jks" \
+            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="${KEY_ALIAS:-jwgardenservices}" \
+            -Pandroid.injected.signing.key.password="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+
+      - name: Build debug APK
+        if: env.SIGNED != 'true'
+        working-directory: native-android
+        run: |
+          ./gradlew :app:assembleDebug --no-daemon \
+            -Dorg.gradle.jvmargs="-Xmx2048m -XX:MaxMetaspaceSize=512m" \
+            -PappVersionCode=${{ github.run_number }} \
+            -PappVersionName=2.0.${{ github.run_number }}
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: jw-crm-native-apk
+          path: |
+            native-android/app/build/outputs/apk/release/*.apk
+            native-android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Summary
+        run: |
+          {
+            echo "### Native Android APK"
+            echo ""
+            if [ "$SIGNED" = "true" ]; then
+              echo "Signed release build, version 2.0.${{ github.run_number }}."
+              echo ""
+              echo "Download it from **Artifacts** below and open it on the phone. It installs"
+              echo "over previous builds signed with the same key."
+            else
+              echo "Debug build, version 2.0.${{ github.run_number }} — **not signed with your key**."
+              echo ""
+              echo "Download it from **Artifacts**. It installs, but updating over a previous"
+              echo "build will not work until a signing key is present."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
