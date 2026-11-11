@@ -53,6 +53,10 @@ import uk.co.jwgardenservices.crm.core.TaxReservePrefs
 import uk.co.jwgardenservices.crm.domain.taxSetAside
 import uk.co.jwgardenservices.crm.domain.ukTaxYearContaining
 import uk.co.jwgardenservices.crm.domain.ukTaxYearLabel
+import uk.co.jwgardenservices.crm.domain.SelfAssessment
+import uk.co.jwgardenservices.crm.domain.estimateSelfAssessmentTax
+import uk.co.jwgardenservices.crm.domain.estimatedTaxYearProfit
+import uk.co.jwgardenservices.crm.data.model.Visit
 import uk.co.jwgardenservices.crm.ui.common.StatCard
 import uk.co.jwgardenservices.crm.ui.common.StatusChip
 import uk.co.jwgardenservices.crm.ui.onDay
@@ -119,7 +123,14 @@ fun DashboardScreen(
 
         item { TodayBand(today = today, jobs = todayJobs, todayMinutes = todayMinutes) }
 
-        item { TaxPotBand(ratePercent = taxRate, invoices = state.invoices, today = today) }
+        item {
+            TaxPotBand(
+                ratePercent = taxRate,
+                invoices = state.invoices,
+                visits = state.visits,
+                today = today,
+            )
+        }
 
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -381,8 +392,16 @@ private fun invoiceColors(status: String): Pair<Color, Color> = when (status) {
 
 /** The running tax pot for the current UK self-assessment year (6 April - 5 April). */
 @Composable
-private fun TaxPotBand(ratePercent: Double, invoices: List<Invoice>, today: LocalDate) {
+private fun TaxPotBand(
+    ratePercent: Double,
+    invoices: List<Invoice>,
+    visits: List<Visit>,
+    today: LocalDate,
+) {
     val pot = remember(invoices, ratePercent, today) { taxSetAside(invoices, ratePercent, today) }
+    val estimate = remember(invoices, visits, today) {
+        estimateSelfAssessmentTax(estimatedTaxYearProfit(invoices, visits, today))
+    }
     if (ratePercent <= 0.0 || pot <= 0.0) return
     val year = remember(today) { ukTaxYearContaining(today) }
     Surface(
@@ -391,20 +410,38 @@ private fun TaxPotBand(ratePercent: Double, invoices: List<Invoice>, today: Loca
         color = MaterialTheme.colorScheme.primaryContainer,
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Tax to set aside: ${money(pot)}",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = "${if (ratePercent % 1.0 == 0.0) ratePercent.toInt() else ratePercent}% of invoiced this tax year " +
-                            "(${ukTaxYearLabel(year)}) · adjust in Settings",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column {
+                Text(
+                    text = "Tax to set aside: ${money(pot)}",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "${if (ratePercent % 1.0 == 0.0) ratePercent.toInt() else ratePercent}% of invoiced this tax year " +
+                        "(${ukTaxYearLabel(year)}) · adjust in Settings",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.25f))
+
+            Column {
+                val detail = if (estimate.profit <= SelfAssessment.PERSONAL_ALLOWANCE) {
+                    "Under the £12,570 allowance so far — no income tax or Class 4 on this profit."
+                } else {
+                    "Income tax ${money(estimate.incomeTax)} + Class 4 NICs ${money(estimate.class4)} " +
+                        "after the £12,570 allowance (~${estimate.effectiveRate}% of profit)"
                 }
+                Text(
+                    text = "Estimated HMRC bill: ~${money(estimate.total)}",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = detail + " · from invoiced minus materials logged",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
     }

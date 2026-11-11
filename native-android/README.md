@@ -100,6 +100,10 @@ The foundation is in place:
   Settings → Tax (default 30%, stored on the device).
 - The dashboard shows a tax-year pot: 30% of invoiced for the current UK
   self-assessment year (6 April – 5 April), drafts excluded.
+- The dashboard also estimates the HMRC bill: income tax after the £12,570
+  allowance (20%/40%/45%) plus Class 4 NICs (6%/2%), on estimated profit —
+  net invoiced minus materials logged, for the tax year. Assumes no other
+  income and England/Wales/NI rates; 2025/26 frozen thresholds.
 - The percentage is a rule of thumb — tax is on profit, so the knob absorbs
   running costs. It is guidance, not a calculation.
 
