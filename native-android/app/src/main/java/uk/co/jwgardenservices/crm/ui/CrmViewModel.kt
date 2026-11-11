@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import uk.co.jwgardenservices.crm.data.local.OutboxEntry
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.ClientDraft
 import uk.co.jwgardenservices.crm.data.model.CreateInvoiceResult
@@ -38,7 +39,7 @@ import uk.co.jwgardenservices.crm.data.model.Visit
 import uk.co.jwgardenservices.crm.data.model.VisitDraft
 import uk.co.jwgardenservices.crm.data.offline.SyncEngine
 import uk.co.jwgardenservices.crm.data.offline.SyncResult
-import uk.co.jwgardenservices.crm.data.repository.CrmRepository
+import uk.co.jwgardenservices.crm.data.repository.*
 import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
 import uk.co.jwgardenservices.crm.domain.localDate
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
@@ -74,6 +75,24 @@ class CrmViewModel(
     private val offline = MutableStateFlow(false)
     private val syncError = MutableStateFlow<String?>(null)
     private val pendingQuote = MutableStateFlow<QuoteDraft?>(null)
+
+    /** Changes the server rejected. They stay queued until retried or discarded. */
+    val failedWrites: StateFlow<List<OutboxEntry>> = repository.observeFailedWrites()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun retryFailedWrite(id: String? = null) {
+        viewModelScope.launch {
+            repository.retryFailedWrite(id)
+            runCatching { syncEngine.syncNow() }
+        }
+    }
+
+    fun discardFailedWrite(id: String) {
+        viewModelScope.launch {
+            repository.discardFailedWrite(id)
+            runCatching { syncEngine.syncNow() }
+        }
+    }
 
     /** A quote started from an enquiry, waiting for the Quotes screen to open it. */
     val pendingQuoteDraft: StateFlow<QuoteDraft?> = pendingQuote.asStateFlow()
@@ -211,6 +230,9 @@ class CrmViewModel(
         repository.setJobTaskDone(task, done)
 
     suspend fun deleteJobTask(id: String) = repository.deleteJobTask(id)
+
+    suspend fun clientPhotos(clientId: String): List<JobPhotoWithUrl> =
+        repository.clientPhotos(clientId)
 
     suspend fun jobPhotos(jobId: String): List<JobPhotoWithUrl> =
         repository.jobPhotos(jobId)

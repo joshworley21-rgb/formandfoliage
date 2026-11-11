@@ -4,7 +4,6 @@ import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.filter.PostgrestFilterBuilder
-import java.io.IOException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
@@ -30,8 +29,9 @@ data class SyncResult(
  *
  * Ordering is strict and the queue stops at the first network failure, exactly
  * like the web app: a create followed by an update must reach the server in that
- * order. A permanent failure (validation, permissions) drops that one entry so
- * the queue cannot wedge, and reports why.
+ * order. A permanent failure (validation, permissions) parks that one entry as
+ * failed so the queue cannot wedge, keeps the change, and reports why. The user
+ * can retry or discard it from the app.
  */
 class SyncEngine(
     private val database: CrmDatabase,
@@ -53,7 +53,7 @@ class SyncEngine(
             refresh()
             refreshed = true
         } catch (failure: Exception) {
-            if (isNetworkError(failure)) {
+            if (SyncErrors.isRetryable(failure)) {
                 return@withLock SyncResult(
                     synced = flushed.synced,
                     offline = true,
@@ -83,12 +83,12 @@ class SyncEngine(
                 outbox.delete(entry.id)
                 synced += 1
             } catch (failure: Exception) {
-                if (isNetworkError(failure)) {
+                if (SyncErrors.isRetryable(failure)) {
                     return FlushResult(synced = synced, offline = true, error = lastError)
                 }
-                outbox.bumpAttempts(entry.id)
-                outbox.delete(entry.id)
-                lastError = "${entry.label}: ${failure.message ?: "could not be saved"}"
+                val reason = failure.message ?: "could not be saved"
+                outbox.markFailed(entry.id, reason)
+                lastError = "${entry.label}: $reason"
             }
         }
 
@@ -136,32 +136,9 @@ class SyncEngine(
     private fun QueuedOpDto.requirePayload(): JsonObject =
         payload ?: error("${kind} operation without a payload")
 
-    private fun isNetworkError(error: Throwable): Boolean {
-        var current: Throwable? = error
-        while (current != null) {
-            if (current is IOException) return true
-            val message = current.message?.lowercase().orEmpty()
-            if (NETWORK_HINTS.any { it in message }) return true
-            current = current.cause
-        }
-        return false
-    }
-
     private data class FlushResult(
         val synced: Int = 0,
         val offline: Boolean = false,
         val error: String? = null,
     )
-
-    private companion object {
-        val NETWORK_HINTS = listOf(
-            "network",
-            "timeout",
-            "failed to connect",
-            "unable to resolve",
-            "offline",
-            "unknownhost",
-            "connectexception",
-        )
-    }
 }

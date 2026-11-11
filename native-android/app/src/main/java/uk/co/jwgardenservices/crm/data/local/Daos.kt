@@ -140,20 +140,32 @@ interface OutboxDao {
     @Insert
     suspend fun insert(entry: OutboxEntry)
 
-    @Query("SELECT * FROM outbox ORDER BY createdAt ASC, id ASC LIMIT 1")
+    @Query("SELECT * FROM outbox WHERE failedReason IS NULL ORDER BY createdAt ASC, id ASC LIMIT 1")
     suspend fun next(): OutboxEntry?
 
-    @Query("SELECT COUNT(*) FROM outbox")
+    @Query("SELECT COUNT(*) FROM outbox WHERE failedReason IS NULL")
     suspend fun pendingCount(): Int
 
-    @Query("SELECT COUNT(*) FROM outbox")
+    @Query("SELECT COUNT(*) FROM outbox WHERE failedReason IS NULL")
     fun observeCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM outbox")
+    suspend fun totalCount(): Int
+
+    @Query("SELECT * FROM outbox WHERE failedReason IS NOT NULL ORDER BY createdAt ASC, id ASC")
+    fun observeFailed(): Flow<List<OutboxEntry>>
 
     @Query("DELETE FROM outbox WHERE id = :id")
     suspend fun delete(id: String)
 
-    @Query("UPDATE outbox SET attempts = attempts + 1 WHERE id = :id")
-    suspend fun bumpAttempts(id: String)
+    @Query("UPDATE outbox SET attempts = attempts + 1, failedReason = :reason WHERE id = :id")
+    suspend fun markFailed(id: String, reason: String)
+
+    @Query("UPDATE outbox SET failedReason = NULL WHERE id = :id")
+    suspend fun retry(id: String)
+
+    @Query("UPDATE outbox SET failedReason = NULL WHERE failedReason IS NOT NULL")
+    suspend fun retryAll()
 
     @Query("DELETE FROM outbox")
     suspend fun clear()

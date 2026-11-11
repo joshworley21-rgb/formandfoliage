@@ -2,8 +2,9 @@ package uk.co.jwgardenservices.crm
 
 import android.content.Intent
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import uk.co.jwgardenservices.crm.core.AppLock
 import androidx.activity.compose.setContent
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
@@ -11,7 +12,12 @@ import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
 import uk.co.jwgardenservices.crm.ui.AppRoot
 import uk.co.jwgardenservices.crm.ui.theme.AppTheme
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
+    override fun onStop() {
+        super.onStop()
+        AppLock.lock()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

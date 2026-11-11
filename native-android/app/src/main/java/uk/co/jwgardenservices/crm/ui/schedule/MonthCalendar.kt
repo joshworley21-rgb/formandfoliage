@@ -36,11 +36,14 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -79,9 +82,37 @@ fun MonthCalendar(
     onMove: (ScheduledJob, LocalDate) -> Unit,
 ) {
     val haptics = LocalHapticFeedback.current
+    val density = LocalDensity.current
     var monthOrigin by remember { mutableStateOf(Offset.Zero) }
+    var gridSize by remember { mutableStateOf(IntSize.Zero) }
     val dayBounds = remember { mutableStateMapOf<LocalDate, Rect>() }
     var drag by remember { mutableStateOf<DragState?>(null) }
+
+    // Holding a dragged job against the top or bottom of the grid pages the
+    // month backwards or forwards, so a job can be moved without first
+    // navigating elsewhere. A short cooldown stops it running away while the
+    // finger stays parked on the edge.
+    val edgeZone = with(density) { 28.dp.toPx() }
+    val edgeCooldownMs = 700L
+    var lastAutoPageAt by remember { mutableStateOf(0L) }
+    fun autoPage(position: Offset) {
+        val height = gridSize.height
+        if (height <= 0) return
+        val now = System.currentTimeMillis()
+        if (now - lastAutoPageAt < edgeCooldownMs) return
+        when {
+            position.y < monthOrigin.y + edgeZone -> {
+                lastAutoPageAt = now
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onMonthChange(month.minusMonths(1))
+            }
+            position.y > monthOrigin.y + height - edgeZone -> {
+                lastAutoPageAt = now
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onMonthChange(month.plusMonths(1))
+            }
+        }
+    }
 
     val days = remember(month) {
         val start = month.atDay(1)
@@ -99,8 +130,9 @@ fun MonthCalendar(
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
     ) {
         Box(
-            modifier = Modifier.onGloballyPositioned {
-                monthOrigin = it.boundsInRoot().topLeft
+            modifier = Modifier.onGloballyPositioned { coordinates ->
+                monthOrigin = coordinates.boundsInRoot().topLeft
+                gridSize = coordinates.size
             },
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
@@ -173,7 +205,11 @@ fun MonthCalendar(
                                             drag = DragState(job, chipOrigin + start)
                                         },
                                         onDrag = { amount ->
-                                            drag = drag?.let { it.copy(position = it.position + amount) }
+                                            drag = drag?.let {
+                                                val moved = it.copy(position = it.position + amount)
+                                                autoPage(moved.position)
+                                                moved
+                                            }
                                         },
                                         onDragEnd = {
                                             val current = drag

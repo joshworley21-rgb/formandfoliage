@@ -25,6 +25,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
+import uk.co.jwgardenservices.crm.ui.common.SectionCard
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -58,6 +60,8 @@ import uk.co.jwgardenservices.crm.data.model.NewInvoiceInput
 import uk.co.jwgardenservices.crm.data.model.Settings
 import uk.co.jwgardenservices.crm.data.model.Visit
 import uk.co.jwgardenservices.crm.domain.formatDateTime
+import uk.co.jwgardenservices.crm.domain.daysOverdue
+import uk.co.jwgardenservices.crm.domain.formatDayMonth
 import uk.co.jwgardenservices.crm.domain.formatDayMonthYear
 import uk.co.jwgardenservices.crm.domain.money
 import uk.co.jwgardenservices.crm.domain.parseDate
@@ -202,6 +206,27 @@ fun InvoicesScreen(viewModel: CrmViewModel) {
         }
 
         item { OwedBand(owed = owed, count = unpaid.size) }
+
+        item {
+            ReadyToBillCard(
+                clients = state.clients,
+                visits = state.visits,
+                clientNames = clientNames,
+                busy = state.saving,
+                onCreate = { client, visitIds ->
+                    scope.launch {
+                        try {
+                            val result = viewModel.createInvoice(
+                                NewInvoiceInput(clientId = client.id, visitIds = visitIds),
+                            )
+                            toast("Invoice ${result.number} created for ${client.name}")
+                        } catch (error: Exception) {
+                            toast(error.message ?: "Could not create the invoice")
+                        }
+                    }
+                },
+            )
+        }
 
         if (invoices.isEmpty()) {
             item {
@@ -477,7 +502,13 @@ private fun InvoiceCard(
                     enabled = !busy,
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text(if (invoice.status == "draft") "Send" else "Resend")
+                    Text(
+                        when {
+                            invoice.status == "draft" -> "Send"
+                            over > 0 -> "Send reminder"
+                            else -> "Resend"
+                        },
+                    )
                 }
             }
             Row(
@@ -874,10 +905,66 @@ private fun DraftInvoiceDialog(
     }
 }
 
-private fun daysOverdue(invoice: Invoice, today: LocalDate = LocalDate.now()): Long {
-    if (invoice.status == "paid") return 0
-    val due = parseDate(invoice.dueDate)
-        ?: parseDate(invoice.issueDate)?.plusDays(30)
-        ?: return 0
-    return ChronoUnit.DAYS.between(due, today).coerceAtLeast(0)
+/**
+ * One row per client with unbilled work. A single tap builds an invoice from
+ * every unbilled visit — the recurring-clients shortcut so the monthly round
+ * does not need a visit-by-visit picker.
+ */
+@Composable
+private fun ReadyToBillCard(
+    clients: List<Client>,
+    visits: List<Visit>,
+    clientNames: Map<String, String>,
+    busy: Boolean,
+    onCreate: (Client, List<String>) -> Unit,
+) {
+    val groups = remember(visits) {
+        visits
+            .filter { !it.billed && !it.missed }
+            .groupBy { it.clientId }
+            .map { (clientId, rows) ->
+                Triple(clientId, rows.sortedBy { it.visitDate }, rows.sumOf { it.amount })
+            }
+            .sortedByDescending { it.third }
+    }
+    if (groups.isEmpty()) return
+    SectionCard(title = "Ready to bill") {
+        Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+            groups.forEach { (clientId, rows, total) ->
+                val client = clients.firstOrNull { it.id == clientId } ?: return@forEach
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = client.name,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "${rows.size} unbilled ${if (rows.size == 1) "visit" else "visits"} · ${money(total)}" +
+                                " · since ${parseDate(rows.first().visitDate)?.formatDayMonth() ?: rows.first().visitDate}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    FilledTonalButton(
+                        onClick = { onCreate(client, rows.map { it.id }) },
+                        enabled = !busy,
+                    ) {
+                        Text("Bill all")
+                    }
+                }
+            }
+            Text(
+                text = "Creates one invoice per client from all their unbilled visits. Drafts stay in the list below so you can adjust before sending.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+    }
 }

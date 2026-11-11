@@ -7,6 +7,7 @@ import io.github.jan.supabase.functions.functions
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Order
+import io.github.jan.supabase.postgrest.query.PostgrestRequestBuilder
 import io.github.jan.supabase.storage.storage
 import io.ktor.http.ContentType
 import io.ktor.client.statement.bodyAsText
@@ -20,6 +21,7 @@ import java.util.UUID
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -77,6 +79,8 @@ import uk.co.jwgardenservices.crm.domain.step
 import uk.co.jwgardenservices.crm.data.offline.OfflineJson
 import uk.co.jwgardenservices.crm.data.remote.SupabaseProvider
 
+private const val PAGE_SIZE = 1000L
+
 /**
  * Offline-first CRM data.
  *
@@ -87,23 +91,23 @@ import uk.co.jwgardenservices.crm.data.remote.SupabaseProvider
  * plus `offline-queue.ts`.
  */
 class CrmRepository(
-    private val database: CrmDatabase,
-    private val client: SupabaseClient = SupabaseProvider.client,
-    private val onQueued: () -> Unit = {},
+    internal val database: CrmDatabase,
+    internal val client: SupabaseClient = SupabaseProvider.client,
+    internal val onQueued: () -> Unit = {},
 ) {
-    private val clients = database.clientDao()
-    private val enquiries = database.enquiryDao()
-    private val team = database.teamMemberDao()
-    private val jobTasks = database.jobTaskDao()
-    private val visits = database.visitDao()
-    private val jobs = database.scheduledJobDao()
-    private val invoices = database.invoiceDao()
-    private val invoiceLines = database.invoiceItemDao()
-    private val emailEvents = database.invoiceEmailEventDao()
-    private val quotes = database.quoteDao()
-    private val quoteLines = database.quoteItemDao()
-    private val settings = database.settingsDao()
-    private val outbox = database.outboxDao()
+    internal val clients = database.clientDao()
+    internal val enquiries = database.enquiryDao()
+    internal val team = database.teamMemberDao()
+    internal val jobTasks = database.jobTaskDao()
+    internal val visits = database.visitDao()
+    internal val jobs = database.scheduledJobDao()
+    internal val invoices = database.invoiceDao()
+    internal val invoiceLines = database.invoiceItemDao()
+    internal val emailEvents = database.invoiceEmailEventDao()
+    internal val quotes = database.quoteDao()
+    internal val quoteLines = database.quoteItemDao()
+    internal val settings = database.settingsDao()
+    internal val outbox = database.outboxDao()
 
     fun observeClients(): Flow<List<Client>> = clients.observeAll()
     fun observeVisits(): Flow<List<Visit>> = visits.observeAll()
@@ -111,13 +115,19 @@ class CrmRepository(
     fun observeJobs(): Flow<List<ScheduledJob>> = jobs.observeAll()
     fun observeSettings(): Flow<Settings?> = settings.observe()
     fun observePendingWrites(): Flow<Int> = outbox.observeCount()
+    fun observeFailedWrites(): Flow<List<OutboxEntry>> = outbox.observeFailed()
+    suspend fun unsyncedWriteCount(): Int = outbox.totalCount()
+    suspend fun retryFailedWrite(id: String?) {
+        if (id == null) outbox.retryAll() else outbox.retry(id)
+    }
+    suspend fun discardFailedWrite(id: String) = outbox.delete(id)
     fun observeQuotes(): Flow<List<Quote>> = quotes.observeAll()
     fun observeEnquiries(): Flow<List<Enquiry>> = enquiries.observeAll()
     fun observeInvoiceEmailEvents(): Flow<List<InvoiceEmailEvent>> = emailEvents.observeAll()
     fun observeTeam(): Flow<List<TeamMember>> = team.observeAll()
     fun observeJobTasks(jobId: String): Flow<List<JobTask>> = jobTasks.observeByJob(jobId)
 
-    private suspend fun userId(): String =
+    internal suspend fun userId(): String =
         client.auth.currentUserOrNull()?.id ?: error("Not signed in")
 
     /**
@@ -127,6 +137,30 @@ class CrmRepository(
      * edit has reached Supabase would overwrite that edit locally and it would
      * silently disappear from the screen.
      */
+
+    /**
+     * Supabase caps a single response (1,000 rows by default), so anything that
+     * can grow is read page by page. Every caller orders by a stable column and
+     * `id` is added last so pages never overlap or skip rows.
+     */
+    internal suspend inline fun <reified T : Any> fetchAll(
+        table: String,
+        crossinline configure: PostgrestRequestBuilder.() -> Unit = {},
+    ): List<T> {
+        val all = mutableListOf<T>()
+        var start = 0L
+        while (true) {
+            val page = client.from(table).select {
+                configure()
+                order("id", order = Order.ASCENDING)
+                range(start, start + PAGE_SIZE - 1)
+            }.decodeList<T>()
+            all += page
+            if (page.size < PAGE_SIZE) return all
+            start += PAGE_SIZE
+        }
+    }
+
     suspend fun refreshAll(role: String = "owner") {
         // Signed out: nothing to pull, and no workspace to pull it for.
         if (client.auth.currentUserOrNull() == null) return
@@ -146,13 +180,13 @@ class CrmRepository(
                     client.postgrest.rpc("staff_clients").decodeList<StaffClientRow>()
                 }
                 val jobRows = async {
-                    client.from("scheduled_jobs").select {
+                    fetchAll<ScheduledJob>("scheduled_jobs") {
                         filter {
                             gte("starts_at", from.toString())
                             lte("starts_at", to.toString())
                         }
                         order("starts_at", order = Order.ASCENDING)
-                    }.decodeList<ScheduledJob>()
+                }
                 }
                 staffClients.await() to jobRows.await()
             }
@@ -191,45 +225,45 @@ class CrmRepository(
 
         val snapshot = coroutineScope {
             val clients = async {
-                client.from("clients").select {
+                fetchAll<Client>("clients") {
                     order("name", order = Order.ASCENDING)
-                }.decodeList<Client>()
+                }
             }
             val visits = async {
-                client.from("visits").select {
+                fetchAll<Visit>("visits") {
                     order("visit_date", order = Order.DESCENDING)
-                }.decodeList<Visit>()
+                }
             }
             val invoices = async {
-                client.from("invoices").select {
+                fetchAll<Invoice>("invoices") {
                     order("issue_date", order = Order.DESCENDING)
                     order("created_at", order = Order.DESCENDING)
-                }.decodeList<Invoice>()
+                }
             }
             val invoiceLines = async {
-                client.from("invoice_items").select {
+                fetchAll<InvoiceItem>("invoice_items") {
                     order("item_date", order = Order.ASCENDING)
-                }.decodeList<InvoiceItem>()
+                }
             }
             val quoteRows = async {
-                client.from("quotes").select {
+                fetchAll<Quote>("quotes") {
                     order("created_at", order = Order.DESCENDING)
-                }.decodeList<Quote>()
+                }
             }
             val quoteItemRows = async {
-                client.from("quote_items").select {
+                fetchAll<QuoteItem>("quote_items") {
                     order("sort_order", order = Order.ASCENDING)
-                }.decodeList<QuoteItem>()
+                }
             }
             val enquiryRows = async {
-                client.from("enquiries").select {
+                fetchAll<Enquiry>("enquiries") {
                     order("created_at", order = Order.DESCENDING)
-                }.decodeList<Enquiry>()
+                }
             }
             val emailEventRows = async {
-                client.from("invoice_email_events").select {
+                fetchAll<InvoiceEmailEvent>("invoice_email_events") {
                     order("created_at", order = Order.DESCENDING)
-                }.decodeList<InvoiceEmailEvent>()
+                }
             }
             val teamRows = async {
                 client.from("team_members").select {
@@ -237,13 +271,13 @@ class CrmRepository(
                 }.decodeList<TeamMember>()
             }
             val jobs = async {
-                client.from("scheduled_jobs").select {
+                fetchAll<ScheduledJob>("scheduled_jobs") {
                     filter {
                         gte("starts_at", from.toString())
                         lte("starts_at", to.toString())
                     }
                     order("starts_at", order = Order.ASCENDING)
-                }.decodeList<ScheduledJob>()
+                }
             }
             val settingsRow = async {
                 client.from("settings").select {
@@ -385,9 +419,6 @@ class CrmRepository(
         onQueued()
     }
 
-    suspend fun invoiceItems(invoiceId: String): List<InvoiceItem> =
-        invoiceLines.forInvoice(invoiceId)
-
     suspend fun client(id: String): Client? = clients.findById(id)
 
     suspend fun getSettings(): Settings? = settings.get()
@@ -398,548 +429,6 @@ class CrmRepository(
      * error is surfaced rather than queued: a draft with a guessed number
      * would have to be reconciled later.
      */
-    suspend fun createInvoice(input: NewInvoiceInput): CreateInvoiceResult {
-        val body = buildJsonObject {
-            put("clientId", input.clientId)
-            put("visitIds", buildJsonArray { input.visitIds.forEach { add(it) } })
-            input.retainerDescription?.let { put("retainerDescription", it) }
-            put("retainerAmount", input.retainerAmount)
-            input.notes?.let { put("notes", it) }
-            input.dueDate?.let { put("dueDate", it) }
-            put("dueInDays", input.dueInDays)
-        }
-        val result = OfflineJson.decodeFromString<CreateInvoiceResult>(
-            invokeFunction("create-invoice", body),
-        )
-        // The invoice exists on the server now even if this refresh cannot run.
-        runCatching { refreshAll() }
-        return result
-    }
-
-    suspend fun sendInvoice(
-        invoiceId: String,
-        pdfBase64: String,
-        subject: String? = null,
-        message: String? = null,
-    ): SendInvoiceResult {
-        val body = buildJsonObject {
-            put("invoiceId", invoiceId)
-            put("pdfBase64", pdfBase64)
-            subject?.let { put("subject", it) }
-            message?.let { put("message", it) }
-        }
-        val result = OfflineJson.decodeFromString<SendInvoiceResult>(
-            invokeFunction("send-invoice-email", body),
-        )
-        runCatching { refreshAll() }
-        return result
-    }
-
-    suspend fun updateInvoiceDraft(id: String, dueDate: String?, notes: String?) {
-        val invoice = invoices.findById(id) ?: return
-        val updated = invoice.copy(
-            dueDate = dueDate?.clean(),
-            notes = notes.clean(),
-            updatedAt = null,
-        )
-        database.withTransaction {
-            invoices.upsert(updated)
-            enqueue(
-                label = "Invoice ${invoice.number} updated",
-                ops = listOf(
-                    QueuedOpDto(
-                        kind = QueuedOpDto.UPDATE,
-                        table = "invoices",
-                        payload = buildJsonObject {
-                            putNullable("due_date", updated.dueDate)
-                            putNullable("notes", updated.notes)
-                        },
-                        match = idMatch(id),
-                    ),
-                ),
-            )
-        }
-        onQueued()
-    }
-
-    suspend fun rebuildInvoice(invoiceId: String): RebuildInvoiceResult {
-        val result = OfflineJson.decodeFromString<RebuildInvoiceResult>(
-            invokeFunction(
-                "rebuild-invoice",
-                buildJsonObject { put("invoiceId", invoiceId) },
-            ),
-        )
-        runCatching { refreshAll() }
-        return result
-    }
-
-    suspend fun markInvoicePaid(id: String) {
-        val invoice = invoices.findById(id) ?: return
-        val updated = invoice.copy(
-            status = "paid",
-            paidAt = Instant.now().toString(),
-            updatedAt = null,
-        )
-        database.withTransaction {
-            invoices.upsert(updated)
-            enqueue(
-                label = "Invoice ${invoice.number} marked paid",
-                ops = listOf(
-                    QueuedOpDto(
-                        kind = QueuedOpDto.UPDATE,
-                        table = "invoices",
-                        payload = OfflineJson.encodeToJsonElement(
-                            Invoice.serializer(),
-                            updated.copy(createdAt = null, updatedAt = null),
-                        ).jsonObject,
-                        match = idMatch(id),
-                    ),
-                ),
-            )
-        }
-        onQueued()
-    }
-
-    suspend fun deleteInvoice(id: String) {
-        database.withTransaction {
-            invoices.deleteById(id)
-            invoiceLines.deleteByInvoice(id)
-            emailEvents.deleteByInvoice(id)
-            visits.unbillByInvoice(id)
-            enqueue(
-                label = "Delete invoice",
-                ops = listOf(
-                    QueuedOpDto(
-                        kind = QueuedOpDto.UPDATE,
-                        table = "visits",
-                        payload = buildJsonObject {
-                            put("billed", false)
-                            put("invoice_id", JsonNull)
-                        },
-                        match = buildJsonObject { put("invoice_id", id) },
-                    ),
-                    QueuedOpDto(
-                        kind = QueuedOpDto.UPDATE,
-                        table = "bank_transactions",
-                        payload = buildJsonObject {
-                            put("invoice_id", JsonNull)
-                            put("matched_at", JsonNull)
-                        },
-                        match = buildJsonObject { put("invoice_id", id) },
-                    ),
-                    QueuedOpDto(
-                        kind = QueuedOpDto.DELETE,
-                        table = "invoice_items",
-                        match = buildJsonObject { put("invoice_id", id) },
-                    ),
-                    QueuedOpDto(
-                        kind = QueuedOpDto.DELETE,
-                        table = "invoice_email_events",
-                        match = buildJsonObject { put("invoice_id", id) },
-                    ),
-                    QueuedOpDto(
-                        kind = QueuedOpDto.DELETE,
-                        table = "invoices",
-                        match = idMatch(id),
-                    ),
-                ),
-            )
-        }
-        onQueued()
-    }
-
-    private suspend fun invokeFunction(name: String, body: JsonObject): String {
-        val response = try {
-            client.functions.invoke(name, body)
-        } catch (failure: IOException) {
-            throw IllegalStateException(
-                "This needs a connection. Try again when you have signal.",
-                failure,
-            )
-        }
-        val text = response.bodyAsText()
-        if (!response.status.isSuccess()) {
-            val message = runCatching {
-                OfflineJson.parseToJsonElement(text).jsonObject["error"]?.jsonPrimitive?.content
-            }.getOrNull()
-            throw IllegalStateException(
-                message ?: "The server rejected the request (${response.status.value})",
-            )
-        }
-        return text
-    }
-
-    suspend fun quoteItems(quoteId: String): List<QuoteItem> = quoteLines.forQuote(quoteId)
-
-    suspend fun createQuote(draft: QuoteDraft): String {
-        val uid = userId()
-        val settingsRow = settings.get()
-        val vatRegistered = settingsRow?.vatRegistered
-        val totals = quoteTotals(
-            draft.items.map { QuoteLine(it.quantity, it.unitPrice) },
-            vatRegistered,
-            settingsRow?.vatRate,
-        )
-        val today = LocalDate.now().toString()
-        val validUntil = draft.validUntil?.takeIf { it.isNotBlank() }
-            ?: LocalDate.now().plusDays((settingsRow?.quoteValidityDays ?: 30).toLong()).toString()
-        val terms = draft.terms?.clean() ?: settingsRow?.quoteTerms
-        val number = client.postgrest.rpc(
-            "next_quote_number",
-            buildJsonObject { put("_user_id", uid) },
-        ).decodeAs<String>()
-
-        val quoteId = UUID.randomUUID().toString()
-        val quotePayload = buildJsonObject {
-            put("id", quoteId)
-            put("user_id", uid)
-            putNullable("client_id", draft.clientId)
-            putNullable("enquiry_id", draft.enquiryId)
-            put("number", number)
-            put("contact_name", draft.contactName.trim())
-            putNullable("contact_email", draft.contactEmail.clean())
-            putNullable("contact_phone", draft.contactPhone.clean())
-            putNullable("contact_address", draft.contactAddress.clean())
-            put("issue_date", today)
-            put("valid_until", validUntil)
-            put("subtotal", totals.subtotal)
-            put("vat_amount", totals.vatAmount)
-            put("total", totals.total)
-            put("status", "draft")
-            putNullable("notes", draft.notes.clean())
-            putNullable("terms", terms)
-        }
-
-        try {
-            client.from("quotes").insert(quotePayload)
-            val lines = draft.items
-                .filter { it.description.isNotBlank() || lineAmount(QuoteLine(it.quantity, it.unitPrice)) != 0.0 }
-                .mapIndexed { index, item ->
-                    buildJsonObject {
-                        put("id", UUID.randomUUID().toString())
-                        put("user_id", uid)
-                        put("quote_id", quoteId)
-                        put("description", item.description.trim().ifBlank { "Garden work" })
-                        put("quantity", item.quantity)
-                        put("unit_price", item.unitPrice)
-                        put("amount", lineAmount(QuoteLine(item.quantity, item.unitPrice)))
-                        put("sort_order", index)
-                    }
-                }
-            if (lines.isNotEmpty()) client.from("quote_items").insert(lines)
-        } catch (failure: IOException) {
-            throw IllegalStateException(
-                "Creating a quote needs a connection. Try again when you have signal.",
-                failure,
-            )
-        }
-
-        runCatching { refreshAll() }
-        return quoteId
-    }
-
-    suspend fun updateQuote(id: String, draft: QuoteDraft) {
-        val uid = userId()
-        val settingsRow = settings.get()
-        val totals = quoteTotals(
-            draft.items.map { QuoteLine(it.quantity, it.unitPrice) },
-            settingsRow?.vatRegistered,
-            settingsRow?.vatRate,
-        )
-        val validUntil = draft.validUntil?.takeIf { it.isNotBlank() }
-            ?: LocalDate.now().plusDays((settingsRow?.quoteValidityDays ?: 30).toLong()).toString()
-        val terms = draft.terms?.clean() ?: settingsRow?.quoteTerms
-
-        val quotePayload = buildJsonObject {
-            putNullable("client_id", draft.clientId)
-            put("contact_name", draft.contactName.trim())
-            putNullable("contact_email", draft.contactEmail.clean())
-            putNullable("contact_phone", draft.contactPhone.clean())
-            putNullable("contact_address", draft.contactAddress.clean())
-            put("valid_until", validUntil)
-            put("subtotal", totals.subtotal)
-            put("vat_amount", totals.vatAmount)
-            put("total", totals.total)
-            putNullable("notes", draft.notes.clean())
-            putNullable("terms", terms)
-        }
-
-        try {
-            client.from("quotes").update(quotePayload) {
-                filter { eq("id", id) }
-            }
-            client.from("quote_items").delete {
-                filter { eq("quote_id", id) }
-            }
-            val lines = draft.items
-                .filter { it.description.isNotBlank() || lineAmount(QuoteLine(it.quantity, it.unitPrice)) != 0.0 }
-                .mapIndexed { index, item ->
-                    buildJsonObject {
-                        put("id", UUID.randomUUID().toString())
-                        put("user_id", uid)
-                        put("quote_id", id)
-                        put("description", item.description.trim().ifBlank { "Garden work" })
-                        put("quantity", item.quantity)
-                        put("unit_price", item.unitPrice)
-                        put("amount", lineAmount(QuoteLine(item.quantity, item.unitPrice)))
-                        put("sort_order", index)
-                    }
-                }
-            if (lines.isNotEmpty()) client.from("quote_items").insert(lines)
-        } catch (failure: IOException) {
-            throw IllegalStateException(
-                "Saving a quote needs a connection. Try again when you have signal.",
-                failure,
-            )
-        }
-
-        runCatching { refreshAll() }
-    }
-
-    suspend fun sendQuote(
-        quoteId: String,
-        origin: String,
-        message: String? = null,
-    ): SendQuoteResult {
-        val body = buildJsonObject {
-            put("quoteId", quoteId)
-            put("origin", origin)
-            message?.clean()?.let { put("message", it) }
-        }
-        val result = OfflineJson.decodeFromString<SendQuoteResult>(
-            invokeFunction("send-quote-email", body),
-        )
-        runCatching { refreshAll() }
-        return result
-    }
-
-    suspend fun setQuoteStatus(id: String, status: String) {
-        val quote = quotes.findById(id) ?: return
-        val decided = status == "accepted" || status == "declined"
-        val decidedAt = if (decided) Instant.now().toString() else null
-        val updated = quote.copy(status = status, decidedAt = decidedAt, updatedAt = null)
-        database.withTransaction {
-            quotes.upsert(updated)
-            enqueue(
-                label = "Quote ${quote.number} $status",
-                ops = listOf(
-                    QueuedOpDto(
-                        kind = QueuedOpDto.UPDATE,
-                        table = "quotes",
-                        payload = buildJsonObject {
-                            put("status", status)
-                            putNullable("decided_at", decidedAt)
-                        },
-                        match = idMatch(id),
-                    ),
-                ),
-            )
-        }
-        onQueued()
-    }
-
-    suspend fun deleteQuote(id: String) {
-        database.withTransaction {
-            quotes.deleteById(id)
-            quoteLines.deleteByQuote(id)
-            enqueue(
-                label = "Delete quote",
-                ops = listOf(
-                    QueuedOpDto(
-                        kind = QueuedOpDto.DELETE,
-                        table = "quote_items",
-                        match = buildJsonObject { put("quote_id", id) },
-                    ),
-                    QueuedOpDto(
-                        kind = QueuedOpDto.DELETE,
-                        table = "quotes",
-                        match = idMatch(id),
-                    ),
-                ),
-            )
-        }
-        onQueued()
-    }
-
-    private fun JsonObjectBuilder.putNullable(key: String, value: String?) {
-        if (value == null) put(key, JsonNull) else put(key, value)
-    }
-
-    suspend fun updateEnquiryStatus(id: String, status: String) {
-        val existing = enquiries.findById(id) ?: return
-        database.withTransaction {
-            enquiries.upsert(existing.copy(status = status, updatedAt = null))
-            enqueue(
-                label = "Enquiry marked $status",
-                ops = listOf(
-                    QueuedOpDto(
-                        kind = QueuedOpDto.UPDATE,
-                        table = "enquiries",
-                        payload = buildJsonObject { put("status", status) },
-                        match = idMatch(id),
-                    ),
-                ),
-            )
-        }
-        onQueued()
-    }
-
-    suspend fun deleteEnquiry(id: String) {
-        database.withTransaction {
-            enquiries.deleteById(id)
-            enqueue(
-                label = "Delete enquiry",
-                ops = listOf(
-                    QueuedOpDto(
-                        kind = QueuedOpDto.DELETE,
-                        table = "enquiries",
-                        match = idMatch(id),
-                    ),
-                ),
-            )
-        }
-        onQueued()
-    }
-
-    /** Create the client and mark the enquiry converted in one queued batch. */
-    suspend fun convertEnquiryToClient(enquiry: Enquiry): String {
-        val uid = userId()
-        val clientId = UUID.randomUUID().toString()
-        val client = Client(
-            id = clientId,
-            userId = uid,
-            name = enquiry.name,
-            address = enquiry.address.clean(),
-            phone = enquiry.phone.clean(),
-            email = enquiry.email.clean(),
-            notes = enquiry.message.clean(),
-        )
-        val updatedEnquiry = enquiry.copy(
-            status = "converted",
-            clientId = clientId,
-            updatedAt = null,
-        )
-        database.withTransaction {
-            clients.upsert(client)
-            enquiries.upsert(updatedEnquiry)
-            enqueue(
-                label = "Convert enquiry",
-                ops = listOf(
-                    QueuedOpDto(
-                        kind = QueuedOpDto.INSERT,
-                        table = "clients",
-                        payload = OfflineJson.encodeToJsonElement(Client.serializer(), client).jsonObject,
-                    ),
-                    QueuedOpDto(
-                        kind = QueuedOpDto.UPDATE,
-                        table = "enquiries",
-                        payload = buildJsonObject {
-                            put("status", "converted")
-                            put("client_id", clientId)
-                        },
-                        match = idMatch(enquiry.id),
-                    ),
-                ),
-            )
-        }
-        onQueued()
-        return clientId
-    }
-
-    suspend fun saveSettings(draft: SettingsDraft) {
-        val uid = userId()
-        val existing = settings.get()
-        val row = (existing ?: Settings(userId = uid)).copy(
-            businessName = draft.businessName.trim().ifBlank { "JW Garden Services" },
-            address = draft.address.clean(),
-            phone = draft.phone.clean(),
-            email = draft.email.clean(),
-            replyToEmail = draft.replyToEmail.clean(),
-            publicSiteUrl = draft.publicSiteUrl.clean()?.trimEnd('/'),
-            vatRegistered = draft.vatRegistered,
-            vatNumber = draft.vatNumber.clean(),
-            vatRate = draft.vatRate,
-            invoicePrefix = draft.invoicePrefix.trim().ifBlank { "JW-" },
-            paymentTerms = draft.paymentTerms.clean(),
-            bankDetails = draft.bankDetails.clean(),
-            quoteValidityDays = draft.quoteValidityDays.coerceIn(1, 365),
-            quoteTerms = draft.quoteTerms.clean(),
-            emailSubjectTemplate = draft.emailSubjectTemplate.trim().ifBlank {
-                "Invoice {{invoice_number}} from {{business_name}}"
-            },
-            emailBodyTemplate = draft.emailBodyTemplate.trim().ifBlank {
-                "Hi {{client_name}},\n\nPlease find attached invoice {{invoice_number}} for recent garden work.\n\nTotal due: {{total}}{{due_clause}}.\n\nMany thanks,\n{{business_name}}"
-            },
-        )
-        database.withTransaction {
-            settings.upsert(row)
-            enqueue(
-                label = "Settings update",
-                ops = listOf(
-                    QueuedOpDto(
-                        kind = QueuedOpDto.UPSERT,
-                        table = "settings",
-                        payload = OfflineJson.encodeToJsonElement(
-                            Settings.serializer(),
-                            row,
-                        ).jsonObject,
-                        onConflict = "user_id",
-                    ),
-                ),
-            )
-        }
-        onQueued()
-    }
-
-    suspend fun inviteMember(email: String, name: String?) {
-        val uid = userId()
-        val member = TeamMember(
-            id = UUID.randomUUID().toString(),
-            ownerId = uid,
-            email = email.trim().lowercase(),
-            name = name.clean(),
-            role = "staff",
-        )
-        database.withTransaction {
-            team.upsert(member)
-            enqueue(
-                label = "Invite ${member.email}",
-                ops = listOf(
-                    QueuedOpDto(
-                        kind = QueuedOpDto.INSERT,
-                        table = "team_members",
-                        payload = OfflineJson.encodeToJsonElement(
-                            TeamMember.serializer(),
-                            member,
-                        ).jsonObject,
-                    ),
-                ),
-            )
-        }
-        onQueued()
-    }
-
-    suspend fun removeMember(id: String) {
-        database.withTransaction {
-            team.deleteById(id)
-            enqueue(
-                label = "Remove team member",
-                ops = listOf(
-                    QueuedOpDto(
-                        kind = QueuedOpDto.DELETE,
-                        table = "team_members",
-                        match = idMatch(id),
-                    ),
-                ),
-            )
-        }
-        onQueued()
-    }
-
-    private suspend fun workspaceOwnerId(): String =
-        client.postgrest.rpc("my_workspace").decodeList<WorkspaceRow>().firstOrNull()?.ownerId
-            ?: userId()
-
     suspend fun refreshJobTasks(jobId: String) {
         val rows = runCatching {
             client.from("job_tasks").select {
@@ -1014,6 +503,25 @@ class CrmRepository(
             )
         }
         onQueued()
+    }
+
+    /** Recent photos across every job for one client, for the photo history. */
+    suspend fun clientPhotos(clientId: String, limit: Long = 24): List<JobPhotoWithUrl> {
+        val jobIds = jobs.observeAll().first()
+            .filter { it.clientId == clientId }
+            .map { it.id }
+        if (jobIds.isEmpty()) return emptyList()
+        val rows = client.from("job_photos").select {
+            filter { isIn("job_id", jobIds) }
+            order("created_at", order = Order.DESCENDING)
+            limit(limit)
+        }.decodeList<JobPhoto>()
+        return rows.map { photo ->
+            val url = runCatching {
+                client.storage.from("job-photos").createSignedUrl(photo.storagePath, 3600.seconds)
+            }.getOrNull()
+            JobPhotoWithUrl(photo, url)
+        }
     }
 
     suspend fun jobPhotos(jobId: String): List<JobPhotoWithUrl> {
@@ -1318,10 +826,10 @@ class CrmRepository(
         // bounded window and a long run may extend past it. Offline, fall back
         // to whatever is already cached.
         runCatching {
-            client.from("scheduled_jobs").select {
+            fetchAll<ScheduledJob>("scheduled_jobs") {
                 filter { eq("series_id", input.seriesId) }
                 order("starts_at", order = Order.ASCENDING)
-            }.decodeList<ScheduledJob>()
+                }
         }.getOrNull()?.let { remote ->
             database.withTransaction { jobs.upsertAll(remote) }
         }
@@ -1472,8 +980,7 @@ class CrmRepository(
         }
         onQueued()
     }
-
-    private suspend fun enqueue(label: String, ops: List<QueuedOpDto>) {
+    internal suspend fun enqueue(label: String, ops: List<QueuedOpDto>) {
         outbox.insert(
             OutboxEntry(
                 id = UUID.randomUUID().toString(),
@@ -1484,7 +991,7 @@ class CrmRepository(
         )
     }
 
-    private fun ClientDraft.toClient(id: String, userId: String) = Client(
+    internal fun ClientDraft.toClient(id: String, userId: String) = Client(
         id = id,
         userId = userId,
         name = name.trim(),
@@ -1498,7 +1005,7 @@ class CrmRepository(
         paymentReminders = paymentReminders,
     )
 
-    private fun idMatch(id: String) = buildJsonObject { put("id", id) }
+    internal fun idMatch(id: String) = buildJsonObject { put("id", id) }
 
     private data class Snapshot(
         val clients: List<Client>,
@@ -1515,4 +1022,4 @@ class CrmRepository(
     )
 }
 
-private fun String?.clean(): String? = this?.trim()?.ifBlank { null }
+internal fun String?.clean(): String? = this?.trim()?.ifBlank { null }

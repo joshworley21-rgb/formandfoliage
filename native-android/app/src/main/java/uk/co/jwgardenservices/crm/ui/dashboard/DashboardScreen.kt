@@ -40,6 +40,8 @@ import uk.co.jwgardenservices.crm.domain.formatWeekday
 import uk.co.jwgardenservices.crm.domain.hoursLabel
 import uk.co.jwgardenservices.crm.domain.localDate
 import uk.co.jwgardenservices.crm.domain.money
+import uk.co.jwgardenservices.crm.domain.monthlyTotals
+import uk.co.jwgardenservices.crm.domain.topClients
 import uk.co.jwgardenservices.crm.domain.parseDate
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
@@ -77,6 +79,8 @@ fun DashboardScreen(
     val unbilledTotal = unbilled.sumOf { it.amount }
     val outstandingTotal = state.invoices.filter { it.status != "paid" }.sumOf { it.total }
 
+    val monthTotals = remember(state.invoices) { monthlyTotals(state.invoices, today) }
+    val topClientRows = remember(state.invoices) { topClients(state.invoices, today.minusMonths(12)) }
     val todayMinutes = todayJobs.sumOf { it.durationMinutes }
     val recentInvoices = state.invoices.take(6)
     val clientNames = remember(state.clients) {
@@ -193,6 +197,15 @@ fun DashboardScreen(
                     Spacer(Modifier.height(8.dp))
                 }
             }
+        }
+
+        item { RevenueCard(months = monthTotals) }
+
+        item {
+            TopClientsCard(
+                clients = topClientRows,
+                clientName = { id -> clientNames[id] ?: "Client" },
+            )
         }
 
         if (unbilledTotal > 0 || outstandingTotal > 0) {

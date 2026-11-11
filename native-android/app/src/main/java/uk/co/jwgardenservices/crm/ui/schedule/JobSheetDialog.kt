@@ -62,11 +62,14 @@ import kotlinx.coroutines.withContext
 import uk.co.jwgardenservices.crm.data.model.JobPhotoWithUrl
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
+import uk.co.jwgardenservices.crm.ui.common.ContactButtons
 
 @Composable
 fun JobSheetDialog(
     job: ScheduledJob,
     clientName: String,
+    clientPhone: String? = null,
+    clientAddress: String? = null,
     viewModel: CrmViewModel,
     onClose: () -> Unit,
 ) {
@@ -145,6 +148,14 @@ fun JobSheetDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text("Job sheet — $clientName", style = MaterialTheme.typography.headlineSmall)
+                if (!clientAddress.isNullOrBlank()) {
+                    Text(
+                        text = clientAddress,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                ContactButtons(phone = clientPhone, address = clientAddress)
                 Text(
                     text = "Tick off tasks and attach photos of completed work.",
                     style = MaterialTheme.typography.bodySmall,

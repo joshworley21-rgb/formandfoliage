@@ -18,6 +18,8 @@ data class OutboxEntry(
     val createdAt: Long,
     val attempts: Int = 0,
     val opsJson: String,
+    /** Null while the entry is waiting to sync; set when the server rejected it. */
+    val failedReason: String? = null,
 )
 
 /**

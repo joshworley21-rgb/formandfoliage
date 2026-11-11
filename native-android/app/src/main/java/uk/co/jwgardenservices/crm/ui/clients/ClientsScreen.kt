@@ -2,6 +2,17 @@ package uk.co.jwgardenservices.crm.ui.clients
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import coil3.compose.AsyncImage
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -51,10 +62,12 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import uk.co.jwgardenservices.crm.data.model.Client
+import uk.co.jwgardenservices.crm.data.model.JobPhotoWithUrl
 import uk.co.jwgardenservices.crm.data.model.ClientDraft
 import uk.co.jwgardenservices.crm.domain.filterBy
 import uk.co.jwgardenservices.crm.domain.money
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
+import uk.co.jwgardenservices.crm.ui.common.ContactButtons
 import uk.co.jwgardenservices.crm.ui.common.EmptyState
 import uk.co.jwgardenservices.crm.ui.common.ErrorState
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
@@ -67,6 +80,7 @@ fun ClientsScreen(viewModel: CrmViewModel, isStaff: Boolean) {
     var query by rememberSaveable { mutableStateOf("") }
     var creating by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Client?>(null) }
+    var photoHistory by remember { mutableStateOf<Client?>(null) }
     var saveError by remember { mutableStateOf<String?>(null) }
 
     val filtered = remember(state.clients, query) {
@@ -165,9 +179,18 @@ fun ClientsScreen(viewModel: CrmViewModel, isStaff: Boolean) {
                     } else {
                         { saveError = null; editing = client }
                     },
+                    onPhotos = { photoHistory = client },
                 )
             }
         }
+    }
+
+    photoHistory?.let { client ->
+        ClientPhotosDialog(
+            client = client,
+            viewModel = viewModel,
+            onDismiss = { photoHistory = null },
+        )
     }
 
     if (!isStaff && (creating || editing != null)) {
@@ -213,7 +236,7 @@ fun ClientsScreen(viewModel: CrmViewModel, isStaff: Boolean) {
 }
 
 @Composable
-private fun ClientCard(client: Client, isStaff: Boolean, onClick: (() -> Unit)?) {
+private fun ClientCard(client: Client, isStaff: Boolean, onClick: (() -> Unit)?, onPhotos: (() -> Unit)?) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -259,6 +282,10 @@ private fun ClientCard(client: Client, isStaff: Boolean, onClick: (() -> Unit)?)
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+            ContactButtons(phone = client.phone, address = client.address)
+            IconButton(onClick = { onPhotos?.invoke() }) {
+                Icon(Icons.Outlined.PhotoCamera, contentDescription = "Job photos for ${client.name}")
             }
             if (!isStaff) {
                 Icon(
@@ -469,4 +496,59 @@ private fun ClientEditorDialog(
             },
         )
     }
+}
+
+@Composable
+private fun ClientPhotosDialog(
+    client: Client,
+    viewModel: CrmViewModel,
+    onDismiss: () -> Unit,
+) {
+    var photos by remember { mutableStateOf<List<JobPhotoWithUrl>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(client.id) {
+        try {
+            photos = viewModel.clientPhotos(client.id)
+        } catch (failure: Exception) {
+            error = failure.message ?: "Could not load photos"
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Photos — ${client.name}") },
+        text = {
+            when {
+                error != null -> Text(error!!, color = MaterialTheme.colorScheme.error)
+                photos == null -> Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                ) { CircularProgressIndicator(Modifier.size(28.dp)) }
+                photos!!.isEmpty() -> Text("No job photos yet. Photos are added on the job sheet.")
+                else -> LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    modifier = Modifier.heightIn(max = 420.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items(photos!!.size) { index ->
+                        val item = photos!![index]
+                        AsyncImage(
+                            model = item.url,
+                            contentDescription = item.photo.caption ?: "Job photo",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .aspectRatio(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainer),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        },
+    )
 }

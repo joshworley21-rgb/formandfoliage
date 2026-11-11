@@ -6,6 +6,10 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 android {
     namespace = "uk.co.jwgardenservices.crm"
     compileSdk = 35
@@ -21,6 +25,7 @@ android {
 
         // Public client configuration, overridable from gradle.properties or a
         // local.properties file. These are not secrets: RLS protects the data.
+        val sentryDsn = providers.gradleProperty("SENTRY_DSN").orNull ?: ""
         val supabaseUrl = providers.gradleProperty("SUPABASE_URL")
             .orElse("https://ugbjwgfmsrkclrzpfwgz.supabase.co")
             .get()
@@ -28,6 +33,7 @@ android {
             .orElse("sb_publishable_QhXCtI1-8WqzxTHE_u9R3Q_eJTzacF4")
             .get()
 
+        buildConfigField("String", "SENTRY_DSN", "\"$sentryDsn\"")
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"$supabaseKey\"")
         buildConfigField("String", "AUTH_SCHEME", "\"uk.co.jwgardenservices.crm\"")
@@ -41,11 +47,8 @@ android {
 
     buildTypes {
         release {
-            // Kept off until the release ProGuard surface has been tested on a
-            // device; the app is small and a broken R8 strip is worse than a
-            // slightly larger APK.
-            isMinifyEnabled = false
-            isShrinkResources = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -111,6 +114,8 @@ dependencies {
     ksp(libs.room.compiler)
 
     implementation(libs.work.runtime.ktx)
+    implementation(libs.androidx.biometric)
+    implementation(libs.sentry.android)
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)

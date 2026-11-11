@@ -94,6 +94,35 @@ The foundation is in place:
   details. They complete jobs through `staff_complete_job`; owner-only screens
   and cached owner data are hidden and cleared on a staff device.
 
+## Reliability and extras
+
+- Sync safety: a change the server rejects is kept as "failed" (red banner, tap
+  to retry or discard) instead of being dropped. Only connection problems, 5xx,
+  429 and expired sessions are retried automatically.
+- Signing out warns when changes have not synced yet.
+- Room has a real migration (10 to 11) and exports its schema to `app/schemas`.
+  From version 11 every schema change needs a migration so the outbox survives
+  an update.
+- Large tables are fetched in 1,000-row pages, so accounts past Supabase's
+  response cap no longer lose data.
+- Cloud backup and device transfer are disabled (client data and the login
+  session stay on the phone).
+- Call / text / navigate buttons on client cards and job sheets.
+- A daily 18:00 notification built from the offline cache: tomorrow's jobs and
+  overdue invoices. Overdue invoices show "Send reminder" on the card.
+- Dashboard: six-month invoiced vs paid chart and top clients.
+- Settings: CSV export of invoices and visits for your accountant.
+- Ready to bill: one tap creates an invoice from every unbilled visit a client
+  has, from the top of the Invoices screen.
+- Client photo history: the camera icon on a client card shows photos from all
+  of their jobs (owner only).
+- App lock: optional fingerprint / phone-PIN gate. On by default, toggle in
+  Settings → Security; fails open if the phone has no screen lock. Locked
+  whenever the app leaves the foreground.
+- R8 minification and resource shrinking are on for release builds.
+- Crash reporting through Sentry, inactive until a `SENTRY_DSN` GitHub secret
+  is set; then the workflow bakes it into the APK automatically.
+
 ## Remaining polish
 
 Everything in the original rewrite plan is now native, except Monzo which is
@@ -101,7 +130,21 @@ deliberately left on the web for now. The smaller known gaps:
 
 - The month grid shows at most two job chips per day; `+N` points at the agenda.
 - Drag-to-move does not auto-scroll near the edges of a long month.
-- Release builds disable R8/minification until it has been checked on a device.
+- R8 needs a first run on a device — if the app misbehaves after an update,
+  tell me and it can be turned off again.
+- Sentry needs a project and a `SENTRY_DSN` secret in the GitHub repo.
+- The month grid shows at most two job chips per day; `+N` points at the agenda.
+
+## Code layout
+
+- `CrmRepository.kt` holds the cache, sync plumbing and client CRUD;
+  invoices/quotes/enquiries/settings/team live in `CrmRepositoryBilling.kt`
+  and jobs/visits/tasks/photos in `CrmRepositoryWork.kt` (extension functions
+  on the same class — behaviour unchanged).
+- `ScheduleScreen.kt` keeps the month view and agenda; the booking, completion,
+  move and series dialogs live in `ScheduleDialogs.kt`.
+- Holding a dragged job at the top or bottom edge of the month grid pages the
+  month backwards or forwards.
 
 ## Build requirements
 

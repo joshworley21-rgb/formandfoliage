@@ -5,6 +5,7 @@ import uk.co.jwgardenservices.crm.data.local.CrmDatabase
 import uk.co.jwgardenservices.crm.data.local.DatabaseProvider
 import uk.co.jwgardenservices.crm.data.offline.SyncEngine
 import uk.co.jwgardenservices.crm.data.offline.SyncScheduler
+import uk.co.jwgardenservices.crm.data.reminders.ReminderWorker
 
 /**
  * Single, lazily-created home for the app's repositories.
@@ -33,6 +34,7 @@ object ServiceLocator {
         initialised = true
         SyncScheduler.ensurePeriodic(appContext)
         SyncScheduler.enqueue(appContext)
+        ReminderWorker.schedule(appContext)
     }
 
     val authRepository: AuthRepository by lazy { AuthRepository() }

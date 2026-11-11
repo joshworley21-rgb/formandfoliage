@@ -24,6 +24,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import uk.co.jwgardenservices.crm.domain.invoicesCsv
+import uk.co.jwgardenservices.crm.domain.visitsCsv
+import uk.co.jwgardenservices.crm.ui.common.shareCsv
+import uk.co.jwgardenservices.crm.core.AppLock
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -111,6 +115,7 @@ fun SettingsScreen(viewModel: CrmViewModel) {
     var inviteError by remember { mutableStateOf<String?>(null) }
     var removing by remember { mutableStateOf<TeamMember?>(null) }
 
+    var appLockOn by remember { mutableStateOf(AppLock.isEnabled(context)) }
     val themeMode = LocalThemeMode.current
     val setThemeMode = LocalSetThemeMode.current
 
@@ -463,6 +468,61 @@ fun SettingsScreen(viewModel: CrmViewModel) {
                         minLines = 3,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                }
+            }
+        }
+
+        item {
+            SectionCard(title = "Security") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Require app lock", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = "Ask for your fingerprint or phone PIN when the app reopens.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = appLockOn,
+                        onCheckedChange = { checked ->
+                            AppLock.setEnabled(context, checked)
+                            appLockOn = checked
+                        },
+                    )
+                }
+            }
+        }
+
+        item {
+            SectionCard(title = "Export for your accountant") {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = "Creates a spreadsheet (CSV) you can send by email, save to Drive or open in Excel.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    val names = state.clients.associate { it.id to it.name }
+                    OutlinedButton(
+                        onClick = {
+                            shareCsv(context, "invoices", invoicesCsv(state.invoices) { names[it] ?: "Client" })
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Export invoices") }
+                    OutlinedButton(
+                        onClick = {
+                            shareCsv(context, "visits", visitsCsv(state.visits) { names[it] ?: "Client" })
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Export visits") }
                 }
             }
         }

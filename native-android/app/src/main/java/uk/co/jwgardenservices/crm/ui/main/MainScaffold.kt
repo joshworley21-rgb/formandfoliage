@@ -1,6 +1,12 @@
 package uk.co.jwgardenservices.crm.ui.main
 
 import androidx.compose.foundation.clickable
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
+import uk.co.jwgardenservices.crm.data.reminders.ReminderWorker
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,6 +22,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -65,6 +75,22 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
     val navController = rememberNavController()
     val crmViewModel: CrmViewModel = viewModel { CrmViewModel() }
     val crmState by crmViewModel.state.collectAsStateWithLifecycle()
+    val failedWrites by crmViewModel.failedWrites.collectAsStateWithLifecycle()
+    var failedOpen by remember { mutableStateOf(false) }
+    var signOutWarning by remember { mutableStateOf(false) }
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
+    val appContext = LocalContext.current
+    LaunchedEffect(Unit) {
+        if (!ReminderWorker.canNotify(appContext)) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+    val unsynced = crmState.pendingWrites + failedWrites.size
+    val requestSignOut: () -> Unit = {
+        if (unsynced > 0) signOutWarning = true else onSignOut()
+    }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     var moreOpen by remember { mutableStateOf(false) }
@@ -112,7 +138,7 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                             Icon(Icons.Outlined.Settings, contentDescription = "Settings")
                         }
                     }
-                    IconButton(onClick = onSignOut) {
+                    IconButton(onClick = requestSignOut) {
                         Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = "Sign out")
                     }
                 },
@@ -124,8 +150,8 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
         bottomBar = {
             val moreSelected = moreItems.any { it.route == currentRoute }
             NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp,
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                tonalElevation = 0.dp,
             ) {
                 barItems.forEach { destination ->
                     NavigationBarItem(
@@ -151,6 +177,12 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                 .fillMaxSize()
                 .padding(padding),
         ) {
+            if (failedWrites.isNotEmpty()) {
+                FailedWritesBanner(
+                    count = failedWrites.size,
+                    onClick = { failedOpen = true },
+                )
+            }
             if (crmState.pendingWrites > 0) {
                 PendingWritesBanner(
                     count = crmState.pendingWrites,
@@ -249,7 +281,7 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                         .clip(RoundedCornerShape(14.dp))
                         .clickable {
                             moreOpen = false
-                            onSignOut()
+                            requestSignOut()
                         }
                         .padding(horizontal = 10.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -264,6 +296,87 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                 }
             }
         }
+    }
+
+    if (signOutWarning) {
+        AlertDialog(
+            onDismissRequest = { signOutWarning = false },
+            title = { Text("Sign out with unsynced changes?") },
+            text = {
+                Text(
+                    "$unsynced ${if (unsynced == 1) "change has" else "changes have"} not reached the server yet. " +
+                        "Signing out now will lose them. Go back and wait for them to sync, or sign out anyway.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        signOutWarning = false
+                        onSignOut()
+                    },
+                ) { Text("Sign out anyway", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { signOutWarning = false }) { Text("Stay signed in") }
+            },
+        )
+    }
+
+    if (failedOpen) {
+        if (failedWrites.isEmpty()) failedOpen = false
+        AlertDialog(
+            onDismissRequest = { failedOpen = false },
+            title = { Text("Changes that could not sync") },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    failedWrites.forEach { entry ->
+                        Column {
+                            Text(entry.label, style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                entry.failedReason ?: "Could not be saved",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            Row {
+                                TextButton(onClick = { crmViewModel.retryFailedWrite(entry.id) }) {
+                                    Text("Retry")
+                                }
+                                TextButton(onClick = { crmViewModel.discardFailedWrite(entry.id) }) {
+                                    Text("Discard", color = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { crmViewModel.retryFailedWrite() }) { Text("Retry all") }
+            },
+            dismissButton = {
+                TextButton(onClick = { failedOpen = false }) { Text("Close") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun FailedWritesBanner(count: Int, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+    ) {
+        Text(
+            text = "$count ${if (count == 1) "change" else "changes"} could not sync — tap to review",
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+        )
     }
 }
 

@@ -3,6 +3,8 @@ package uk.co.jwgardenservices.crm.data.local
 import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.room.RoomDatabase
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.Enquiry
@@ -33,8 +35,8 @@ import uk.co.jwgardenservices.crm.data.model.Visit
         TeamMember::class,
         OutboxEntry::class,
     ],
-    version = 10,
-    exportSchema = false,
+    version = 11,
+    exportSchema = true,
 )
 abstract class CrmDatabase : RoomDatabase() {
     abstract fun clientDao(): ClientDao
@@ -52,6 +54,12 @@ abstract class CrmDatabase : RoomDatabase() {
     abstract fun outboxDao(): OutboxDao
 }
 
+private val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE outbox ADD COLUMN failedReason TEXT")
+    }
+}
+
 object DatabaseProvider {
     @Volatile
     private var instance: CrmDatabase? = null
@@ -63,6 +71,10 @@ object DatabaseProvider {
                 CrmDatabase::class.java,
                 "jw-crm.db",
             )
+                .addMigrations(MIGRATION_10_11)
+                // Only reached for versions older than 10, which never held
+                // unsynced work from a shipped build. From 11 onward every
+                // schema change needs a real migration so the outbox survives.
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
                 .also { instance = it }
