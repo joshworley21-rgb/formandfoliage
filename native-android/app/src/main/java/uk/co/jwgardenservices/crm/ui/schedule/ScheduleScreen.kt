@@ -119,13 +119,14 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
     var completing by remember { mutableStateOf<ScheduledJob?>(null) }
     var seriesJob by remember { mutableStateOf<ScheduledJob?>(null) }
     var movingJob by remember { mutableStateOf<ScheduledJob?>(null) }
+    var pendingSeriesMove by remember { mutableStateOf<Pair<ScheduledJob, LocalDate>?>(null) }
     var sheetJob by remember { mutableStateOf<ScheduledJob?>(null) }
     var saveError by remember { mutableStateOf<String?>(null) }
     var monthCursor by remember { mutableStateOf(YearMonth.now()) }
     val listState = rememberLazyListState()
     val appContext = LocalContext.current
 
-    fun moveJobTo(job: ScheduledJob, day: LocalDate) {
+    fun moveSingle(job: ScheduledJob, day: LocalDate) {
         val starts = parseTimestamp(job.startsAt) ?: return
         scope.launch {
             try {
@@ -154,12 +155,22 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
         }
     }
 
+    fun moveJobTo(job: ScheduledJob, day: LocalDate) {
+        // Part of a repeating run? Ask before carrying the rest of the run with it.
+        if (job.seriesId != null) {
+            pendingSeriesMove = job to day
+            return
+        }
+        moveSingle(job, day)
+    }
+
     fun closeDialogs() {
         booking = false
         editing = null
         completing = null
         seriesJob = null
         movingJob = null
+        pendingSeriesMove = null
         sheetJob = null
         saveError = null
     }
@@ -471,6 +482,52 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
                     } catch (error: Exception) {
                         saveError = error.message ?: "Could not move the job"
                     }
+                }
+            },
+        )
+    }
+
+    pendingSeriesMove?.let { (job, day) ->
+        val currentDay = parseTimestamp(job.startsAt)?.localDate()?.formatDayMonth() ?: "this visit"
+        AlertDialog(
+            onDismissRequest = { pendingSeriesMove = null },
+            title = { Text("Move the whole run?") },
+            text = {
+                Text(
+                    "This visit on $currentDay is part of a repeating run. Move just this visit, " +
+                        "or this visit and every future one in the run? Done and past visits are left alone.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingSeriesMove = null
+                        scope.launch {
+                            try {
+                                viewModel.moveSeriesFrom(job.id, day)
+                                Toast.makeText(
+                                    appContext,
+                                    "Run moved to ${day.formatDayMonth()}",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            } catch (error: Exception) {
+                                Toast.makeText(
+                                    appContext,
+                                    error.message ?: "Could not move the run",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        }
+                    },
+                ) { Text("This and future") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        pendingSeriesMove = null
+                        moveSingle(job, day)
+                    }) { Text("Just this one") }
+                    TextButton(onClick = { pendingSeriesMove = null }) { Text("Cancel") }
                 }
             },
         )

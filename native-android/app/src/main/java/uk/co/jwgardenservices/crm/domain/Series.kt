@@ -61,6 +61,31 @@ fun atTime(day: LocalDate, time: String, zone: ZoneId = ZoneId.systemDefault()):
 }
 
 /**
+ * Dragging one visit of a run onto another day moves it and every scheduled
+ * visit on or after it by the same number of days, each keeping its own time
+ * of day. Done and past visits are left alone: they are the record of what
+ * happened, not the plan. Returns an empty list when there is nothing to move
+ * (unknown visit, or the drag did not actually change the day).
+ */
+fun seriesShift(
+    jobs: List<SeriesJob>,
+    draggedId: String,
+    dayDelta: Long,
+    zone: ZoneId = ZoneId.systemDefault(),
+): List<RetimedVisit> {
+    if (dayDelta == 0L) return emptyList()
+    val dragged = jobs.firstOrNull { it.id == draggedId } ?: return emptyList()
+    val fromDate = localDateOf(dragged.startsAt, zone)
+    return jobs
+        .filter { it.status == "scheduled" && !localDateOf(it.startsAt, zone).isBefore(fromDate) }
+        .map { visit ->
+            val time = visit.startsAt.atZone(zone).toLocalTime()
+            val day = localDateOf(visit.startsAt, zone).plusDays(dayDelta)
+            RetimedVisit(visit.id, day.atTime(time).atZone(zone).toInstant())
+        }
+}
+
+/**
  * The visits a series-wide edit is allowed to move: still to come, and not
  * already ticked off. Everything behind now is history.
  */

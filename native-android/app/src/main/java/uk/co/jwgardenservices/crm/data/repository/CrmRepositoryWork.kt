@@ -23,6 +23,7 @@ import kotlin.time.Duration.Companion.seconds
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -76,11 +77,13 @@ import uk.co.jwgardenservices.crm.domain.QuoteLine
 import uk.co.jwgardenservices.crm.domain.SeriesJob
 import uk.co.jwgardenservices.crm.domain.editableVisits
 import uk.co.jwgardenservices.crm.domain.lineAmount
+import uk.co.jwgardenservices.crm.domain.localDateOf
 import uk.co.jwgardenservices.crm.domain.parseDate
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
 import uk.co.jwgardenservices.crm.domain.quoteTotals
 import uk.co.jwgardenservices.crm.domain.retimedVisits
 import uk.co.jwgardenservices.crm.domain.round2
+import uk.co.jwgardenservices.crm.domain.seriesShift
 import uk.co.jwgardenservices.crm.domain.step
 import uk.co.jwgardenservices.crm.data.offline.OfflineJson
 import uk.co.jwgardenservices.crm.data.remote.SupabaseProvider
@@ -545,6 +548,62 @@ suspend fun CrmRepository.editSeries(input: SeriesEditInput) {
                 match = idMatch(input.seriesId),
             )
             enqueue(label = "Series update", ops = ops)
+        }
+        onQueued()
+    }
+
+    /**
+     * Drag one visit of a repeating run onto another day and carry the rest of
+     * the run with it: this visit and every scheduled one after it shift by
+     * the same number of days, each keeping its own time of day. Done and past
+     * visits are left alone.
+     */
+    suspend fun CrmRepository.moveSeriesFrom(jobId: String, newDay: LocalDate) {
+        val dragged = jobs.findById(jobId) ?: error("This job no longer exists")
+        val seriesId = dragged.seriesId ?: error("This job is not part of a repeating run")
+        val draggedStart = parseTimestamp(dragged.startsAt) ?: error("This job has no start time")
+        val dayDelta = ChronoUnit.DAYS.between(localDateOf(draggedStart), newDay)
+        if (dayDelta == 0L) return
+
+        // Prefer the server's copy of the whole run: the local cache is a
+        // bounded window and a long run may extend past it. Offline, fall back
+        // to whatever is already cached.
+        runCatching {
+            fetchAll<ScheduledJob>("scheduled_jobs") {
+                filter { eq("series_id", seriesId) }
+                order("starts_at", order = Order.ASCENDING)
+            }
+        }.getOrNull()?.let { remote -> database.withTransaction { jobs.upsertAll(remote) } }
+
+        val rows = jobs.bySeries(seriesId)
+        val domainJobs = rows.mapNotNull { row ->
+            parseTimestamp(row.startsAt)?.let { starts -> SeriesJob(row.id, starts, row.status) }
+        }
+        val moves = seriesShift(domainJobs, jobId, dayDelta)
+        if (moves.isEmpty()) error("Nothing left to move in this run")
+
+        val byId = rows.associateBy { it.id }
+        val updated = moves.mapNotNull { visit ->
+            byId[visit.id]?.copy(startsAt = visit.startsAt.toString(), updatedAt = null)
+        }
+        if (updated.isEmpty()) error("Nothing left to move in this run")
+
+        database.withTransaction {
+            jobs.upsertAll(updated)
+            enqueue(
+                label = "Repeating run moved",
+                ops = updated.map { row ->
+                    QueuedOpDto(
+                        kind = QueuedOpDto.UPDATE,
+                        table = "scheduled_jobs",
+                        payload = OfflineJson.encodeToJsonElement(
+                            ScheduledJob.serializer(),
+                            row.copy(createdAt = null, updatedAt = null),
+                        ).jsonObject,
+                        match = idMatch(row.id),
+                    )
+                },
+            )
         }
         onQueued()
     }

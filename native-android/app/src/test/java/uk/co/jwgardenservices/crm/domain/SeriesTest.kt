@@ -4,6 +4,7 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class SeriesTest {
@@ -177,5 +178,36 @@ class SeriesTest {
         val instant = atTime(java.time.LocalDate.of(2026, 3, 17), "07:45", zone)
         assertEquals("2026-03-17", dayOf(instant))
         assertEquals("07:45", timeOf(instant))
+    }
+
+    @Test
+    fun `seriesShift moves the dragged visit and every later scheduled one by the same days`() {
+        val jobs = listOf(
+            job("past", "2026-03-03T09:00:00", "done"),
+            job("dragged", "2026-03-10T09:00:00"),
+            job("next", "2026-03-17T09:00:00"),
+            job("last", "2026-03-24T11:30:00"),
+        )
+        val moved = seriesShift(jobs, "dragged", dayDelta = 2, zone = zone)
+        assertEquals(listOf("dragged", "next", "last"), moved.map { it.id })
+        assertEquals("2026-03-12", dayOf(moved[0].startsAt))
+        assertEquals("2026-03-19", dayOf(moved[1].startsAt))
+        assertEquals("2026-03-26", dayOf(moved[2].startsAt))
+        // Times of day are untouched.
+        assertEquals("09:00", timeOf(moved[0].startsAt))
+        assertEquals("11:30", timeOf(moved[2].startsAt))
+        // The completed visit in the past is not part of the shift.
+        assertFalse(moved.any { it.id == "past" })
+    }
+
+    @Test
+    fun `seriesShift can move a run backwards and ignores a zero shift`() {
+        val jobs = listOf(job("a", "2026-03-10T09:00:00"), job("b", "2026-03-17T09:00:00"))
+        assertEquals(
+            listOf("2026-03-08", "2026-03-15"),
+            seriesShift(jobs, "a", dayDelta = -2, zone = zone).map { dayOf(it.startsAt) },
+        )
+        assertEquals(emptyList<RetimedVisit>(), seriesShift(jobs, "a", dayDelta = 0, zone = zone))
+        assertEquals(emptyList<RetimedVisit>(), seriesShift(jobs, "missing", dayDelta = 3, zone = zone))
     }
 }

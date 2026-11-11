@@ -210,6 +210,13 @@ class CrmViewModel(
         }
     }
 
+    suspend fun moveSeriesFrom(jobId: String, newDay: LocalDate) {
+        withSaving {
+            runCatching { syncEngine.syncNow() }
+            repository.moveSeriesFrom(jobId, newDay)
+        }
+    }
+
     suspend fun completeJobWithVisit(jobId: String, visitId: String) {
         withSaving { repository.completeJobWithVisit(jobId, visitId) }
     }
