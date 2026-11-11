@@ -25,7 +25,11 @@ android {
 
         // Public client configuration, overridable from gradle.properties or a
         // local.properties file. These are not secrets: RLS protects the data.
-        val sentryDsn = providers.gradleProperty("SENTRY_DSN").orNull ?: ""
+        // Public client key (same status as the Supabase keys above): it ships
+        // inside the APK regardless. A SENTRY_DSN property or GitHub secret can
+        // override this to rotate projects without a code change.
+        val sentryDsn = providers.gradleProperty("SENTRY_DSN").orNull?.takeIf { it.isNotBlank() }
+            ?: "https://2db5e3b800989fa06211896264228199@o4512413257826304.ingest.de.sentry.io/4512413289087056"
         val supabaseUrl = providers.gradleProperty("SUPABASE_URL")
             .orElse("https://ugbjwgfmsrkclrzpfwgz.supabase.co")
             .get()
