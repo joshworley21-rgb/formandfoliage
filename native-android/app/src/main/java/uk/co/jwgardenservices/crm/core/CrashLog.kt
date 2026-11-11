@@ -30,6 +30,18 @@ object CrashLog {
         }
     }
 
+    /** Records an error that was caught instead of crashing (startup failures). */
+    fun record(context: Context, error: Throwable, where: String) {
+        runCatching {
+            File(context.applicationContext.filesDir, FILE).writeText(
+                buildString {
+                    appendLine("Caught during $where on ${Instant.now()}")
+                    append(Log.getStackTraceString(error))
+                },
+            )
+        }
+    }
+
     fun read(context: Context): String? =
         File(context.applicationContext.filesDir, FILE)
             .takeIf { it.length() > 0 }

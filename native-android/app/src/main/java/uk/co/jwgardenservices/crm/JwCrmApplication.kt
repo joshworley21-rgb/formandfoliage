@@ -10,12 +10,18 @@ class JwCrmApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         CrashLog.install(this)
-        ServiceLocator.init(this)
-        AppLock.init(this)
+        // Startup problems are recorded and survived, not fatal: a crash loop
+        // here would also stop the crash report from ever reaching the screen.
+        runCatching { ServiceLocator.init(this) }
+            .onFailure { CrashLog.record(this, it, "ServiceLocator.init") }
+        runCatching { AppLock.init(this) }
+            .onFailure { CrashLog.record(this, it, "AppLock.init") }
         // No-op unless a SENTRY_DSN was baked in at build time (set it as a
         // GitHub secret named SENTRY_DSN). Without a DSN Sentry stays silent.
-        if (BuildConfig.SENTRY_DSN.isNotBlank()) {
-            SentryAndroid.init(this) { options -> options.dsn = BuildConfig.SENTRY_DSN }
-        }
+        runCatching {
+            if (BuildConfig.SENTRY_DSN.isNotBlank()) {
+                SentryAndroid.init(this) { options -> options.dsn = BuildConfig.SENTRY_DSN }
+            }
+        }.onFailure { CrashLog.record(this, it, "Sentry.init") }
     }
 }
