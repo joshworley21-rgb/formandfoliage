@@ -45,6 +45,7 @@ class ReminderWorker(
         val summary = buildReminderSummary(
             jobs = database.scheduledJobDao().observeAll().first(),
             invoices = database.invoiceDao().observeAll().first(),
+            visits = database.visitDao().observeAll().first(),
         )
         if (summary.isEmpty) return Result.success()
 
@@ -63,6 +64,13 @@ class ReminderWorker(
                 val total = summary.overdue.sumOf { it.total }
                 add(
                     "${summary.overdue.size} overdue ${if (summary.overdue.size == 1) "invoice" else "invoices"} (${money(total)})",
+                )
+            }
+            if (summary.unbilledVisits.isNotEmpty()) {
+                val total = summary.unbilledVisits.sumOf { it.amount }
+                val size = summary.unbilledVisits.size
+                add(
+                    "$size ${if (size == 1) "visit" else "visits"} to bill (${money(total)})",
                 )
             }
         }

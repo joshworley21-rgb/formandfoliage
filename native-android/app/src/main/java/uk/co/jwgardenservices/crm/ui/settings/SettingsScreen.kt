@@ -25,7 +25,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import uk.co.jwgardenservices.crm.core.TaxReservePrefs
 import androidx.compose.material3.Switch
+import java.time.LocalDate
 import uk.co.jwgardenservices.crm.domain.invoicesCsv
+import uk.co.jwgardenservices.crm.domain.taxYearCsv
+import uk.co.jwgardenservices.crm.domain.ukTaxYearContaining
+import uk.co.jwgardenservices.crm.domain.ukTaxYearLabel
 import uk.co.jwgardenservices.crm.domain.visitsCsv
 import uk.co.jwgardenservices.crm.ui.common.shareCsv
 import uk.co.jwgardenservices.crm.core.AppLock
@@ -555,6 +559,23 @@ fun SettingsScreen(viewModel: CrmViewModel) {
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Export visits") }
+                    OutlinedButton(
+                        onClick = {
+                            shareCsv(
+                                context,
+                                "tax-year",
+                                taxYearCsv(state.invoices, { names[it] ?: "Client" }, taxRate),
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Export tax year (${ukTaxYearLabel(ukTaxYearContaining(LocalDate.now()))})")
+                    }
+                    Text(
+                        text = "The tax year CSV adds what to set aside for tax at your rate in Settings → Tax, alongside what remains after it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }

@@ -1,5 +1,6 @@
 package uk.co.jwgardenservices.crm.domain
 
+import java.time.LocalDate
 import uk.co.jwgardenservices.crm.data.model.Invoice
 import uk.co.jwgardenservices.crm.data.model.Visit
 
@@ -55,3 +56,50 @@ fun visitsCsv(visits: List<Visit>, clientName: (String) -> String): String = csv
         )
     },
 )
+
+/**
+ * One row per invoice in the current UK tax year, with what to set aside
+ * for tax at [ratePercent] and what remains after it. The summary row at the
+ * end is what the accountant wants at a glance.
+ */
+fun taxYearCsv(
+    invoices: List<Invoice>,
+    clientName: (String) -> String,
+    ratePercent: Double,
+    today: LocalDate = LocalDate.now(),
+): String {
+    val year = ukTaxYearContaining(today)
+    val inYear = invoices
+        .filter { it.status != "draft" }
+        .filter { parseDate(it.issueDate)?.let { d -> !d.isBefore(year.start) && !d.isAfter(year.end) } == true }
+        .sortedBy { it.issueDate }
+    val body = inYear.map {
+        val pot = taxReserveAmount(it.subtotal, ratePercent)
+        listOf(
+            it.number,
+            clientName(it.clientId),
+            it.issueDate,
+            it.status,
+            number(it.subtotal),
+            number(pot),
+            number(it.subtotal - pot),
+        )
+    }
+    val net = round2(inYear.sumOf { it.subtotal })
+    val pot = round2(inYear.sumOf { taxReserveAmount(it.subtotal, ratePercent) })
+    val rows = body + listOf(
+        listOf(
+            "Tax year ${ukTaxYearLabel(year)}",
+            "${inYear.size} invoices",
+            "",
+            "",
+            number(net),
+            number(pot),
+            number(net - pot),
+        ),
+    )
+    return csv(
+        listOf("Number", "Client", "Issue date", "Status", "Net", "Tax pot", "Drawn"),
+        rows,
+    )
+}

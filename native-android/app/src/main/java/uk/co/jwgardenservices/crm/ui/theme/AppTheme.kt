@@ -17,7 +17,9 @@ fun AppTheme(content: @Composable () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = ThemeMode.SYSTEM)
 
     val dark = when (mode) {
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+        // "Follow system" now leans light: the bright, fresh look is the app's
+        // identity, and dark mode is opt-in via the appearance setting.
+        ThemeMode.SYSTEM -> false
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }

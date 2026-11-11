@@ -196,7 +196,7 @@ fun MonthCalendar(
                                         else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
                                     },
                                 )
-                                dayJobs.take(2).forEach { job ->
+                                dayJobs.take(3).forEach { job ->
                                     JobChip(
                                         job = job,
                                         canDrag = canDrag && job.status == "scheduled",
