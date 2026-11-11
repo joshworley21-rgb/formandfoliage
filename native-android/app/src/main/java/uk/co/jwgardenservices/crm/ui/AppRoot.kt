@@ -163,11 +163,16 @@ private fun LockScreen() {
                 }
             },
         )
-        val info = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Unlock JW CRM")
-            .setAllowedAuthenticators(authenticators)
-            .build()
-        prompt.authenticate(info)
+        runCatching {
+            val info = BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Unlock JW CRM")
+                .setAllowedAuthenticators(authenticators)
+                .build()
+            prompt.authenticate(info)
+        }.onFailure {
+            // Never trap the owner behind a prompt the device cannot show.
+            AppLock.unlock()
+        }
     }
 
     LaunchedEffect(Unit) { unlock() }
