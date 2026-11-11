@@ -17,6 +17,7 @@ desugar = "2.1.5"
 ksp = "2.1.20-1.0.32"
 room = "2.7.1"
 work = "2.10.1"
+sentry = "8.63.0"
 junit = "4.13.2"
 androidxJunit = "1.2.1"
 espresso = "3.6.1"
@@ -62,6 +63,7 @@ room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
 room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
 work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
 androidx-biometric = { module = "androidx.biometric:biometric", version = "1.1.0" }
+sentry-android = { module = "io.sentry:sentry-android", version.ref = "sentry" }
 
 junit = { module = "junit:junit", version.ref = "junit" }
 androidx-junit = { module = "androidx.test.ext:junit", version.ref = "androidxJunit" }

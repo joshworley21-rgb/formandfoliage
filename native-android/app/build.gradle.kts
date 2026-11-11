@@ -32,6 +32,13 @@ android {
             .orElse("sb_publishable_QhXCtI1-8WqzxTHE_u9R3Q_eJTzacF4")
             .get()
 
+        // Public client key, overridable via a SENTRY_DSN property or GitHub secret.
+        buildConfigField(
+            "String",
+            "SENTRY_DSN",
+            "\"" + (providers.gradleProperty("SENTRY_DSN").orNull?.takeIf { it.isNotBlank() }
+                ?: "https://2db5e3b800989fa06211896264228199@o4512413257826304.ingest.de.sentry.io/4512413289087056") + "\"",
+        )
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"$supabaseKey\"")
         buildConfigField("String", "AUTH_SCHEME", "\"uk.co.jwgardenservices.crm\"")
@@ -115,6 +122,12 @@ dependencies {
 
     implementation(libs.work.runtime.ktx)
     implementation(libs.androidx.biometric)
+    // The NDK module is excluded: 7.14.0's startup (native signal handling and
+    // auto-init providers) killed the app before our code ran on the owner's
+    // phone. Java crash reporting needs none of it.
+    implementation(libs.sentry.android) {
+        exclude(group = "io.sentry", module = "sentry-android-ndk")
+    }
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)

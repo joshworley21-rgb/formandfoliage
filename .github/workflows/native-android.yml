@@ -32,6 +32,7 @@ jobs:
       KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
       COMMITTED_KEYSTORE: android/keystore/release.jks
 
     steps:
@@ -84,6 +85,7 @@ jobs:
             -Dorg.gradle.jvmargs="-Xmx2048m -XX:MaxMetaspaceSize=512m" \
             -PappVersionCode=${{ github.run_number }} \
             -PappVersionName=2.0.${{ github.run_number }} \
+            -PSENTRY_DSN="$SENTRY_DSN" \
             -Pandroid.injected.signing.store.file="$RUNNER_TEMP/release.jks" \
             -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
             -Pandroid.injected.signing.key.alias="${KEY_ALIAS:-jwgardenservices}" \
