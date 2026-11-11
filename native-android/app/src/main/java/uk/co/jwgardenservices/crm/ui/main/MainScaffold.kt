@@ -100,7 +100,12 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
     } else {
         AppDestination.primaryItems
     }
-    val moreItems = if (isStaff) emptyList() else AppDestination.moreItems
+    // Settings lives in the top bar gear, so it is not repeated here.
+    val moreItems = if (isStaff) {
+        emptyList()
+    } else {
+        AppDestination.moreItems.filter { it != AppDestination.Settings }
+    }
 
     fun navigate(destination: AppDestination) {
         navController.navigate(destination.route) {

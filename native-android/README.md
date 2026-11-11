@@ -123,7 +123,9 @@ The foundation is in place:
 - Call / text / navigate buttons on client cards and job sheets.
 - A daily 18:00 notification built from the offline cache: tomorrow's jobs and
   overdue invoices. Overdue invoices show "Send reminder" on the card.
-- Dashboard: six-month invoiced vs paid chart and top clients.
+- Dashboard: today's jobs with client names, the week's job count, the
+  six-month invoiced vs paid chart and top clients. Settings is in the
+  top-bar gear only.
 - Settings: CSV export of invoices and visits for your accountant.
 - Ready to bill: one tap creates an invoice from every unbilled visit a client
   has, from the top of the Invoices screen.

@@ -73,10 +73,11 @@ fun DashboardScreen(
 
     val scheduled = state.jobs.filter { it.status == "scheduled" }
     val todayJobs = scheduled.onDay(today)
-    val upcomingAll = scheduled
-        .filter { parseTimestamp(it.startsAt)?.localDate()?.isAfter(today) == true }
-        .sortedBy { it.startsAt }
-    val upcoming = upcomingAll.take(8)
+    val weekAhead = today.plusDays(7)
+    val weekJobs = scheduled.filter {
+        parseTimestamp(it.startsAt)?.localDate()?.let { d -> !d.isBefore(today) && !d.isAfter(weekAhead) } == true
+    }
+    val upcoming = weekJobs.take(8)
 
     val monthVisits = state.visits.filter { visit ->
         parseDate(visit.visitDate)?.let { it.year == today.year && it.month == today.month } == true
@@ -86,7 +87,6 @@ fun DashboardScreen(
 
     val unbilled = state.visits.filter { !it.billed && !it.missed }
     val unbilledTotal = unbilled.sumOf { it.amount }
-    val outstandingTotal = state.invoices.filter { it.status != "paid" }.sumOf { it.total }
 
     val monthTotals = remember(state.invoices) { monthlyTotals(state.invoices, today) }
     val topClientRows = remember(state.invoices) { topClients(state.invoices, today.minusMonths(12)) }
@@ -121,8 +121,7 @@ fun DashboardScreen(
             item { ErrorState(state.error!!, viewModel::refresh) }
         }
 
-        item { TodayBand(today = today, jobs = todayJobs, todayMinutes = todayMinutes) }
-
+        item { TodayBand(today = today, jobs = todayJobs, todayMinutes = todayMinutes, clientNames = clientNames) }
         item {
             TaxPotBand(
                 ratePercent = taxRate,
@@ -163,7 +162,7 @@ fun DashboardScreen(
                     )
                     StatCard(
                         label = "Jobs next 7 days",
-                        value = (upcomingAll.size + todayJobs.size).toString(),
+                        value = weekJobs.size.toString(),
                         icon = Icons.Outlined.CalendarMonth,
                         modifier = Modifier.weight(1f),
                     )
@@ -173,23 +172,22 @@ fun DashboardScreen(
 
         item {
             SectionCard(
-                title = "Next 7 days",
+                title = "Today's jobs",
                 actionLabel = "Calendar",
                 onAction = onOpenSchedule,
             ) {
-                if (upcoming.isEmpty()) {
+                if (todayJobs.isEmpty()) {
                     Text(
-                        text = "Nothing booked yet.",
+                        text = "Nothing booked today.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(20.dp),
                     )
                 } else {
-                    upcoming.forEachIndexed { index, job ->
+                    todayJobs.forEachIndexed { index, job ->
                         if (index > 0) HorizontalDivider(Modifier.padding(horizontal = 20.dp))
                         UpcomingRow(job = job, clientName = clientNames[job.clientId] ?: "Client")
                     }
-                    Spacer(Modifier.height(8.dp))
                 }
             }
         }
@@ -225,21 +223,16 @@ fun DashboardScreen(
                 clientName = { id -> clientNames[id] ?: "Client" },
             )
         }
-
-        if (unbilledTotal > 0 || outstandingTotal > 0) {
-            item {
-                Text(
-                    text = "${money(unbilledTotal)} ready to bill · ${money(outstandingTotal)} awaiting payment.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
     }
 }
 
 @Composable
-private fun TodayBand(today: LocalDate, jobs: List<ScheduledJob>, todayMinutes: Int) {
+private fun TodayBand(
+    today: LocalDate,
+    jobs: List<ScheduledJob>,
+    todayMinutes: Int,
+    clientNames: Map<String, String>,
+) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
@@ -293,7 +286,7 @@ private fun TodayBand(today: LocalDate, jobs: List<ScheduledJob>, todayMinutes: 
                             modifier = Modifier.width(56.dp),
                         )
                         Text(
-                            text = "Job booked",
+                            text = clientNames[job.clientId] ?: "Client",
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.weight(1f),
                             color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f),
