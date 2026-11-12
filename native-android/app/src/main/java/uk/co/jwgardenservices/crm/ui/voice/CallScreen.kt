@@ -84,9 +84,9 @@ fun CallScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val executor = remember { VoiceExecutor(viewModel) }
-    val turns = remember {
-        mutableStateListOf(Turn(mine = false, text = "This is your assistant. What do you need?"))
-    }
+    // No hardcoded greeting: in live mode the server's own voice and
+    // transcript opens the call; the offline fallback adds its own line.
+    val turns = remember { mutableStateListOf<Turn>() }
     var phase by remember { mutableStateOf(Phase.Listening) }
     var muted by remember { mutableStateOf(false) }
     var engineError by remember { mutableStateOf<String?>(null) }
@@ -105,6 +105,16 @@ fun CallScreen(
         Manifest.permission.RECORD_AUDIO,
     ) == PackageManager.PERMISSION_GRANTED
 
+    /** Server transcripts can stream; a continuation grows the last bubble. */
+    fun appendStreamed(mine: Boolean, text: String) {
+        val last = turns.lastOrNull()
+        if (last != null && last.mine == mine && text.startsWith(last.text)) {
+            turns[turns.size - 1] = last.copy(text = text)
+        } else {
+            turns.add(Turn(mine = mine, text = text))
+        }
+    }
+
     fun keepListening() {
         if (localActive && !muted && phase != Phase.Ended) localSession?.listen()
     }
@@ -121,6 +131,7 @@ fun CallScreen(
         serverSession?.stop()
         serverSession = null
         localActive = true
+        turns.add(Turn(mine = false, "This is your offline assistant. What do you need?"))
         if (micGranted()) localSession?.start()
         phase = Phase.Listening
     }
@@ -128,11 +139,11 @@ fun CallScreen(
     val serverListener = object : PipecatVoiceSession.Listener {
         override fun onUserTranscript(text: String) {
             silenceStreak = 0
-            turns.add(Turn(mine = true, text))
+            appendStreamed(mine = true, text)
         }
 
         override fun onAssistantText(text: String) {
-            turns.add(Turn(mine = false, text))
+            appendStreamed(mine = false, text)
         }
 
         override fun onConnected() {

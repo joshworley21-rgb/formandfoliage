@@ -157,18 +157,19 @@ deliberately left on the web for now. The smaller known gaps:
   transcript and a big end button. Clients lives behind More; staff keep
   their shorter bar.
 - **Server brain first**: it connects to the VPS voice pipeline
-  (ws://45.13.232.205:8765/ws — Pipecat WebSocket transport with
-  ProtobufFrameSerializer running Faster-Whisper STT, an Ollama Qwen 2.5 3B
-  brain and Kokoro 24 kHz TTS) and streams 16 kHz mono mic audio up while
-  playing the 24 kHz reply. That is a full two-way conversation, not
-  turn-taking. Barge-in flushes playback on the server's InterruptionFrame
-  plus a light energy check on the mic.
+  (ws://45.13.232.205:8765/ws — Faster-Whisper STT, an Ollama Qwen 2.5 3B
+  brain and Kokoro TTS) using the simplified protocol: raw 16 kHz mono PCM
+  frames up from AudioRecord, raw 24 kHz mono PCM down to AudioTrack, and
+  JSON control frames — `{"type": "transcript", "role": ...}` (streamed,
+  coalesced into one bubble) and `{"type": "interrupt"}` to flush the
+  speaker. Barge-in also has a light energy check on the mic.
 - **Offline fallback**: the connection is refused, times out (8 s) or drops
   mid-call, the call switches to Android's on-device speech recognition plus
   the deterministic command parser, so the lane never leaves you without
-  help. A status pill shows which brain is answering — green "Live VPS Voice
-  (bm_fable)" or "Offline Fallback" with the real connection failure and a
-  manual **Reconnect Live** button.
+  help (the greeting line only exists in offline mode; live mode opens with
+  the server's own voice). A status pill shows which brain is answering —
+  green "Live VPS Voice (bm_fable)" or "Offline Fallback" with the real
+  connection failure and a manual **Reconnect Live** button.
 - Driving commands: what's on today, next job, mark louisa done,
   log three hours for louisa, what's outstanding, which invoices are overdue,
   mark invoice twelve paid, price three hours at thirty, help, hang up.

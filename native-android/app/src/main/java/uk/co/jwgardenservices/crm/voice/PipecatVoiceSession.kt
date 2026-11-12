@@ -16,6 +16,9 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import uk.co.jwgardenservices.crm.data.offline.OfflineJson
 import java.util.concurrent.TimeUnit
 
 /**
@@ -77,19 +80,15 @@ class PipecatVoiceSession(
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                 gotPipelineTraffic = true
-                when (val frame = PipecatFrames.decode(bytes.toByteArray())) {
-                    is PipecatFrames.Frame.Audio -> {
-                        botSpeaking = true
-                        listener.onConnected()
-                        play(frame.audio)
-                    }
-                    is PipecatFrames.Frame.Transcription ->
-                        if (frame.text.isNotBlank()) listener.onUserTranscript(frame.text)
-                    is PipecatFrames.Frame.Text ->
-                        if (frame.text.isNotBlank()) listener.onAssistantText(frame.text)
-                    is PipecatFrames.Frame.Interruption -> flushPlayback()
-                    else -> {}
-                }
+                // Raw 24 kHz 16-bit LE mono reply audio, straight to the speaker.
+                botSpeaking = true
+                listener.onConnected()
+                play(bytes.toByteArray())
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                gotPipelineTraffic = true
+                handleControl(text)
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -157,7 +156,7 @@ class PipecatVoiceSession(
                 val read = record.read(buffer, 0, buffer.size)
                 if (read > 0) {
                     val chunk = if (read == buffer.size) buffer else buffer.copyOf(read)
-                    webSocket?.send(PipecatFrames.encodeAudio(chunk).toByteString())
+                    webSocket?.send(chunk.toByteString())
                     maybeLocalBargeIn(chunk)
                 } else if (read < 0) {
                     break
@@ -248,6 +247,32 @@ class PipecatVoiceSession(
         if (bargeStreak >= BARGE_IN_STREAK) {
             bargeStreak = 0
             flushPlayback()
+        }
+    }
+
+    /**
+     * Control frames arrive as small JSON objects:
+     *
+     *     {"type": "transcript", "role": "user"|"assistant", "text": "..."}
+     *     {"type": "interrupt"}
+     *
+     * Transcripts may stream — the UI coalesces continuations into the same
+     * bubble. An interrupt flushes the speaker mid-sentence.
+     */
+    private fun handleControl(text: String) {
+        runCatching {
+            val obj = OfflineJson.parseToJsonElement(text).jsonObject
+            when (obj["type"]?.jsonPrimitive?.content) {
+                "transcript" -> {
+                    val role = obj["role"]?.jsonPrimitive?.content
+                    val body = obj["text"]?.jsonPrimitive?.content ?: ""
+                    if (body.isBlank()) return
+                    if (role == "assistant") listener.onAssistantText(body) else listener.onUserTranscript(body)
+                }
+                "interrupt" -> flushPlayback()
+            }
+        }.onFailure {
+            // Unknown control frames are ignored; the audio stream keeps going.
         }
     }
 
