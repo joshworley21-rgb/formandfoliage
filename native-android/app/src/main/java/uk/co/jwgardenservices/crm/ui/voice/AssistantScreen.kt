@@ -3,6 +3,7 @@ package uk.co.jwgardenservices.crm.ui.voice
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -46,7 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import uk.co.jwgardenservices.crm.voice.AssistantSpeaker
+import uk.co.jwgardenservices.crm.voice.KokoroTts
 import uk.co.jwgardenservices.crm.voice.QwenIntentEngine
 import uk.co.jwgardenservices.crm.voice.SherpaSpeechService
 
@@ -62,7 +63,7 @@ fun AssistantScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val service = remember { SherpaSpeechService(context) }
-    val speaker = remember { AssistantSpeaker(context) }
+    val speaker = remember { KokoroTts(context) }
     val intents = remember { QwenIntentEngine(context) }
     val state by service.state.collectAsStateWithLifecycle()
 
@@ -87,19 +88,22 @@ fun AssistantScreen() {
         }
     }
 
-    // sherpa-onnx has finished a sentence: say so out loud, then ask the
-    // local Qwen model what it means. The mic is paused while the
-    // confirmation plays, otherwise the phone would transcribe itself and
-    // answer forever. The intent JSON is logged (tag QwenIntent) ready for
-    // the next phase to route.
+    // sherpa-onnx has finished a sentence: ask the local Qwen model what it
+    // means, then read the confirmation out loud with Kokoro. The mic is
+    // paused for the whole utterance, otherwise the phone would transcribe
+    // itself and answer forever. Qwen logs the intent JSON under QwenIntent.
     LaunchedEffect(service, speaker, intents) {
         service.transcripts.collect { text ->
+            val intent = intents.classify(text)
+            val reply = confirmationFor(intent)
             val paused = service.isListening()
             if (paused) service.pauseForSpeech()
-            speaker.speak("Command received") {
+            try {
+                runCatching { speaker.speak(reply) }
+                    .onFailure { Log.w("AssistantScreen", "Kokoro playback failed", it) }
+            } finally {
                 if (paused) service.resumeAfterSpeech()
             }
-            intents.classify(text)
         }
     }
 
@@ -264,6 +268,22 @@ fun AssistantScreen() {
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * The spoken confirmation for a classified command. Kept short: it is read
+ * back over the top of whatever the microphone just heard.
+ */
+private fun confirmationFor(intent: QwenIntentEngine.Intent): String {
+    val topic = intent.clientOrTopic.trim()
+    return when (intent.intent) {
+        QwenIntentEngine.Kind.LogHours ->
+            if (topic.isEmpty()) "Hours logged." else "Logged your hours for $topic."
+        QwenIntentEngine.Kind.CheckSchedule -> "Checking your schedule."
+        QwenIntentEngine.Kind.Quote ->
+            if (topic.isEmpty()) "Preparing your quote." else "Preparing a quote for $topic."
+        QwenIntentEngine.Kind.Other -> "Command received."
     }
 }
 

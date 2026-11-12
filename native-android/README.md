@@ -163,9 +163,10 @@ deliberately left on the web for now. The smaller known gaps:
   `app/src/main/assets/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/`
   — about 44 MB in the APK. Nothing is downloaded at runtime, so the tab
   works with no connection at all.
-- **Not in git**: both the AAR and the model are ~92 MB of binaries. The
-  Gradle task `:app:downloadSherpa` fetches any that are missing (SHA-256
-  checked) and `preBuild` depends on it, so a fresh clone needs a connection
+- **Not in git**: the AAR, the Zipformer model and the Kokoro voice model
+  are ~250 MB of binaries. `:app:downloadSherpa` fetches the ASR pieces and
+  `:app:downloadKokoro` downloads and extracts the Kokoro archive (SHA-256
+  checked); `preBuild` depends on both, so a fresh clone needs a connection
   for its first build only.
 - **Local intent model**: each finished sentence is also classified on-device
   by a quantised Qwen 1.5B GGUF model through the llama.android AAR
@@ -197,20 +198,30 @@ deliberately left on the web for now. The smaller known gaps:
 - The transcript is display-only for now: no command parsing, replies or
   server brain is wired to it. `VoiceExecutor` and `parseVoiceCommand` are
   still in the tree for when that comes back.
-- **Spoken confirmation**: each finished sentence makes the phone's own
-  text-to-speech engine say "Command received", so a silent phone is easy to
-  spot. Microphone frames are discarded while it speaks to stop the
-  assistant transcribing itself. Android 11+ needs the `TTS_SERVICE` query in
-  the manifest for that engine lookup.
+- **Spoken confirmation with Kokoro**: once Qwen has classified the line,
+  `KokoroTts` synthesises a short reply on-device with Kokoro-82M and plays
+  it at 24 kHz. The voice is `bm_fable` (speaker 25 of
+  `kokoro-multi-lang-v1_0`). It reads "Logged your hours for <client>",
+  "Checking your schedule", "Preparing a quote for <client>" or "Command
+  received", depending on the intent. Microphone frames are discarded for
+  the whole utterance so the phone does not transcribe itself; the Android
+  native TTS engine and its manifest query are gone.
+- `:app:downloadKokoro` extracts only the English pieces from
+  `kokoro-int8-multi-lang-v1_0.tar.bz2`: `model.int8.onnx` (109 MB),
+  `voices.bin` (27 MB), `tokens.txt`, `lexicon-us-en.txt` and the 19 MB
+  `espeak-ng-data` phonemizer. The Chinese dictionaries are skipped. (`int8`
+  rather than the 330 MB fp32 `model.onnx` keeps the APK installable; the
+  configuration in `KokoroTts.kt` is the only place to change it.)
 - LiveKit, Vosk, the VPS call path and the JitPack repository they needed
-  have all been removed. The only third-party voice binary is the vendored
-  official AAR `app/libs/sherpa-onnx-1.13.8.aar`; there is no Maven
-  coordinate for it, so it is committed rather than resolved.
-- Known limits: the model is English, punctuation and casing are not
-  restored, and the screen needs to stay on while listening. A foreground
-  mic service is the next step.
-- sherpa-onnx and the streaming Zipformer model are Apache 2.0 (k2-fsa /
-  Alpha Cephei).
+  have all been removed. Speech runs on the vendored official
+  `sherpa-onnx-1.13.8.aar` and llama.cpp comes from the llama.android AAR;
+  neither model weights nor the sherpa AAR are committed.
+- Known limits: the recognizer is English-only, punctuation and casing are
+  not restored, the first utterance waits for the Kokoro model to load
+  (a few seconds), and the screen needs to stay on while listening. A
+  foreground mic service is the next step.
+- sherpa-onnx, the streaming Zipformer model, Kokoro-82M and its voices are
+  Apache 2.0 (k2-fsa / Alpha Cephei / hexgrad).
 
 ## Code layout
 

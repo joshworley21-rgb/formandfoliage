@@ -65,13 +65,13 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
     private var closed = false
 
     /**
-     * Classify [transcript] and log the resulting JSON line to Logcat under
-     * the [TAG] tag. Always returns a schema-valid JSON string.
+     * Classify [transcript], log the resulting JSON line to Logcat under the
+     * [TAG] tag, and return the structured intent.
      */
-    suspend fun classify(transcript: String): String {
+    suspend fun classify(transcript: String): Intent {
         val text = transcript.trim()
         if (text.isEmpty() || closed) {
-            return Intent(Kind.Other, "", false).toJson().also { Log.i(TAG, it) }
+            return Intent(Kind.Other, "", false).also { Log.i(TAG, it.toJson()) }
         }
 
         val reply = runCatching {
@@ -89,9 +89,8 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
         }.getOrNull()
 
         val intent = reply?.let { coerce(it, text) } ?: fallback(text)
-        val json = intent.toJson()
-        Log.i(TAG, json)
-        return json
+        Log.i(TAG, intent.toJson())
+        return intent
     }
 
     private suspend fun loadModel(): LlamaModel {

@@ -245,6 +245,100 @@ val downloadSherpa by tasks.registering {
     }
 }
 
+// --- Kokoro-82M offline TTS -------------------------------------------------
+// One 127 MB archive holds the int8 multilingual model (English + Chinese),
+// the 53 built-in voices — af_heart is speaker 3 — tokens, the English
+// lexicon and espeak-ng-data. Only the English pieces are extracted; the
+// Chinese dictionaries and FSTs are skipped.
+val kokoroDir = "src/main/assets/kokoro-multi-lang-v1_0"
+val kokoroArchiveSha = "72c347230107ef8a31098ec4d468a605244beef5f1ed00db97efa13518800653"
+val kokoroFiles: Map<String, String> = mapOf(
+    "model.int8.onnx" to "75635ea3b85a32d00094dcdd61a258aba87c160f7c264c304a7b3ae9d734195e",
+    "voices.bin" to "1c5a5b983d3d50d8586d437a51f3faa2da7919ce76a013c081e65671a3447c29",
+    "tokens.txt" to "6ebb6bb288f20f3ae8d004d3c2ca27697da27c037d75e81a60e2a6a663f95425",
+    "lexicon-us-en.txt" to "7daaab53a181be9885b853a8582bf1838186317e5dadacbcef9c426d6fa0da14",
+)
+
+fun download(url: String, target: File, expectedSha: String) {
+    logger.lifecycle("download: $url")
+    target.parentFile?.mkdirs()
+    val partial = File(target.parentFile, "${target.name}.part")
+    val connection = URI(url).toURL().openConnection() as HttpURLConnection
+    connection.instanceFollowRedirects = true
+    connection.connectTimeout = 30_000
+    connection.readTimeout = 300_000
+    connection.setRequestProperty("User-Agent", "jw-crm-gradle")
+    try {
+        val code = connection.responseCode
+        if (code !in 200..299) error("HTTP $code while downloading $url")
+        connection.inputStream.use { input ->
+            partial.outputStream().use { output -> input.copyTo(output) }
+        }
+    } finally {
+        connection.disconnect()
+    }
+    check(sha256(partial) == expectedSha) { "Checksum mismatch for $url" }
+    if (!partial.renameTo(target)) {
+        partial.copyTo(target, overwrite = true)
+        partial.delete()
+    }
+}
+
+val downloadKokoroArchive by tasks.registering {
+    group = "build"
+    description = "Downloads the Kokoro-82M int8 model archive."
+    val archive = layout.buildDirectory.file("downloads/kokoro-int8-multi-lang-v1_0.tar.bz2")
+    outputs.file(archive)
+    doLast {
+        val target = archive.get().asFile
+        if (target.isFile && sha256(target) == kokoroArchiveSha) return@doLast
+        download(
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2",
+            target,
+            kokoroArchiveSha,
+        )
+    }
+}
+
+val downloadKokoro by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Extracts the Kokoro model, af_heart voice bank, lexicon and espeak-ng-data into assets."
+    dependsOn(downloadKokoroArchive)
+    val root = layout.projectDirectory.dir(kokoroDir).asFile
+    val archive = layout.buildDirectory.file("downloads/kokoro-int8-multi-lang-v1_0.tar.bz2")
+    inputs.file(archive)
+    outputs.dir(root)
+
+    fun complete(): Boolean =
+        File(root, "espeak-ng-data/phontab").isFile &&
+            kokoroFiles.all { (name, sha) -> File(root, name).let { it.isFile && sha256(it) == sha } }
+
+    onlyIf { !complete() }
+    doFirst { root.mkdirs() }
+    commandLine(
+        "tar",
+        "-xjf",
+        archive.get().asFile.absolutePath,
+        "-C",
+        root.absolutePath,
+        "--strip-components=1",
+        "kokoro-int8-multi-lang-v1_0/model.int8.onnx",
+        "kokoro-int8-multi-lang-v1_0/voices.bin",
+        "kokoro-int8-multi-lang-v1_0/tokens.txt",
+        "kokoro-int8-multi-lang-v1_0/lexicon-us-en.txt",
+        "kokoro-int8-multi-lang-v1_0/espeak-ng-data",
+    )
+    doLast {
+        kokoroFiles.forEach { (name, sha) ->
+            check(sha256(File(root, name)) == sha) { "Checksum mismatch after extracting $name" }
+        }
+        check(File(root, "espeak-ng-data/phontab").isFile) { "espeak-ng-data missing from the archive" }
+    }
+}
+
 afterEvaluate {
-    tasks.named("preBuild") { dependsOn(downloadSherpa) }
+    tasks.named("preBuild") {
+        dependsOn(downloadSherpa)
+        dependsOn(downloadKokoro)
+    }
 }
