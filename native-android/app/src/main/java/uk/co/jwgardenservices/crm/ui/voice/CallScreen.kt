@@ -247,10 +247,14 @@ fun CallScreen(
         }
     }
 
-    // If the server accepts the socket but the pipeline never answers, do not
-    // leave the user staring at a dead call. Re-runs on every reconnect.
+    // Only the *initial connection* is on a clock: the socket must open and
+    // the pipeline must announce itself within 20 s, or the call falls back.
+    // Once the pill goes green (socket open, pipeline announced) the timer is
+    // cancelled — the server's brain can take as long as it needs before its
+    // first spoken reply arrives, and mid-call gaps never trigger fallback.
     LaunchedEffect(connectNonce) {
-        delay(8_000)
+        if (localActive) return@LaunchedEffect
+        delay(20_000)
         if (!localActive && serverActive != true) {
             fallbackToOffline(lastFailure ?: "No response from the server assistant")
         }
