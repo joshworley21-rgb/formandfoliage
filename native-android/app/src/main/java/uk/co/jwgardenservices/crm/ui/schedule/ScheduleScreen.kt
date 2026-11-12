@@ -96,9 +96,13 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
     val scope = rememberCoroutineScope()
     val today = LocalDate.now()
     var selectedDay by remember { mutableStateOf(LocalDate.now()) }
+    // Tapping a day in the calendar focuses the agenda on just that day;
+    // null shows the running round again.
+    var focusedDay by remember { mutableStateOf<LocalDate?>(null) }
 
-    val days = remember(selectedDay) {
-        (0..20).map { selectedDay.plusDays(it.toLong()) }
+    val days = remember(selectedDay, focusedDay) {
+        focusedDay?.let { listOf(it) }
+            ?: (0..20).map { selectedDay.plusDays(it.toLong()) }
     }
     val jobsByDay: Map<LocalDate, List<ScheduledJob>> = remember(state.jobs) {
         state.jobs
@@ -219,6 +223,7 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
                 onMonthChange = { monthCursor = it },
                 onSelectDay = { day ->
                     selectedDay = day
+                    focusedDay = day
                     monthCursor = YearMonth.from(day)
                     scope.launch { listState.animateScrollToItem(2) }
                 },
@@ -226,6 +231,15 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
                 clientName = { id -> clientNames[id] ?: "Client" },
                 onMove = { job, day -> moveJobTo(job, day) },
             )
+        }
+
+        val focused = focusedDay
+        if (focused != null) {
+            item {
+                TextButton(onClick = { focusedDay = null }) {
+                    Text("Showing ${focused.formatDayMonth()} — show the whole round")
+                }
+            }
         }
 
         if (state.error != null) {
