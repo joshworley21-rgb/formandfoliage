@@ -123,6 +123,31 @@ fun InvoicesScreen(viewModel: CrmViewModel) {
         }
     }
 
+    fun shareViaWhatsApp(invoice: Invoice) {
+        scope.launch {
+            busyId = invoice.id
+            try {
+                val client = state.clients.find { it.id == invoice.clientId }
+                    ?: error("This invoice's client is missing")
+                val items = viewModel.invoiceItems(invoice.id)
+                val file = withContext(Dispatchers.IO) {
+                    InvoicePdf.build(context, invoice, client, items, state.settings)
+                }
+                val due = invoice.dueDate?.let { parseDate(it)?.formatDayMonth() }
+                val message = buildString {
+                    append("Hi ${client.name}, here's invoice ${invoice.number} for ${money(invoice.total)}")
+                    if (due != null) append(" — due $due")
+                    append(". Thanks!")
+                }
+                PdfSharing.shareViaWhatsApp(context, file, message)
+            } catch (error: Exception) {
+                toast(error.message ?: "Could not build the PDF")
+            } finally {
+                busyId = null
+            }
+        }
+    }
+
     fun send(invoice: Invoice) {
         scope.launch {
             busyId = invoice.id
@@ -256,6 +281,7 @@ fun InvoicesScreen(viewModel: CrmViewModel) {
                     historyId = if (historyId == invoice.id) null else invoice.id
                 },
                 onPdf = { sharePdf(invoice) },
+                onWhatsApp = { shareViaWhatsApp(invoice) },
                 onSend = { send(invoice) },
                 onPaid = { markPaid(invoice) },
                 onEdit = {
@@ -396,6 +422,7 @@ private fun InvoiceCard(
     showHistory: Boolean,
     onHistory: () -> Unit,
     onPdf: () -> Unit,
+    onWhatsApp: () -> Unit,
     onSend: () -> Unit,
     onPaid: () -> Unit,
     onEdit: () -> Unit,
@@ -518,6 +545,13 @@ private fun InvoiceCard(
                     modifier = Modifier.weight(1f),
                 ) {
                     Text("Share PDF")
+                }
+                OutlinedButton(
+                    onClick = onWhatsApp,
+                    enabled = !busy,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("WhatsApp")
                 }
                 Button(
                     onClick = onSend,
