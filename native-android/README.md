@@ -155,17 +155,26 @@ deliberately left on the web for now. The smaller known gaps:
 - A mic button on the dashboard header (and "Call assistant" in the More
   sheet) opens a phone-call style screen: continuous listening, a transcript
   and a big end button.
-- Works fully offline using Android's on-device speech recognition and
-  text-to-speech, so there is no cost and no model download.
+- **Server brain first**: it connects to the VPS voice pipeline
+  (ws://45.13.232.205:8765/ws — Pipecat WebSocket transport with
+  ProtobufFrameSerializer running Faster-Whisper STT, an Ollama Qwen 2.5 3B
+  brain and Kokoro 24 kHz TTS) and streams 16 kHz mono mic audio up while
+  playing the 24 kHz reply. That is a full two-way conversation, not
+  turn-taking. Barge-in flushes playback on the server's InterruptionFrame
+  plus a light energy check on the mic.
+- **Offline fallback**: the connection is refused, times out (8 s) or drops
+  mid-call, the call switches to Android's on-device speech recognition plus
+  the deterministic command parser, so the lane never leaves you without
+  help. A line in the transcript says which brain is active.
 - Driving commands: what's on today, next job, mark louisa done,
   log three hours for louisa, what's outstanding, which invoices are overdue,
   mark invoice twelve paid, price three hours at thirty, help, hang up.
 - Money actions (marking invoices paid, logging visits) always read back a
   confirmation and wait for "yes", so a misheard word never changes money.
-- Known limits for v1: it listens in turns (short reply, then listens again)
-  rather than true simultaneous conversation, and it needs the screen on —
-  a foreground mic service is the next step. A streaming cloud model can be
-  added later for fully natural conversation when there is signal.
+- Known limits: the server link is plain ws:// (unencrypted — move to
+  wss:// behind a domain before it carries anything sensitive), and the
+  screen needs to stay on; a foreground mic service is the next step.
+  On-device Silero VAD could replace the energy check for noisier vans.
 
 ## Code layout
 

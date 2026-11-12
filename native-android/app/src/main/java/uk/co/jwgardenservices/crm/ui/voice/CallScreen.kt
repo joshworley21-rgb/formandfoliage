@@ -1,7 +1,9 @@
 package uk.co.jwgardenservices.crm.ui.voice
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -32,6 +34,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -44,13 +47,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import android.speech.SpeechRecognizer
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.speech.SpeechRecognizer
+import uk.co.jwgardenservices.crm.core.AppConfig
 import uk.co.jwgardenservices.crm.domain.parseVoiceCommand
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
 import uk.co.jwgardenservices.crm.voice.VoiceExecutor
 import uk.co.jwgardenservices.crm.voice.VoiceSession
+import uk.co.jwgardenservices.crm.voice.PipecatVoiceSession
 
 /** One line in the call transcript. */
 private data class Turn(val mine: Boolean, val text: String)
@@ -58,9 +64,13 @@ private data class Turn(val mine: Boolean, val text: String)
 private enum class Phase { Listening, Thinking, Speaking, Ended }
 
 /**
- * The "phone call to your own office" screen: continuous listening, a short
- * spoken reply, and a transcript. Actions run against the offline cache;
- * money actions always read back a confirmation first.
+ * The "phone call to your own office" screen.
+ *
+ * It tries the VPS voice pipeline first (server-side Whisper STT, Ollama
+ * brain, Kokoro TTS — full two-way conversation while there is signal) and
+ * falls back to the offline assistant (on-device recognition + a
+ * deterministic command parser) whenever the server cannot be used, so a
+ * weak-signal lane never leaves the user without help.
  */
 @Composable
 fun CallScreen(
@@ -76,12 +86,21 @@ fun CallScreen(
     var phase by remember { mutableStateOf(Phase.Listening) }
     var muted by remember { mutableStateOf(false) }
     var engineError by remember { mutableStateOf<String?>(null) }
-    var session by remember { mutableStateOf<VoiceSession?>(null) }
+    // null = still deciding which brain is answering.
+    var serverActive by remember { mutableStateOf<Boolean?>(null) }
+    var localActive by remember { mutableStateOf(false) }
+    var serverSession by remember { mutableStateOf<PipecatVoiceSession?>(null) }
+    var localSession by remember { mutableStateOf<VoiceSession?>(null) }
     var silenceStreak by remember { mutableStateOf(0) }
     val listState = rememberLazyListState()
 
+    fun micGranted(): Boolean = ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.RECORD_AUDIO,
+    ) == PackageManager.PERMISSION_GRANTED
+
     fun keepListening() {
-        if (!muted && phase != Phase.Ended) session?.listen()
+        if (localActive && !muted && phase != Phase.Ended) localSession?.listen()
     }
 
     fun finishCall() {
@@ -89,76 +108,119 @@ fun CallScreen(
         onEnd()
     }
 
-    val micPermission = rememberLauncherForActivityResult(
+    fun fallbackToOffline(reason: String) {
+        if (localActive) return
+        serverActive = false
+        serverSession?.stop()
+        serverSession = null
+        localActive = true
+        turns.add(Turn(mine = false, "$reason — offline assistant on."))
+        if (micGranted()) localSession?.start()
+        phase = Phase.Listening
+    }
+
+    val micRequest = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        if (granted) {
-            engineError = null
-            session?.start()
-        } else {
-            engineError = "Microphone permission is needed for the call."
+        when {
+            !granted -> engineError = "Microphone permission is needed for the call."
+            serverActive == true -> serverSession?.start()
+            else -> fallbackToOffline("No internet connection")
+        }
+    }
+
+    val serverListener = object : PipecatVoiceSession.Listener {
+        override fun onUserTranscript(text: String) {
+            silenceStreak = 0
+            turns.add(Turn(mine = true, text))
+        }
+
+        override fun onAssistantText(text: String) {
+            turns.add(Turn(mine = false, text))
+        }
+
+        override fun onConnected() {
+            serverActive = true
+            phase = Phase.Listening
+        }
+
+        override fun onUnavailable(message: String) {
+            fallbackToOffline(message)
+        }
+    }
+
+    val localListener = object : VoiceSession.Listener {
+        override fun onHeard(text: String) {
+            silenceStreak = 0
+            turns.add(Turn(mine = true, text))
+            phase = Phase.Thinking
+            scope.launch {
+                try {
+                    val reply = executor.handle(parseVoiceCommand(text))
+                    turns.add(Turn(mine = false, reply.text))
+                    if (reply.endSession) {
+                        finishCall()
+                    } else {
+                        phase = Phase.Speaking
+                        localSession?.speak(reply.text)
+                    }
+                } catch (error: Exception) {
+                    val message = error.message ?: "Something went wrong"
+                    turns.add(Turn(mine = false, message))
+                    phase = Phase.Speaking
+                    localSession?.speak(message)
+                }
+            }
+        }
+
+        override fun onSilence() {
+            silenceStreak += 1
+            if (silenceStreak == 3) {
+                turns.add(Turn(mine = false, "Still here. Say 'help' for what I can do."))
+                phase = Phase.Speaking
+                localSession?.speak("Still here. Say help for what I can do.")
+            } else {
+                keepListening()
+            }
+        }
+
+        override fun onSpoken() {
+            phase = Phase.Listening
+            keepListening()
+        }
+
+        override fun onEngineError(message: String) {
+            engineError = message
         }
     }
 
     DisposableEffect(Unit) {
-        val voiceSession = VoiceSession(context, object : VoiceSession.Listener {
-            override fun onHeard(text: String) {
-                silenceStreak = 0
-                turns.add(Turn(mine = true, text))
-                phase = Phase.Thinking
-                scope.launch {
-                    try {
-                        val reply = executor.handle(parseVoiceCommand(text))
-                        turns.add(Turn(mine = false, reply.text))
-                        if (reply.endSession) {
-                            finishCall()
-                        } else {
-                            phase = Phase.Speaking
-                            session?.speak(reply.text)
-                        }
-                    } catch (error: Exception) {
-                        val message = error.message ?: "Something went wrong"
-                        turns.add(Turn(mine = false, message))
-                        phase = Phase.Speaking
-                        session?.speak(message)
-                    }
-                }
-            }
+        val remote = PipecatVoiceSession(context, serverListener, AppConfig.ASSISTANT_WS_URL)
+        val local = VoiceSession(context, localListener)
+        serverSession = remote
+        localSession = local
 
-            override fun onSilence() {
-                silenceStreak += 1
-                // Sit quietly through the first few, then gently prompt.
-                if (silenceStreak == 3) {
-                    turns.add(Turn(mine = false, "Still here. Say 'help' for what I can do."))
-                    phase = Phase.Speaking
-                    session?.speak("Still here. Say help for what I can do.")
-                } else {
-                    keepListening()
-                }
-            }
-
-            override fun onSpoken() {
-                phase = Phase.Listening
-                keepListening()
-            }
-
-            override fun onEngineError(message: String) {
-                engineError = message
-            }
-        })
-        session = voiceSession
-        val granted = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.RECORD_AUDIO,
-        ) == PackageManager.PERMISSION_GRANTED
-        if (granted && SpeechRecognizer.isRecognitionAvailable(context)) {
-            voiceSession.start()
-        } else if (!granted) {
-            micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        if (!micGranted()) {
+            micRequest.launch(Manifest.permission.RECORD_AUDIO)
+        } else if (hasNetwork(context)) {
+            remote.start()
         } else {
-            engineError = "This phone has no speech recognition."
+            fallbackToOffline("No internet connection")
         }
-        onDispose { voiceSession.stop() }
+
+        onDispose {
+            remote.stop()
+            local.stop()
+        }
+    }
+
+    // If the server accepts the socket but the pipeline never answers, do not
+    // leave the user staring at a dead call.
+    LaunchedEffect(Unit) {
+        delay(8_000)
+        if (!localActive && serverActive != true) {
+            fallbackToOffline("No response from the server assistant")
+        }
     }
 
     Box(
@@ -179,14 +241,24 @@ fun CallScreen(
             )
             Spacer(Modifier.height(4.dp))
             Text(
+                text = when (serverActive) {
+                    true -> "Server assistant (Whisper · Ollama · Kokoro)"
+                    false -> "Offline assistant"
+                    null -> "Connecting to the server assistant…"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
                 text = when (phase) {
                     Phase.Listening -> "Listening…"
                     Phase.Thinking -> "Thinking…"
                     Phase.Speaking -> "Speaking…"
                     Phase.Ended -> "Call ended"
                 },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             Spacer(Modifier.height(16.dp))
@@ -240,8 +312,12 @@ fun CallScreen(
             ) {
                 IconButton(
                     onClick = {
-                        muted = !muted
-                        if (!muted) keepListening()
+                        val nowMuted = !muted
+                        muted = nowMuted
+                        when {
+                            serverActive == true -> serverSession?.setMuted(nowMuted)
+                            localActive -> if (!nowMuted) keepListening()
+                        }
                     },
                     modifier = Modifier
                         .size(56.dp)
@@ -283,4 +359,11 @@ fun CallScreen(
             }
         }
     }
+}
+
+private fun hasNetwork(context: Context): Boolean {
+    val manager = context.getSystemService(ConnectivityManager::class.java) ?: return false
+    val network = manager.activeNetwork ?: return false
+    val caps = manager.getNetworkCapabilities(network) ?: return false
+    return caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
 }
