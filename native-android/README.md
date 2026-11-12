@@ -156,7 +156,9 @@ deliberately left on the web for now. The smaller known gaps:
   and Invoices) opens a phone-call style screen: continuous listening, a
   transcript and a big end button. Clients lives behind More; staff keep
   their shorter bar.
-- **Server brain first**: it connects to the VPS voice pipeline
+- **Server brain first**: OkHttp callbacks are marshalled to the main
+  thread before they touch the app (a background-thread SpeechRecognizer
+  start is a crash). It connects to the VPS voice pipeline
   (ws://45.13.232.205:8765/ws — Faster-Whisper STT, an Ollama Qwen 2.5 3B
   brain and Kokoro TTS) using the simplified protocol: raw 16 kHz mono PCM
   frames up from AudioRecord — after a first `{"type": "start"}` handshake

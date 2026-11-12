@@ -9,6 +9,8 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.os.Handler
+import android.os.Looper
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -57,6 +59,17 @@ class PipecatVoiceSession(
         .pingInterval(15, TimeUnit.SECONDS)
         .build()
 
+    /**
+     * OkHttp delivers callbacks on its own threads, but everything they
+     * touch — SpeechRecognizer, the UI's snapshot state — belongs on the
+     * main thread, so every listener call is marshalled there.
+     */
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private fun post(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) block() else mainHandler.post(block)
+    }
+
     private var webSocket: WebSocket? = null
     private var audioRecord: AudioRecord? = null
     private var audioTrack: AudioTrack? = null
@@ -75,7 +88,7 @@ class PipecatVoiceSession(
         val request = Request.Builder().url(url).build()
         webSocket = okHttp.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                listener.onConnected()
+                post { listener.onConnected() }
                 // The pipeline needs the handshake before any audio: nothing
                 // flows until the server sees this frame.
                 webSocket.send(startFrame())
@@ -87,7 +100,7 @@ class PipecatVoiceSession(
                 gotPipelineTraffic = true
                 // Raw 24 kHz 16-bit LE mono reply audio, straight to the speaker.
                 botSpeaking = true
-                listener.onConnected()
+                post { listener.onConnected() }
                 play(bytes.toByteArray())
             }
 
@@ -97,11 +110,11 @@ class PipecatVoiceSession(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                if (running) listener.onUnavailable("Server assistant unreachable (${t.message ?: "connection failed"})")
+                if (running) post { listener.onUnavailable("Server assistant unreachable (${t.message ?: "connection failed"})") }
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                if (running) listener.onUnavailable("Server assistant closed the connection")
+                if (running) post { listener.onUnavailable("Server assistant closed the connection") }
             }
         })
     }
@@ -146,7 +159,7 @@ class PipecatVoiceSession(
             bufferSize,
         )
         if (record.state != AudioRecord.STATE_INITIALIZED) {
-            listener.onUnavailable("Microphone could not be opened")
+            post { listener.onUnavailable("Microphone could not be opened") }
             return
         }
         audioRecord = record
@@ -280,7 +293,11 @@ class PipecatVoiceSession(
                     val role = obj["role"]?.jsonPrimitive?.content
                     val body = obj["text"]?.jsonPrimitive?.content ?: ""
                     if (body.isBlank()) return
-                    if (role == "assistant") listener.onAssistantText(body) else listener.onUserTranscript(body)
+                    if (role == "assistant") {
+                        post { listener.onAssistantText(body) }
+                    } else {
+                        post { listener.onUserTranscript(body) }
+                    }
                 }
                 "interrupt" -> flushPlayback()
             }
