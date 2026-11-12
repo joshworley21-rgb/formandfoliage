@@ -56,7 +56,7 @@ import kotlinx.coroutines.launch
 import uk.co.jwgardenservices.crm.core.AppConfig
 import uk.co.jwgardenservices.crm.domain.parseVoiceCommand
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
-import uk.co.jwgardenservices.crm.voice.PipecatVoiceSession
+import uk.co.jwgardenservices.crm.voice.LiveKitVoiceSession
 import uk.co.jwgardenservices.crm.voice.VoiceExecutor
 import uk.co.jwgardenservices.crm.voice.VoiceSession
 
@@ -93,7 +93,7 @@ fun CallScreen(
     // null = still deciding which brain is answering.
     var serverActive by remember { mutableStateOf<Boolean?>(null) }
     var localActive by remember { mutableStateOf(false) }
-    var serverSession by remember { mutableStateOf<PipecatVoiceSession?>(null) }
+    var serverSession by remember { mutableStateOf<LiveKitVoiceSession?>(null) }
     var localSession by remember { mutableStateOf<VoiceSession?>(null) }
     var silenceStreak by remember { mutableStateOf(0) }
     var lastFailure by remember { mutableStateOf<String?>(null) }
@@ -136,7 +136,7 @@ fun CallScreen(
         phase = Phase.Listening
     }
 
-    val serverListener = object : PipecatVoiceSession.Listener {
+    val serverListener = object : LiveKitVoiceSession.Listener {
         override fun onUserTranscript(text: String) {
             silenceStreak = 0
             appendStreamed(mine = true, text)
@@ -175,7 +175,7 @@ fun CallScreen(
         serverActive = null
         connectNonce += 1
         localSession?.stop()
-        val remote = PipecatVoiceSession(context, serverListener, AppConfig.ASSISTANT_WS_URL)
+        val remote = LiveKitVoiceSession(context, serverListener)
         serverSession = remote
         when {
             !micGranted() -> micRequest.launch(Manifest.permission.RECORD_AUDIO)
@@ -230,7 +230,7 @@ fun CallScreen(
     }
 
     DisposableEffect(Unit) {
-        val remote = PipecatVoiceSession(context, serverListener, AppConfig.ASSISTANT_WS_URL)
+        val remote = LiveKitVoiceSession(context, serverListener)
         val local = VoiceSession(context, localListener)
         serverSession = remote
         localSession = local

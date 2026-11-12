@@ -17,6 +17,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // LiveKit's audio-switch helper (com.github.davidliu:audioswitch) is
+        // only published to JitPack.
+        maven { url = uri("https://jitpack.io") }
     }
 }
 

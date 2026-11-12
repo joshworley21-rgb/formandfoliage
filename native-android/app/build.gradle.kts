@@ -39,6 +39,16 @@ android {
             "\"" + (providers.gradleProperty("SENTRY_DSN").orNull?.takeIf { it.isNotBlank() }
                 ?: "https://2db5e3b800989fa06211896264228199@o4512413257826304.ingest.de.sentry.io/4512413289087056") + "\"",
         )
+        // Self-hosted LiveKit on the VPS: the assistant joins the same room as
+        // the bm_fable pipeline. --dev-mode credentials, overridable by property.
+        val livekitUrl = providers.gradleProperty("LIVEKIT_URL")
+            .orElse("wss://45.13.232.205:7880").get()
+        val livekitRoom = providers.gradleProperty("LIVEKIT_ROOM").orElse("assistant").get()
+        val livekitToken = providers.gradleProperty("LIVEKIT_TOKEN")
+            .orElse("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJkZXZrZXkiLCJleHAiOjE5MDAwMDAwMDAsImlkZW50aXR5IjoiY3JtLWFzc2lzdGFudC1jbGllbnQiLCJuYW1lIjoiQ3JtIFBob25lIiwicm9vbUpvaW4iOnsicm9vbSI6ImFzc2lzdGFudCIsInJvb21Kb2luIjp0cnVlfSwibWV0YWRhdGEiOiIifQ.AufrPkD2sDjzA8-oOV3nXcEDZvvbHS0BEG2cbHTbxO4")
+        buildConfigField("String", "LIVEKIT_URL", "\"$livekitUrl\"")
+        buildConfigField("String", "LIVEKIT_ROOM", "\"$livekitRoom\"")
+        buildConfigField("String", "LIVEKIT_TOKEN", "\"$livekitToken\"")
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"$supabaseKey\"")
         buildConfigField("String", "AUTH_SCHEME", "\"uk.co.jwgardenservices.crm\"")
@@ -128,6 +138,9 @@ dependencies {
     implementation(libs.sentry.android) {
         exclude(group = "io.sentry", module = "sentry-android-ndk")
     }
+
+    // LiveKit room for the server-brain assistant call.
+    implementation(libs.livekit.android)
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
