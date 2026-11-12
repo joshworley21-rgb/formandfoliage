@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { currentUser } from "@/lib/session";
+import { runOrQueue, type QueuedOp } from "@/lib/offline-queue";
 
 export type Enquiry = Database["public"]["Tables"]["enquiries"]["Row"];
 export type EnquiryStatus = "new" | "contacted" | "converted" | "closed";
@@ -55,26 +56,33 @@ export function useConvertEnquiry() {
   return useMutation({
     mutationFn: async (enquiry: Enquiry) => {
       const authUser = await currentUser();
-      if (!authUser) throw new Error("Not signed in");
-      const { data: client, error } = await supabase
-        .from("clients")
-        .insert({
-          user_id: authUser.id,
-          name: enquiry.name,
-          email: enquiry.email,
-          phone: enquiry.phone,
-          address: enquiry.address,
-          notes: enquiry.message,
-        })
-        .select("id")
-        .single();
-      if (error) throw error;
-      const { error: updateError } = await supabase
-        .from("enquiries")
-        .update({ status: "converted", client_id: client.id })
-        .eq("id", enquiry.id);
-      if (updateError) throw updateError;
-      return client.id;
+      const userId = authUser?.id;
+      if (!userId) throw new Error("Not signed in");
+      
+      const clientId = crypto.randomUUID();
+      const ops: QueuedOp[] = [
+        {
+          kind: "insert",
+          table: "clients",
+          payload: {
+            id: clientId,
+            user_id: userId,
+            name: enquiry.name,
+            email: enquiry.email,
+            phone: enquiry.phone,
+            address: enquiry.address,
+            notes: enquiry.message,
+          },
+        },
+        {
+          kind: "update",
+          table: "enquiries",
+          payload: { status: "converted", client_id: clientId },
+          match: { id: enquiry.id },
+        },
+      ];
+      await runOrQueue("Convert enquiry", ops);
+      return clientId;
     },
     onSuccess: () => qc.invalidateQueries(),
   });

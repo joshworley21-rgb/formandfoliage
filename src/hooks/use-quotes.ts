@@ -9,6 +9,7 @@ import {
 } from "@/lib/quotes";
 import type { Enquiry } from "@/hooks/use-enquiries";
 import { currentUser } from "@/lib/session";
+import { runOrQueue, type QueuedOp } from "@/lib/offline-queue";
 
 export function useQuotes() {
   return useQuery({
@@ -99,39 +100,31 @@ export function useSaveQuote() {
         subtotal: totals.subtotal,
         vat_amount: totals.vatAmount,
         total: totals.total,
+        user_id: userId,
       };
 
-      let quoteId = input.id;
+      const quoteId = input.id ?? crypto.randomUUID();
+      const ops: QueuedOp[] = [];
 
-      if (quoteId) {
-        const { error } = await supabase.from("quotes").update(fields).eq("id", quoteId);
-        if (error) throw error;
+      if (input.id) {
+        ops.push({ kind: "update", table: "quotes", payload: fields, match: { id: quoteId } });
+        ops.push({ kind: "delete", table: "quote_items", match: { quote_id: quoteId } });
       } else {
+        // Need next_quote_number for number, which is an RPC
+        // This makes this non-atomic across RPC + Insert.
+        // For now, accept the pattern established in the app.
         const { data: number, error: numberError } = await supabase.rpc("next_quote_number", {
           _user_id: userId,
         });
         if (numberError) throw numberError;
-
-        const { data: created, error } = await supabase
-          .from("quotes")
-          .insert({ ...fields, user_id: userId, number: number as string })
-          .select("id")
-          .single();
-        if (error) throw error;
-        quoteId = created.id;
+        ops.push({ kind: "insert", table: "quotes", payload: { ...fields, id: quoteId, number } });
       }
-
-      const { error: clearError } = await supabase
-        .from("quote_items")
-        .delete()
-        .eq("quote_id", quoteId);
-      if (clearError) throw clearError;
 
       const rows = input.items
         .filter((item) => item.description.trim() || lineAmount(item) !== 0)
         .map((item, index) => ({
           user_id: userId,
-          quote_id: quoteId as string,
+          quote_id: quoteId,
           description: item.description.trim() || "Garden work",
           quantity: Number(item.quantity) || 0,
           unit_price: Number(item.unit_price) || 0,
@@ -140,11 +133,11 @@ export function useSaveQuote() {
         }));
 
       if (rows.length > 0) {
-        const { error } = await supabase.from("quote_items").insert(rows);
-        if (error) throw error;
+        ops.push(...rows.map((row) => ({ kind: "insert" as const, table: "quote_items", payload: row })));
       }
 
-      return quoteId as string;
+      await runOrQueue(input.id ? "Quote update" : "New quote", ops);
+      return quoteId;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["quotes"] });

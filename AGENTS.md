@@ -10,3 +10,9 @@
 > the editor, so keep the branch in a working state.
 
 <!-- LOVABLE:END -->
+
+## Active Skills & Knowledge
+- `.opencode/skills/ui-components.md` (shadcn, Radix, Tailwind best practices)
+- `.opencode/skills/mobile-ux.md` (Capacitor native touch, haptics, gesture handling)
+- `.opencode/skills/visual-review.md` (Playwright headless viewport snapshots)
+- `.opencode/skills/design-tokens.md` (Iconography, spacing rhythm, color tokens)

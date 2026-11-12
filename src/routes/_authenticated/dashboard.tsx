@@ -115,21 +115,30 @@ function DashboardPage() {
   const monthStart = startOfMonth(today);
   const monthEnd = endOfMonth(today);
 
-  const { data: clients = [] } = useClients();
-  const { data: visits = [] } = useVisits();
-  const { data: invoices = [] } = useInvoices();
-  const { data: jobs = [] } = useJobs({
+  const { data: clients = [], error: clientsError } = useClients();
+  const { data: visits = [], error: visitsError } = useVisits();
+  const { data: invoices = [], error: invoicesError } = useInvoices();
+  const { data: jobs = [], error: jobsError } = useJobs({
     from: addDays(today, -30).toISOString(),
     to: addDays(today, 8).toISOString(),
   });
+
+  const error = clientsError || visitsError || invoicesError || jobsError;
+  if (error)
+    return (
+      <AppShell title="Dashboard">
+        <p className="text-destructive">Error loading dashboard: {error.message}</p>
+      </AppShell>
+    );
 
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name ?? "Client";
 
   const scheduled = jobs.filter((j) => j.status === "scheduled");
   const todayJobs = scheduled.filter((j) => isSameDay(parseISO(j.starts_at), today));
-  const upcoming = scheduled
-    .filter((j) => parseISO(j.starts_at) > today && !isSameDay(parseISO(j.starts_at), today))
-    .slice(0, 8);
+  const upcomingFiltered = scheduled.filter(
+    (j) => parseISO(j.starts_at) > today && !isSameDay(parseISO(j.starts_at), today),
+  );
+  const upcoming = upcomingFiltered.slice(0, 8);
   const overdue = scheduled.filter((j) => isBefore(parseISO(j.starts_at), today));
 
   const todayMinutes = todayJobs.reduce((s, j) => s + Number(j.duration_minutes ?? 0), 0);
@@ -160,7 +169,7 @@ function DashboardPage() {
     { label: "Unbilled work", value: money(unbilledTotal), icon: PoundSterling },
     {
       label: "Jobs next 7 days",
-      value: String(upcoming.length + todayJobs.length),
+      value: String(upcomingFiltered.length + todayJobs.length),
       icon: CalendarDays,
     },
   ];

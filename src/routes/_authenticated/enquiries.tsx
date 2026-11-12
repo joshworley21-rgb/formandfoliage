@@ -104,8 +104,12 @@ function EnquiriesPage() {
               onQuote={() => setQuoting(quoteDraftFromEnquiry(enquiry))}
               onDelete={async () => {
                 if (!confirm(`Delete the enquiry from ${enquiry.name}?`)) return;
-                await remove.mutateAsync(enquiry.id);
-                toast.success("Enquiry deleted");
+                try {
+                  await remove.mutateAsync(enquiry.id);
+                  toast.success("Enquiry deleted");
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : "Could not delete");
+                }
               }}
             />
           ))}

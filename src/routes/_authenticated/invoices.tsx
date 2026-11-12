@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { format, parseISO } from "date-fns";
+import { addDays, format, parseISO } from "date-fns";
 import {
   AlertCircle,
   CheckCircle2,
@@ -140,8 +140,9 @@ const STATUS_LOOK: Record<string, { stripe: string; chip: string; label: string 
 /** Sent, issued more than 30 days ago, and still not paid. */
 function daysOverdue(invoice: Invoice): number {
   if (invoice.status === "paid") return 0;
-  const days = Math.floor((Date.now() - parseISO(invoice.issue_date).getTime()) / 86_400_000);
-  return days > 30 ? days - 30 : 0;
+  const due = invoice.due_date ? parseISO(invoice.due_date) : addDays(parseISO(invoice.issue_date), 30);
+  const days = Math.floor((Date.now() - due.getTime()) / 86_400_000);
+  return days > 0 ? days : 0;
 }
 
 /**
@@ -202,12 +203,20 @@ function InvoiceCard({
 }
 
 function InvoicesPage() {
-  const { data: clients = [] } = useClients();
-  const { data: invoices = [] } = useInvoices();
-  const { data: emailEvents = [] } = useAllInvoiceEmailEvents();
-  const { data: visits = [] } = useVisits();
-  const { data: settings } = useSettings();
-  const updateInvoice = useUpdateInvoice();
+  const { data: clients = [], error: clientsError } = useClients();
+  const { data: invoices = [], error: invoicesError } = useInvoices();
+  const { data: emailEvents = [], error: emailEventsError } = useAllInvoiceEmailEvents();
+  const { data: visits = [], error: visitsError } = useVisits();
+  const { data: settings, error: settingsError } = useSettings();
+
+  const error = clientsError || invoicesError || emailEventsError || visitsError || settingsError;
+  if (error)
+    return (
+      <AppShell title="Invoices">
+        <p className="text-destructive">Error loading invoices: {error.message}</p>
+      </AppShell>
+    );
+
   // The draft being corrected before it goes anywhere.
   const [editingDraft, setEditingDraft] = useState<Invoice | null>(null);
   const deleteInvoice = useDeleteInvoice();

@@ -39,6 +39,7 @@ function VisitsPage() {
 
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Visit | null>(null);
+  const [defaultMissed, setDefaultMissed] = useState(false);
 
   const totals = useMemo(() => {
     const unbilled = visits.filter((v) => !v.billed && !v.missed);
@@ -48,13 +49,15 @@ function VisitsPage() {
     };
   }, [visits]);
 
-  function openNew() {
+  function openNew(missed: boolean) {
     setEditing(null);
+    setDefaultMissed(missed);
     setOpen(true);
   }
 
   function openEdit(visit: Visit) {
     setEditing(visit);
+    setDefaultMissed(false);
     setOpen(true);
   }
 
@@ -63,9 +66,14 @@ function VisitsPage() {
       title="Visits"
       description="Hours and materials logged for completed work."
       actions={
-        <Button onClick={openNew} disabled={clients.length === 0}>
-          <Plus className="size-4" /> Log visit
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => openNew(true)} disabled={clients.length === 0}>
+            <MinusCircle className="size-4 mr-2" /> Log missed
+          </Button>
+          <Button onClick={() => openNew(false)} disabled={clients.length === 0}>
+            <Plus className="size-4 mr-2" /> Log visit
+          </Button>
+        </div>
       }
     >
       <div className="mb-5 grid gap-3 sm:grid-cols-2">
@@ -166,7 +174,12 @@ function VisitsPage() {
         </div>
       )}
 
-      <VisitDialog open={open} visit={editing} onOpenChange={setOpen} />
+      <VisitDialog
+        open={open}
+        visit={editing}
+        defaultMissed={defaultMissed}
+        onOpenChange={setOpen}
+      />
     </AppShell>
   );
 }

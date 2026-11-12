@@ -69,6 +69,7 @@ export function VisitDialog({
   defaultClientId?: string;
   /** yyyy-MM-dd for a new visit. Defaults to today. */
   defaultDate?: string;
+  defaultMissed?: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved?: (result: { missed: boolean; completedJob: boolean }) => void;
 }) {
@@ -143,12 +144,12 @@ export function VisitDialog({
     setMaterials("0");
     setMaterialsNote("");
     setDescription("");
-    setMissed(false);
+    setMissed(defaultMissed ?? false);
     resetRate(first);
     // clients is deliberately out of the deps: it arrives once and re-running
     // this on a cache refresh would wipe whatever is half-typed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, visit, defaultClientId, defaultDate]);
+  }, [open, visit, defaultClientId, defaultDate, defaultMissed]);
 
   const moneyInput = { locked, missed, payMode, hours, materials, rate, days };
   const computedAmount = visitAmount(moneyInput);

@@ -42,7 +42,7 @@ android {
         // Self-hosted LiveKit on the VPS: the assistant joins the same room as
         // the bm_fable pipeline. --dev-mode credentials, overridable by property.
         val livekitUrl = providers.gradleProperty("LIVEKIT_URL")
-            .orElse("wss://45.13.232.205:7880").get()
+            .orElse("ws://45.13.232.205:7880").get()
         val livekitRoom = providers.gradleProperty("LIVEKIT_ROOM").orElse("assistant").get()
         val livekitToken = providers.gradleProperty("LIVEKIT_TOKEN")
             .orElse("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJkZXZrZXkiLCJleHAiOjE5MDAwMDAwMDAsImlkZW50aXR5IjoiY3JtLWFzc2lzdGFudC1jbGllbnQiLCJuYW1lIjoiQ3JtIFBob25lIiwicm9vbUpvaW4iOnsicm9vbSI6ImFzc2lzdGFudCIsInJvb21Kb2luIjp0cnVlfSwibWV0YWRhdGEiOiIifQ.AufrPkD2sDjzA8-oOV3nXcEDZvvbHS0BEG2cbHTbxO4")
