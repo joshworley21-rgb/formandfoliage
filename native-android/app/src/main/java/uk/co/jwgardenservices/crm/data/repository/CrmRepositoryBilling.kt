@@ -58,6 +58,7 @@ import uk.co.jwgardenservices.crm.data.model.RebuildInvoiceResult
 import uk.co.jwgardenservices.crm.data.model.Quote
 import uk.co.jwgardenservices.crm.data.model.QuoteDraft
 import uk.co.jwgardenservices.crm.data.model.QuoteItem
+import uk.co.jwgardenservices.crm.data.model.QuoteItemDraft
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
 import uk.co.jwgardenservices.crm.data.model.SendInvoiceResult
 import uk.co.jwgardenservices.crm.data.model.SendQuoteResult
@@ -327,6 +328,29 @@ suspend fun CrmRepository.createQuote(draft: QuoteDraft): String {
 
         runCatching { refreshAll() }
         return quoteId
+    }
+
+    /**
+     * Copy a quote into a fresh draft with its own number, keeping the contact
+     * details, terms and every line. Useful for repeat work: duplicate, tweak
+     * the price, send.
+     */
+    suspend fun CrmRepository.duplicateQuote(quoteId: String): String {
+        val quote = quotes.findById(quoteId) ?: error("This quote no longer exists")
+        val items = quoteLines.forQuote(quoteId)
+        if (items.isEmpty()) error("This quote has no lines to copy")
+        return createQuote(
+            QuoteDraft(
+                clientId = quote.clientId,
+                contactName = quote.contactName,
+                contactEmail = quote.contactEmail,
+                contactPhone = quote.contactPhone,
+                contactAddress = quote.contactAddress,
+                notes = quote.notes,
+                terms = quote.terms,
+                items = items.map { QuoteItemDraft(it.description, it.quantity, it.unitPrice) },
+            ),
+        )
     }
 
 suspend fun CrmRepository.updateQuote(id: String, draft: QuoteDraft) {

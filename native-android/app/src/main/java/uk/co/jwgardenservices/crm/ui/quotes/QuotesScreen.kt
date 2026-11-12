@@ -172,6 +172,20 @@ fun QuotesScreen(viewModel: CrmViewModel) {
         }
     }
 
+    fun duplicate(quote: Quote) {
+        scope.launch {
+            busyId = quote.id
+            try {
+                viewModel.duplicateQuote(quote.id)
+                toast("${quote.number} copied as a new draft quote")
+            } catch (error: Exception) {
+                toast(error.message ?: "Could not duplicate the quote")
+            } finally {
+                busyId = null
+            }
+        }
+    }
+
     fun delete(quote: Quote) {
         scope.launch {
             try {
@@ -238,6 +252,7 @@ fun QuotesScreen(viewModel: CrmViewModel) {
                 onSend = { openSend(quote) },
                 onLink = { shareLink(quote) },
                 onStatus = { status -> setStatus(quote, status) },
+                onDuplicate = { duplicate(quote) },
                 onDelete = { deleting = quote },
             )
         }
@@ -341,6 +356,7 @@ private fun QuoteCard(
     onSend: () -> Unit,
     onLink: () -> Unit,
     onStatus: (String) -> Unit,
+    onDuplicate: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val display = displayQuoteStatus(quote.status, quote.validUntil)
@@ -394,6 +410,13 @@ private fun QuoteCard(
                                 },
                             )
                         }
+                        DropdownMenuItem(
+                            text = { Text("Duplicate") },
+                            onClick = {
+                                menuOpen = false
+                                onDuplicate()
+                            },
+                        )
                         DropdownMenuItem(
                             text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
                             onClick = {

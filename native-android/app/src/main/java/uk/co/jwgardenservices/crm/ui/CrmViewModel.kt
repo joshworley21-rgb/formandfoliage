@@ -307,6 +307,11 @@ class CrmViewModel(
         }
     }
 
+    suspend fun duplicateQuote(quoteId: String): String = withSavingResult {
+        runCatching { syncEngine.syncNow() }
+        repository.duplicateQuote(quoteId)
+    }
+
     suspend fun sendQuote(
         quoteId: String,
         origin: String,
