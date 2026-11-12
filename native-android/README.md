@@ -159,10 +159,11 @@ deliberately left on the web for now. The smaller known gaps:
 - **Server brain first**: it connects to the VPS voice pipeline
   (ws://45.13.232.205:8765/ws — Faster-Whisper STT, an Ollama Qwen 2.5 3B
   brain and Kokoro TTS) using the simplified protocol: raw 16 kHz mono PCM
-  frames up from AudioRecord, raw 24 kHz mono PCM down to AudioTrack, and
-  JSON control frames — `{"type": "transcript", "role": ...}` (streamed,
-  coalesced into one bubble) and `{"type": "interrupt"}` to flush the
-  speaker. Barge-in also has a light energy check on the mic.
+  frames up from AudioRecord — after a first `{"type": "start"}` handshake
+  frame sent the moment the socket opens — raw 24 kHz mono PCM down to
+  AudioTrack, and JSON control frames — `{"type": "transcript",
+  "role": ...}` (streamed, coalesced into one bubble) and `{"type":
+  "interrupt"}` to flush the speaker. Barge-in also has a light energy check on the mic.
 - **Offline fallback**: the connection is refused, times out (8 s) or drops
   mid-call, the call switches to Android's on-device speech recognition plus
   the deterministic command parser, so the lane never leaves you without

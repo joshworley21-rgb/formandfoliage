@@ -16,6 +16,8 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import uk.co.jwgardenservices.crm.data.offline.OfflineJson
@@ -74,6 +76,9 @@ class PipecatVoiceSession(
         webSocket = okHttp.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 listener.onConnected()
+                // The pipeline needs the handshake before any audio: nothing
+                // flows until the server sees this frame.
+                webSocket.send(startFrame())
                 startCapture()
                 startPlayback()
             }
@@ -249,6 +254,14 @@ class PipecatVoiceSession(
             flushPlayback()
         }
     }
+
+    /**
+     * The first frame on the socket: tells the pipeline this connection is a
+     * voice stream, before any PCM leaves the microphone. Keeping it as a
+     * JSON object matches the control frames flowing the other way.
+     */
+    private fun startFrame(): String =
+        OfflineJson.encodeToString(buildJsonObject { put("type", "start") })
 
     /**
      * Control frames arrive as small JSON objects:
