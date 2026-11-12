@@ -1,5 +1,6 @@
 package uk.co.jwgardenservices.crm.ui.dashboard
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -34,7 +35,6 @@ import java.time.LocalDate
 import uk.co.jwgardenservices.crm.data.model.Invoice
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
 import uk.co.jwgardenservices.crm.domain.formatDayMonth
-import uk.co.jwgardenservices.crm.domain.formatShortWeekday
 import uk.co.jwgardenservices.crm.domain.formatTime
 import uk.co.jwgardenservices.crm.domain.formatWeekday
 import uk.co.jwgardenservices.crm.domain.hoursLabel
@@ -77,8 +77,6 @@ fun DashboardScreen(
     val weekJobs = scheduled.filter {
         parseTimestamp(it.startsAt)?.localDate()?.let { d -> !d.isBefore(today) && !d.isAfter(weekAhead) } == true
     }
-    val upcoming = weekJobs.take(8)
-
     val monthVisits = state.visits.filter { visit ->
         parseDate(visit.visitDate)?.let { it.year == today.year && it.month == today.month } == true
     }
@@ -121,7 +119,15 @@ fun DashboardScreen(
             item { ErrorState(state.error!!, viewModel::refresh) }
         }
 
-        item { TodayBand(today = today, jobs = todayJobs, todayMinutes = todayMinutes, clientNames = clientNames) }
+        item {
+            TodayBand(
+                today = today,
+                jobs = todayJobs,
+                todayMinutes = todayMinutes,
+                clientNames = clientNames,
+                onOpenSchedule = onOpenSchedule,
+            )
+        }
         item {
             TaxPotBand(
                 ratePercent = taxRate,
@@ -172,28 +178,6 @@ fun DashboardScreen(
 
         item {
             SectionCard(
-                title = "Today's jobs",
-                actionLabel = "Calendar",
-                onAction = onOpenSchedule,
-            ) {
-                if (todayJobs.isEmpty()) {
-                    Text(
-                        text = "Nothing booked today.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(20.dp),
-                    )
-                } else {
-                    todayJobs.forEachIndexed { index, job ->
-                        if (index > 0) HorizontalDivider(Modifier.padding(horizontal = 20.dp))
-                        UpcomingRow(job = job, clientName = clientNames[job.clientId] ?: "Client")
-                    }
-                }
-            }
-        }
-
-        item {
-            SectionCard(
                 title = "Billing",
                 actionLabel = "Invoices",
                 onAction = onOpenInvoices,
@@ -232,9 +216,12 @@ private fun TodayBand(
     jobs: List<ScheduledJob>,
     todayMinutes: Int,
     clientNames: Map<String, String>,
+    onOpenSchedule: () -> Unit,
 ) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpenSchedule),
         shape = RoundedCornerShape(28.dp),
         color = MaterialTheme.colorScheme.primary,
         contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -298,43 +285,15 @@ private fun TodayBand(
                         )
                     }
                 }
+                if (jobs.size > 3) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "…and ${jobs.size - 3} more · tap to open the calendar",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f),
+                    )
+                }
             }
-        }
-    }
-}
-
-@Composable
-private fun UpcomingRow(job: ScheduledJob, clientName: String) {
-    val starts = parseTimestamp(job.startsAt)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(
-            modifier = Modifier.width(52.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                text = starts?.formatShortWeekday()?.uppercase() ?: "",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = starts?.localDate()?.dayOfMonth?.toString() ?: "",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-        Spacer(Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(clientName, style = MaterialTheme.typography.titleMedium)
-            Text(
-                text = "${starts?.formatTime() ?: "—"} · ${job.durationMinutes} min",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }

@@ -18,7 +18,11 @@ object AppLock {
     private const val PREFS = "app-security"
     private const val KEY_ENABLED = "app_lock_enabled"
 
+    /** How long the app can sit in the background before locking again. */
+    private const val GRACE_MS = 2 * 60_000L
+
     private var appContext: Context? = null
+    private var backgroundedAt = 0L
     private val lockState = MutableStateFlow(true)
     private val enabledState = MutableStateFlow(true)
 
@@ -44,7 +48,28 @@ object AppLock {
         if (!value) lockState.value = false
     }
 
-    /** Called when the app leaves the foreground. */
+    /**
+     * Called when the app leaves the foreground. It only notes when that
+     * happened: locking on every background event meant a glance at a
+     * notification or a two-second app switch demanded the fingerprint again.
+     */
+    fun onBackground() {
+        if (enabledState.value) backgroundedAt = System.currentTimeMillis()
+    }
+
+    /**
+     * Called when the app comes back. It locks only if the app was away for
+     * longer than the grace period; quick switches carry straight on.
+     */
+    fun onForeground() {
+        val leftAt = backgroundedAt
+        backgroundedAt = 0L
+        if (enabledState.value && leftAt > 0 && System.currentTimeMillis() - leftAt > GRACE_MS) {
+            lockState.value = true
+        }
+    }
+
+    /** Lock immediately, e.g. when the user signs out. */
     fun lock() {
         if (enabledState.value) lockState.value = true
     }

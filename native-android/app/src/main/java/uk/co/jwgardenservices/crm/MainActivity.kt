@@ -18,9 +18,14 @@ import uk.co.jwgardenservices.crm.ui.AppRoot
 import uk.co.jwgardenservices.crm.ui.theme.AppTheme
 
 class MainActivity : FragmentActivity() {
+    override fun onStart() {
+        super.onStart()
+        AppLock.onForeground()
+    }
+
     override fun onStop() {
         super.onStop()
-        AppLock.lock()
+        AppLock.onBackground()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
