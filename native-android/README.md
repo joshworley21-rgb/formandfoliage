@@ -150,6 +150,23 @@ deliberately left on the web for now. The smaller known gaps:
 - Sentry needs a project and a `SENTRY_DSN` secret in the GitHub repo.
 - The month grid shows at most two job chips per day; `+N` points at the agenda.
 
+## Voice assistant (call mode)
+
+- A mic button on the dashboard header (and "Call assistant" in the More
+  sheet) opens a phone-call style screen: continuous listening, a transcript
+  and a big end button.
+- Works fully offline using Android's on-device speech recognition and
+  text-to-speech, so there is no cost and no model download.
+- Driving commands: what's on today, next job, mark louisa done,
+  log three hours for louisa, what's outstanding, which invoices are overdue,
+  mark invoice twelve paid, price three hours at thirty, help, hang up.
+- Money actions (marking invoices paid, logging visits) always read back a
+  confirmation and wait for "yes", so a misheard word never changes money.
+- Known limits for v1: it listens in turns (short reply, then listens again)
+  rather than true simultaneous conversation, and it needs the screen on —
+  a foreground mic service is the next step. A streaming cloud model can be
+  added later for fully natural conversation when there is signal.
+
 ## Code layout
 
 - `CrmRepository.kt` holds the cache, sync plumbing and client CRUD;

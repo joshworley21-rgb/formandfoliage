@@ -6,6 +6,7 @@
     <!-- Sentry's own kill-switch, in case the removal above is ever outvoted. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:name=".JwCrmApplication"

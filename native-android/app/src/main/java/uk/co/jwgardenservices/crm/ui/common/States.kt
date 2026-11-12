@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -35,6 +36,7 @@ fun PageHeader(
     title: String,
     description: String? = null,
     onRefresh: (() -> Unit)? = null,
+    onAssistant: (() -> Unit)? = null,
     action: (@Composable () -> Unit)? = null,
 ) {
     Row(
@@ -54,9 +56,16 @@ fun PageHeader(
         }
         if (action != null) {
             action()
-        } else if (onRefresh != null) {
-            IconButton(onClick = onRefresh) {
-                Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
+        } else {
+            if (onAssistant != null) {
+                IconButton(onClick = onAssistant) {
+                    Icon(Icons.Outlined.Mic, contentDescription = "Call assistant")
+                }
+            }
+            if (onRefresh != null) {
+                IconButton(onClick = onRefresh) {
+                    Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
+                }
             }
         }
     }
