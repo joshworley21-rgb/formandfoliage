@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
+import android.speech.SpeechRecognizer
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -32,6 +33,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -44,19 +46,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import android.speech.SpeechRecognizer
 import uk.co.jwgardenservices.crm.core.AppConfig
 import uk.co.jwgardenservices.crm.domain.parseVoiceCommand
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
+import uk.co.jwgardenservices.crm.voice.PipecatVoiceSession
 import uk.co.jwgardenservices.crm.voice.VoiceExecutor
 import uk.co.jwgardenservices.crm.voice.VoiceSession
-import uk.co.jwgardenservices.crm.voice.PipecatVoiceSession
 
 /** One line in the call transcript. */
 private data class Turn(val mine: Boolean, val text: String)
@@ -67,10 +69,12 @@ private enum class Phase { Listening, Thinking, Speaking, Ended }
  * The "phone call to your own office" screen.
  *
  * It tries the VPS voice pipeline first (server-side Whisper STT, Ollama
- * brain, Kokoro TTS — full two-way conversation while there is signal) and
- * falls back to the offline assistant (on-device recognition + a
+ * brain, Kokoro TTS — a full two-way conversation while there is signal) and
+ * falls back to the offline assistant (on-device recognition plus the
  * deterministic command parser) whenever the server cannot be used, so a
- * weak-signal lane never leaves the user without help.
+ * weak-signal lane never leaves the user without help. The status pill under
+ * the title always says which brain is answering, and carries the real
+ * connection failure plus a manual reconnect when the call is offline.
  */
 @Composable
 fun CallScreen(
@@ -92,6 +96,8 @@ fun CallScreen(
     var serverSession by remember { mutableStateOf<PipecatVoiceSession?>(null) }
     var localSession by remember { mutableStateOf<VoiceSession?>(null) }
     var silenceStreak by remember { mutableStateOf(0) }
+    var lastFailure by remember { mutableStateOf<String?>(null) }
+    var connectNonce by remember { mutableStateOf(0) }
     val listState = rememberLazyListState()
 
     fun micGranted(): Boolean = ContextCompat.checkSelfPermission(
@@ -111,22 +117,12 @@ fun CallScreen(
     fun fallbackToOffline(reason: String) {
         if (localActive) return
         serverActive = false
+        lastFailure = reason
         serverSession?.stop()
         serverSession = null
         localActive = true
-        turns.add(Turn(mine = false, "$reason — offline assistant on."))
         if (micGranted()) localSession?.start()
         phase = Phase.Listening
-    }
-
-    val micRequest = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        when {
-            !granted -> engineError = "Microphone permission is needed for the call."
-            serverActive == true -> serverSession?.start()
-            else -> fallbackToOffline("No internet connection")
-        }
     }
 
     val serverListener = object : PipecatVoiceSession.Listener {
@@ -140,12 +136,40 @@ fun CallScreen(
         }
 
         override fun onConnected() {
+            lastFailure = null
             serverActive = true
             phase = Phase.Listening
         }
 
         override fun onUnavailable(message: String) {
             fallbackToOffline(message)
+        }
+    }
+
+    val micRequest = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        when {
+            !granted -> engineError = "Microphone permission is needed for the call."
+            localActive -> localSession?.start()
+            else -> serverSession?.start()
+        }
+    }
+
+    /** Try the VPS pipeline again from scratch, keeping the transcript. */
+    fun reconnectLive() {
+        engineError = null
+        lastFailure = null
+        localActive = false
+        serverActive = null
+        connectNonce += 1
+        localSession?.stop()
+        val remote = PipecatVoiceSession(context, serverListener, AppConfig.ASSISTANT_WS_URL)
+        serverSession = remote
+        when {
+            !micGranted() -> micRequest.launch(Manifest.permission.RECORD_AUDIO)
+            hasNetwork(context) -> remote.start()
+            else -> fallbackToOffline("No internet connection")
         }
     }
 
@@ -200,12 +224,10 @@ fun CallScreen(
         serverSession = remote
         localSession = local
 
-        if (!micGranted()) {
-            micRequest.launch(Manifest.permission.RECORD_AUDIO)
-        } else if (hasNetwork(context)) {
-            remote.start()
-        } else {
-            fallbackToOffline("No internet connection")
+        when {
+            !micGranted() -> micRequest.launch(Manifest.permission.RECORD_AUDIO)
+            hasNetwork(context) -> remote.start()
+            else -> fallbackToOffline("No internet connection")
         }
 
         onDispose {
@@ -215,11 +237,11 @@ fun CallScreen(
     }
 
     // If the server accepts the socket but the pipeline never answers, do not
-    // leave the user staring at a dead call.
-    LaunchedEffect(Unit) {
+    // leave the user staring at a dead call. Re-runs on every reconnect.
+    LaunchedEffect(connectNonce) {
         delay(8_000)
         if (!localActive && serverActive != true) {
-            fallbackToOffline("No response from the server assistant")
+            fallbackToOffline(lastFailure ?: "No response from the server assistant")
         }
     }
 
@@ -239,16 +261,41 @@ fun CallScreen(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = when (serverActive) {
-                    true -> "Server assistant (Whisper · Ollama · Kokoro)"
-                    false -> "Offline assistant"
-                    null -> "Connecting to the server assistant…"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            Spacer(Modifier.height(10.dp))
+
+            // Which brain is answering. Green = the VPS pipeline, neutral =
+            // still deciding, warning = the offline fallback, with the real
+            // connection failure and a way back to the live call.
+            when (serverActive) {
+                true -> StatusPill(
+                    text = "Live VPS Voice (bm_fable)",
+                    container = MaterialTheme.colorScheme.primaryContainer,
+                    content = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                null -> StatusPill(
+                    text = "Connecting to bm_fable…",
+                    container = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    content = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                false -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    StatusPill(
+                        text = "Offline Fallback",
+                        container = MaterialTheme.colorScheme.secondary,
+                        content = MaterialTheme.colorScheme.onSecondary,
+                    )
+                    lastFailure?.let { reason ->
+                        Text(
+                            text = reason,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                    TextButton(onClick = { reconnectLive() }) {
+                        Text("Reconnect Live")
+                    }
+                }
+            }
             Spacer(Modifier.height(2.dp))
             Text(
                 text = when (phase) {
@@ -358,6 +405,22 @@ fun CallScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun StatusPill(text: String, container: Color, content: Color) {
+    Surface(
+        shape = MaterialTheme.shapes.extraLarge,
+        color = container,
+        contentColor = content,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+        )
     }
 }
 

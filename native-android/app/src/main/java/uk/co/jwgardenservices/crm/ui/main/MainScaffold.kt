@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
@@ -107,10 +106,6 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
         emptyList()
     } else {
         AppDestination.moreItems.filter { it != AppDestination.Settings }
-    }
-
-    fun navigateRoute(route: String) {
-        navController.navigate(route) { launchSingleTop = true }
     }
 
     fun navigate(destination: AppDestination) {
@@ -222,7 +217,7 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                             viewModel = crmViewModel,
                             onOpenSchedule = { navigate(AppDestination.Schedule) },
                             onOpenInvoices = { navigate(AppDestination.Invoices) },
-                            onOpenAssistant = { navigateRoute("assistant") },
+                            onOpenAssistant = { navigate(AppDestination.Assistant) },
                         )
                     }
                     composable(AppDestination.Invoices.route) {
@@ -271,26 +266,6 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
             ) {
                 Text("Everything else", style = MaterialTheme.typography.titleLarge)
                 Spacer(Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable {
-                            moreOpen = false
-                            navigateRoute("assistant")
-                        }
-                        .padding(horizontal = 10.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Mic,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                    Spacer(Modifier.width(16.dp))
-                    Text("Call assistant", style = MaterialTheme.typography.bodyLarge)
-                }
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 moreItems.forEach { destination ->
                     Row(
                         modifier = Modifier

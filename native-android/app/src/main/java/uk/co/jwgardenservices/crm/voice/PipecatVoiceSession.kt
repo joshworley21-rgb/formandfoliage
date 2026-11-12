@@ -70,6 +70,7 @@ class PipecatVoiceSession(
         val request = Request.Builder().url(url).build()
         webSocket = okHttp.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                listener.onConnected()
                 startCapture()
                 startPlayback()
             }

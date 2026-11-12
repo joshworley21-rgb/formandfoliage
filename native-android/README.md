@@ -152,9 +152,10 @@ deliberately left on the web for now. The smaller known gaps:
 
 ## Voice assistant (call mode)
 
-- A mic button on the dashboard header (and "Call assistant" in the More
-  sheet) opens a phone-call style screen: continuous listening, a transcript
-  and a big end button.
+- The **Assistant** tab (mic icon, centre of the phone bar between Schedule
+  and Invoices) opens a phone-call style screen: continuous listening, a
+  transcript and a big end button. Clients lives behind More; staff keep
+  their shorter bar.
 - **Server brain first**: it connects to the VPS voice pipeline
   (ws://45.13.232.205:8765/ws — Pipecat WebSocket transport with
   ProtobufFrameSerializer running Faster-Whisper STT, an Ollama Qwen 2.5 3B
@@ -165,7 +166,9 @@ deliberately left on the web for now. The smaller known gaps:
 - **Offline fallback**: the connection is refused, times out (8 s) or drops
   mid-call, the call switches to Android's on-device speech recognition plus
   the deterministic command parser, so the lane never leaves you without
-  help. A line in the transcript says which brain is active.
+  help. A status pill shows which brain is answering — green "Live VPS Voice
+  (bm_fable)" or "Offline Fallback" with the real connection failure and a
+  manual **Reconnect Live** button.
 - Driving commands: what's on today, next job, mark louisa done,
   log three hours for louisa, what's outstanding, which invoices are overdue,
   mark invoice twelve paid, price three hours at thirty, help, hang up.
