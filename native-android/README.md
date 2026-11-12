@@ -150,38 +150,67 @@ deliberately left on the web for now. The smaller known gaps:
 - Sentry needs a project and a `SENTRY_DSN` secret in the GitHub repo.
 - The month grid shows at most two job chips per day; `+N` points at the agenda.
 
-## Voice assistant (call mode)
+## Voice assistant (offline speech to text)
 
 - The **Assistant** tab (mic icon, centre of the phone bar between Schedule
-  and Invoices) opens a phone-call style screen: continuous listening, a
-  transcript and a big end button. Clients lives behind More; staff keep
-  their shorter bar.
-- **Server brain first**: OkHttp callbacks are marshalled to the main
-  thread before they touch the app (a background-thread SpeechRecognizer
-  start is a crash). It connects to the VPS voice pipeline
-  (ws://45.13.232.205:8765/ws — Faster-Whisper STT, an Ollama Qwen 2.5 3B
-  brain and Kokoro TTS) using the simplified protocol: raw 16 kHz mono PCM
-  frames up from AudioRecord — after a first `{"type": "start"}` handshake
-  frame sent the moment the socket opens — raw 24 kHz mono PCM down to
-  AudioTrack, and JSON control frames — `{"type": "transcript",
-  "role": ...}` (streamed, coalesced into one bubble) and `{"type":
-  "interrupt"}` to flush the speaker. Barge-in also has a light energy check on the mic.
-- **Offline fallback**: the connection is refused, times out (8 s) or drops
-  mid-call, the call switches to Android's on-device speech recognition plus
-  the deterministic command parser, so the lane never leaves you without
-  help (the greeting line only exists in offline mode; live mode opens with
-  the server's own voice). A status pill shows which brain is answering —
-  green "Live VPS Voice (bm_fable)" or "Offline Fallback" with the real
-  connection failure and a manual **Reconnect Live** button.
-- Driving commands: what's on today, next job, mark louisa done,
-  log three hours for louisa, what's outstanding, which invoices are overdue,
-  mark invoice twelve paid, price three hours at thirty, help, hang up.
-- Money actions (marking invoices paid, logging visits) always read back a
-  confirmation and wait for "yes", so a misheard word never changes money.
-- Known limits: the server link is plain ws:// (unencrypted — move to
-  wss:// behind a domain before it carries anything sensitive), and the
-  screen needs to stay on; a foreground mic service is the next step.
-  On-device Silero VAD could replace the energy check for noisier vans.
+  and Invoices) listens with sherpa-onnx entirely on the phone. Tap the mic
+  to start, tap again to stop; tap the mic a second time after pausing to
+  continue. Partial words appear greyed while the recognizer is still
+  deciding and each finished sentence stays in the panel. Clients lives
+  behind More; staff keep their shorter bar.
+- **Bundled model**: the streaming Zipformer (English, 20M parameters, int8
+  encoder/joiner) ships in
+  `app/src/main/assets/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/`
+  — about 44 MB in the APK. Nothing is downloaded at runtime, so the tab
+  works with no connection at all.
+- **Not in git**: both the AAR and the model are ~92 MB of binaries. The
+  Gradle task `:app:downloadSherpa` fetches any that are missing (SHA-256
+  checked) and `preBuild` depends on it, so a fresh clone needs a connection
+  for its first build only.
+- **Local intent model**: each finished sentence is also classified on-device
+  by a quantised Qwen 1.5B GGUF model through the llama.android AAR
+  (`dev.ffmpegkit-maintained:llama-android:0.1.1`, llama.cpp JNI,
+  arm64-v8a). Put the model in internal storage at
+  `/data/data/uk.co.jwgardenservices.crm/files/models/` (preferred name
+  `qwen2.5-1.5b-instruct-q4_k_m.gguf`; any `.gguf` works). The result is
+  logged as JSON under the `QwenIntent` tag.
+- The JSON contract lives in `app/src/main/assets/intent.gbnf`:
+  `{ "intent": "log_hours" | "check_schedule" | "quote" | "other",
+  "client_or_topic": "string", "requires_cloud": boolean }`.
+  The current AAR does not expose llama.cpp's grammar sampler, so the
+  grammar is enforced by prompt plus strict validation, with a deterministic
+  rule classifier as the fallback; the logged line always matches the
+  schema. Swap in a grammar-aware binding (or add the official JNI) to make
+  the constraint sampler-level.
+- To install the GGUF on a connected phone and watch the result:
+
+  ```
+  adb push qwen2.5-1.5b-instruct-q4_k_m.gguf /data/local/tmp/
+  adb shell run-as uk.co.jwgardenservices.crm mkdir -p files/models
+  adb shell run-as uk.co.jwgardenservices.crm \
+    cp /data/local/tmp/qwen2.5-1.5b-instruct-q4_k_m.gguf files/models/
+  adb logcat -s QwenIntent
+  ```
+- The recognizer is read from assets via `OnlineRecognizer(assetManager,
+  config)`. Its endpoint detector (roughly 1.2 s of trailing silence) is what
+  decides the speaker has stopped and commits the line.
+- The transcript is display-only for now: no command parsing, replies or
+  server brain is wired to it. `VoiceExecutor` and `parseVoiceCommand` are
+  still in the tree for when that comes back.
+- **Spoken confirmation**: each finished sentence makes the phone's own
+  text-to-speech engine say "Command received", so a silent phone is easy to
+  spot. Microphone frames are discarded while it speaks to stop the
+  assistant transcribing itself. Android 11+ needs the `TTS_SERVICE` query in
+  the manifest for that engine lookup.
+- LiveKit, Vosk, the VPS call path and the JitPack repository they needed
+  have all been removed. The only third-party voice binary is the vendored
+  official AAR `app/libs/sherpa-onnx-1.13.8.aar`; there is no Maven
+  coordinate for it, so it is committed rather than resolved.
+- Known limits: the model is English, punctuation and casing are not
+  restored, and the screen needs to stay on while listening. A foreground
+  mic service is the next step.
+- sherpa-onnx and the streaming Zipformer model are Apache 2.0 (k2-fsa /
+  Alpha Cephei).
 
 ## Code layout
 

@@ -1,0 +1,25 @@
+# GBNF grammar for the local intent classifier.
+#
+# llama.cpp can constrain sampling to this grammar so the model can only emit
+# a JSON object matching the schema the app expects:
+#
+#   { "intent": "log_hours" | "check_schedule" | "quote" | "other",
+#     "client_or_topic": "string",
+#     "requires_cloud": boolean }
+#
+# The bundled llama.android binding used today (dev.ffmpegkit-maintained,
+# 0.1.1) does not expose llama_sampler_init_grammar, so the file is also used
+# as the prompt's format contract and the result is validated in
+# QwenIntentEngine before it is logged. Pass the same text to the sampler as
+# soon as a grammar-aware binding is used.
+
+root ::= "{" ws "\"intent\"" ws ":" ws intent ws "," ws "\"client_or_topic\"" ws ":" ws topic ws "," ws "\"requires_cloud\"" ws ":" ws boolean ws "}"
+
+intent ::= "\"log_hours\"" | "\"check_schedule\"" | "\"quote\"" | "\"other\""
+
+topic ::= "\"" topic-char{0,120} "\""
+topic-char ::= [^"\\] | "\\" (["\\/bfnrt] | "u" hex hex hex hex)
+
+boolean ::= "true" | "false"
+hex ::= [0-9a-fA-F]
+ws ::= [ \t\n]*

@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-     The voice pipeline VPS is reached over plain ws:// for now, so exactly
-     that host is allowed cleartext. Everything else keeps the platform
-     default (HTTPS only). Point the assistant at a wss:// domain and this
-     entry can go.
+     The VPS voice pipeline is still reached over plain ws:// by the legacy
+     socket session, so exactly that host is allowed cleartext. The offline
+     Vosk assistant never leaves the phone. Everything else keeps the
+     platform default (HTTPS only).
 -->
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">45.13.232.205</domain>
-        <!-- LiveKit room signal on the same box -->
+        <!-- Legacy Pipecat socket on the same box -->
     </domain-config>
 </network-security-config>

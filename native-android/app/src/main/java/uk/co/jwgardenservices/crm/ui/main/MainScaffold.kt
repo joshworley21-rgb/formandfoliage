@@ -68,7 +68,7 @@ import uk.co.jwgardenservices.crm.ui.quotes.QuotesScreen
 import uk.co.jwgardenservices.crm.ui.schedule.ScheduleScreen
 import uk.co.jwgardenservices.crm.ui.settings.SettingsScreen
 import uk.co.jwgardenservices.crm.ui.visits.VisitsScreen
-import uk.co.jwgardenservices.crm.ui.voice.CallScreen
+import uk.co.jwgardenservices.crm.ui.voice.AssistantScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -238,11 +238,8 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                     composable(AppDestination.Quotes.route) {
                         QuotesScreen(viewModel = crmViewModel)
                     }
-                    composable("assistant") {
-                        CallScreen(
-                            viewModel = crmViewModel,
-                            onEnd = { navController.popBackStack() },
-                        )
+                    composable(AppDestination.Assistant.route) {
+                        AssistantScreen()
                     }
                     composable(AppDestination.Settings.route) {
                         SettingsScreen(viewModel = crmViewModel)

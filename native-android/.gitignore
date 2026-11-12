@@ -3,6 +3,11 @@
 local.properties
 .idea/
 .DS_Store
+# Fetched on demand by :app:downloadSherpa (see app/build.gradle.kts) rather
+# than committed: 48 MB AAR + 44 MB Zipformer model.
+app/libs/*.aar
+app/src/main/assets/sherpa-onnx-*/
+
 build/
 .kotlin/
 captures/

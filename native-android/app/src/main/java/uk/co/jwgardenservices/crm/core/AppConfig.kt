@@ -16,9 +16,4 @@ object AppConfig {
      * move to wss:// behind a domain before using it for anything sensitive.
      */
     const val ASSISTANT_WS_URL: String = "ws://45.13.232.205:8765/ws"
-
-    /** Self-hosted LiveKit on the VPS: the assistant's audio room. */
-    val livekitUrl: String = BuildConfig.LIVEKIT_URL
-    val livekitRoom: String = BuildConfig.LIVEKIT_ROOM
-    val livekitToken: String = BuildConfig.LIVEKIT_TOKEN
 }
