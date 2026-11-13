@@ -140,7 +140,9 @@ const STATUS_LOOK: Record<string, { stripe: string; chip: string; label: string 
 /** Sent, issued more than 30 days ago, and still not paid. */
 function daysOverdue(invoice: Invoice): number {
   if (invoice.status === "paid") return 0;
-  const due = invoice.due_date ? parseISO(invoice.due_date) : addDays(parseISO(invoice.issue_date), 30);
+  const due = invoice.due_date
+    ? parseISO(invoice.due_date)
+    : addDays(parseISO(invoice.issue_date), 30);
   const days = Math.floor((Date.now() - due.getTime()) / 86_400_000);
   return days > 0 ? days : 0;
 }
@@ -209,17 +211,10 @@ function InvoicesPage() {
   const { data: visits = [], error: visitsError } = useVisits();
   const { data: settings, error: settingsError } = useSettings();
 
-  const error = clientsError || invoicesError || emailEventsError || visitsError || settingsError;
-  if (error)
-    return (
-      <AppShell title="Invoices">
-        <p className="text-destructive">Error loading invoices: {error.message}</p>
-      </AppShell>
-    );
-
   // The draft being corrected before it goes anywhere.
   const [editingDraft, setEditingDraft] = useState<Invoice | null>(null);
   const deleteInvoice = useDeleteInvoice();
+  const updateInvoice = useUpdateInvoice();
   const { client: clientFromLink } = Route.useSearch();
   const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
@@ -247,6 +242,14 @@ function InvoicesPage() {
   const [composing, setComposing] = useState<{ invoice: Invoice; client: Client } | null>(null);
 
   const queryClient = useQueryClient();
+
+  const error = clientsError || invoicesError || emailEventsError || visitsError || settingsError;
+  if (error)
+    return (
+      <AppShell title="Invoices">
+        <p className="text-destructive">Error loading invoices: {error.message}</p>
+      </AppShell>
+    );
 
   const sendFn = sendInvoiceEmail;
   const createFn = createInvoice;

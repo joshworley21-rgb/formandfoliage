@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { format, parseISO } from "date-fns";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { MinusCircle, Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";

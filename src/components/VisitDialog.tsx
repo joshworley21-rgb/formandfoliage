@@ -59,6 +59,7 @@ export function VisitDialog({
   visit,
   defaultClientId,
   defaultDate,
+  defaultMissed,
   onOpenChange,
   onSaved,
 }: {

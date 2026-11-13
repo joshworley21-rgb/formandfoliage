@@ -58,7 +58,7 @@ export function useConvertEnquiry() {
       const authUser = await currentUser();
       const userId = authUser?.id;
       if (!userId) throw new Error("Not signed in");
-      
+
       const clientId = crypto.randomUUID();
       const ops: QueuedOp[] = [
         {

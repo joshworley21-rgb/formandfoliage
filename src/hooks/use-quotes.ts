@@ -133,7 +133,9 @@ export function useSaveQuote() {
         }));
 
       if (rows.length > 0) {
-        ops.push(...rows.map((row) => ({ kind: "insert" as const, table: "quote_items", payload: row })));
+        ops.push(
+          ...rows.map((row) => ({ kind: "insert" as const, table: "quote_items", payload: row })),
+        );
       }
 
       await runOrQueue(input.id ? "Quote update" : "New quote", ops);
