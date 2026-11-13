@@ -137,9 +137,6 @@ class AssistantService : Service() {
             if (wasListening) speech.pauseForSpeech()
             _speaking.value = true
             try {
-                // Instant verbal filler removes the dead air while the local
-                // Qwen model thinks.
-                speaker.speak(fillerFor(text), voice.speakerId)
                 val intent = intents.classify(text)
                 CrashLog.note(this, TAG, "intent=${intent.intent.wire} cloud=${intent.requiresCloud}")
                 if (intent.requiresCloud) {
@@ -169,13 +166,6 @@ class AssistantService : Service() {
                 if (wasListening) speech.resumeAfterSpeech()
             }
         }
-    }
-
-    /** A short phrase said the moment the transcript commits. */
-    private fun fillerFor(transcript: String): String {
-        val text = transcript.lowercase()
-        val schedule = listOf("schedule", "diary", "today", "next job", "calendar")
-        return if (schedule.any { text.contains(it) }) "Checking schedule." else "Got it."
     }
 
     override fun onDestroy() {

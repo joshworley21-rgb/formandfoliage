@@ -12,6 +12,7 @@ import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import uk.co.jwgardenservices.crm.core.CrashLog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -74,10 +75,18 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                 // Real file paths, not the AssetManager: reading the 109 MB
                 // model through AAsset_getBuffer aborts the process on some
                 // devices. Copying once with ordinary streams is reliable.
+                val highQuality = AssistantPreferences.highQualityFlow(context).first() &&
+                    KokoroHqDownloader.isInstalled(context)
+                val modelPath = if (highQuality) {
+                    KokoroHqDownloader.modelFile(context).absolutePath
+                } else {
+                    File(dir, "model.int8.onnx").absolutePath
+                }
+                CrashLog.note(context, TAG, "model=${if (highQuality) "fp32" else "int8"}")
                 val config = OfflineTtsConfig(
                     model = OfflineTtsModelConfig(
                         kokoro = OfflineTtsKokoroModelConfig(
-                            model = File(dir, "model.int8.onnx").absolutePath,
+                            model = modelPath,
                             voices = File(dir, "voices.bin").absolutePath,
                             tokens = File(dir, "tokens.txt").absolutePath,
                             dataDir = File(dir, "espeak-ng-data").absolutePath,
@@ -87,7 +96,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                             lexicon = File(dir, "lexicon-us-en.txt").absolutePath,
                             lengthScale = 1.0f,
                         ),
-                        numThreads = 2,
+                        numThreads = 4,
                         provider = "cpu",
                     ),
                     maxNumSentences = 1,

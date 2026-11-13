@@ -144,6 +144,8 @@ dependencies {
     implementation(libs.supabase.functions)
     implementation(libs.ktor.client.okhttp)
     implementation(libs.okhttp)
+    // Extracts the optional fp32 Kokoro model from its .tar.bz2 release.
+    implementation(libs.commons.compress)
 
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)

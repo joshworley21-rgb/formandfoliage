@@ -226,9 +226,9 @@ deliberately left on the web for now. The smaller known gaps:
   Kokoro profile (`bm_fable` or `bf_emma`) and inspect everything under
   `filesDir/models`, with size and date. The voice changes on the next
   reply.
-- **Verbal filler**: the moment an endpoint commits, Kokoro says "Got it."
-  (or "Checking schedule." for diary-flavoured wording) before the Qwen
-  model runs, so the call never goes silent while the intent is worked out.
+- **Conversation flow**: there is no extra "Got it." before local answers —
+  the reply itself is spoken as soon as the action finishes. Only a
+  cloud-routed turn says "Checking online rates…" first.
 - **Audio focus**: the service takes `AUDIOFOCUS_GAIN_TRANSIENT` when it
   starts and abandons it on shutdown, so an incoming call or the van's media
   takes priority; losing focus stops Kokoro mid-sentence.
@@ -237,18 +237,18 @@ deliberately left on the web for now. The smaller known gaps:
   it at 24 kHz. The voice is `bm_fable` (speaker 25 of
   `kokoro-multi-lang-v1_0`). British voices use `lexicon-gb-en.txt` with
   espeak's `en-gb`, and Kokoro's padding silence is trimmed before playback
-  so replies are not separated by dead air. It reads "Logged your hours for
-  <client>", "Checking your schedule", "Preparing a quote for <client>" or "Command
-  received", depending on the intent. Microphone frames are discarded for
+  so replies are not separated by dead air. Settings → Assistant settings →
+  Voice quality can download the full fp32 model (350 MB, Wi-Fi only) for a
+  more natural voice; it applies the next time the Assistant starts. Microphone frames are discarded for
   the whole utterance so the phone does not transcribe itself; the mic
   reopens the instant playback finishes, so the next command is hands-free.
   The Android native TTS engine and its manifest query are gone.
 - `:app:downloadKokoro` extracts only the English pieces from
   `kokoro-int8-multi-lang-v1_0.tar.bz2`: `model.int8.onnx` (109 MB),
-  `voices.bin` (27 MB), `tokens.txt`, `lexicon-us-en.txt` and the 19 MB
-  `espeak-ng-data` phonemizer. The Chinese dictionaries are skipped. (`int8`
-  rather than the 330 MB fp32 `model.onnx` keeps the APK installable; the
-  configuration in `KokoroTts.kt` is the only place to change it.)
+  `voices.bin` (27 MB), `tokens.txt`, the US/GB lexicons and the 19 MB
+  `espeak-ng-data` phonemizer. The Chinese dictionaries are skipped. int8
+  keeps the APK installable; the optional fp32 model is fetched from the
+  same release by `KokoroHqDownloader` when enabled in settings.
 - LiveKit, Vosk, the VPS call path and the JitPack repository they needed
   have all been removed. Speech runs on the vendored official
   `sherpa-onnx-1.13.8.aar` and llama.cpp comes from the llama.android AAR;
