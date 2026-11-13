@@ -33,10 +33,6 @@ jobs:
       KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-      # Optional: enables the hybrid cloud fallback. The Gradle build reads
-      # this environment variable (see app/build.gradle.kts), so the key is
-      # never stored in the repository.
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       COMMITTED_KEYSTORE: android/keystore/release.jks
 
     steps:

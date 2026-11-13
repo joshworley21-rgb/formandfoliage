@@ -26,7 +26,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import uk.co.jwgardenservices.crm.MainActivity
 import uk.co.jwgardenservices.crm.R
-import uk.co.jwgardenservices.crm.core.AppConfig
 import uk.co.jwgardenservices.crm.core.CrashLog
 
 /**
@@ -51,8 +50,8 @@ class AssistantService : Service() {
     private lateinit var speaker: KokoroTts
     private lateinit var intents: QwenIntentEngine
 
-    /** Created on first cloud-routed turn; holds the build's API key only. */
-    private val cloud by lazy { OpenAiCloudRouter(AppConfig.openAiApiKey) }
+    /** Created on first cloud-routed turn; holds no secret, only the endpoint. */
+    private val cloud by lazy { OpenAiCloudRouter() }
 
     /** Writes spoken commands into the same Room cache the screens use. */
     private val actions by lazy { VoiceActionRunner() }
@@ -61,6 +60,7 @@ class AssistantService : Service() {
     val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
 
     private var voice = KokoroVoice.BmFable
+    private var speed = AssistantPreferences.DEFAULT_SPEED
     private var greeted = false
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
@@ -88,6 +88,14 @@ class AssistantService : Service() {
         startInForeground()
         requestAudioFocus()
         scope.launch { AssistantPreferences.voiceFlow(this@AssistantService).collect { voice = it } }
+        scope.launch { AssistantPreferences.speedFlow(this@AssistantService).collect { speed = it } }
+        // Swapping between int8 and the downloaded fp32 model should take
+        // effect on the next reply, without restarting the Assistant.
+        scope.launch {
+            AssistantPreferences.highQualityFlow(this@AssistantService).collect {
+                speaker.reload()
+            }
+        }
         scope.launch { handleTranscripts() }
     }
 
@@ -115,7 +123,7 @@ class AssistantService : Service() {
         if (wasListening) speech.pauseForSpeech()
         _speaking.value = true
         try {
-            speaker.speak("How can I help?", voice.speakerId)
+            speaker.speak("How can I help?", voice.speakerId, speed)
         } catch (error: Exception) {
             CrashLog.note(this, TAG, "greeting failed: ${error.message}")
             Log.w(TAG, "Greeting playback failed", error)
@@ -137,27 +145,16 @@ class AssistantService : Service() {
             if (wasListening) speech.pauseForSpeech()
             _speaking.value = true
             try {
-                val intent = intents.classify(text)
-                CrashLog.note(this, TAG, "intent=${intent.intent.wire} cloud=${intent.requiresCloud}")
-                if (intent.requiresCloud) {
-                    speaker.speak(CHECKING_ONLINE, voice.speakerId)
-                    val answer = runCatching { cloud.route(text, intent.clientOrTopic) }
-                        .onFailure { error -> Log.w(TAG, "Cloud route failed", error) }
-                        .getOrNull()
-                    speaker.speak(
-                        answer ?: if (AppConfig.openAiApiKey.isBlank()) {
-                            "Online rates are not set up on this phone."
-                        } else {
-                            "I couldn't reach the online rates. Try again when you have signal."
-                        },
-                        voice.speakerId,
-                    )
+                // A previous turn may have asked "How many hours?" — finish
+                // that before treating this sentence as a new command.
+                val followUp = runCatching { actions.continuePending(text) }
+                    .onFailure { CrashLog.note(this, TAG, "pending action failed: ${it.message}") }
+                    .getOrNull()
+                if (followUp != null) {
+                    CrashLog.note(this, TAG, "pending reply: ${followUp.take(120)}")
+                    speaker.speak(followUp, voice.speakerId, speed)
                 } else {
-                    val executed = runCatching { actions.run(text, intent) }
-                        .onFailure { CrashLog.note(this, TAG, "action failed: ${it.message}") }
-                        .getOrNull()
-                    CrashLog.note(this, TAG, "action reply: ${executed ?: "none"}")
-                    speaker.speak(executed ?: confirmationFor(intent), voice.speakerId)
+                    answerTurn(text)
                 }
             } catch (error: Exception) {
                 Log.w(TAG, "Kokoro playback failed", error)
@@ -165,6 +162,29 @@ class AssistantService : Service() {
                 _speaking.value = false
                 if (wasListening) speech.resumeAfterSpeech()
             }
+        }
+    }
+
+    /** Classify one finished sentence and either act locally or ask the cloud. */
+    private suspend fun answerTurn(text: String) {
+        val intent = intents.classify(text)
+        CrashLog.note(this, TAG, "intent=${intent.intent.wire} cloud=${intent.requiresCloud}")
+        if (intent.requiresCloud) {
+            speaker.speak(CHECKING_ONLINE, voice.speakerId, speed)
+            val answer = runCatching { cloud.route(text, intent.clientOrTopic) }
+                .onFailure { error -> Log.w(TAG, "Cloud route failed", error) }
+                .getOrNull()
+            speaker.speak(
+                answer ?: "I couldn't reach the online rates. Try again when you have signal.",
+                voice.speakerId,
+                speed,
+            )
+        } else {
+            val executed = runCatching { actions.run(text, intent) }
+                .onFailure { CrashLog.note(this, TAG, "action failed: ${it.message}") }
+                .getOrNull()
+            CrashLog.note(this, TAG, "action reply: ${executed ?: "none"}")
+            speaker.speak(executed ?: confirmationFor(intent), voice.speakerId, speed)
         }
     }
 
@@ -273,8 +293,13 @@ private fun confirmationFor(intent: QwenIntentEngine.Intent): String {
         QwenIntentEngine.Kind.LogHours ->
             if (topic.isEmpty()) "Hours logged." else "Logged your hours for $topic."
         QwenIntentEngine.Kind.CheckSchedule -> "Checking your schedule."
+        QwenIntentEngine.Kind.NextJob -> "Checking your next job."
+        QwenIntentEngine.Kind.MarkJobDone ->
+            if (topic.isEmpty()) "Marking that job done." else "Marking the job for $topic done."
+        QwenIntentEngine.Kind.WhoOwesMe -> "Checking who owes you."
+        QwenIntentEngine.Kind.WeeklyEarnings -> "Checking this week's earnings."
         QwenIntentEngine.Kind.Quote ->
             if (topic.isEmpty()) "Preparing your quote." else "Preparing a quote for $topic."
-        QwenIntentEngine.Kind.Other -> "I can log hours, check your schedule or prepare a quote."
+        QwenIntentEngine.Kind.Other -> "I can log hours, check your diary or tell you who owes you."
     }
 }

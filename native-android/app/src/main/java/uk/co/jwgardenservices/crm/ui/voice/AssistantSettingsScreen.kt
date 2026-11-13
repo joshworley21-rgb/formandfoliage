@@ -17,13 +17,16 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -44,6 +47,7 @@ import uk.co.jwgardenservices.crm.ui.common.SectionCard
 import uk.co.jwgardenservices.crm.ui.common.ShareText
 import uk.co.jwgardenservices.crm.voice.AssistantPreferences
 import uk.co.jwgardenservices.crm.voice.KokoroHqDownloader
+import uk.co.jwgardenservices.crm.voice.KokoroTts
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
 import java.io.File
 import java.time.Instant
@@ -63,10 +67,27 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
 
     val highQuality by AssistantPreferences.highQualityFlow(context)
         .collectAsStateWithLifecycle(initialValue = false)
+    val savedSpeed by AssistantPreferences.speedFlow(context)
+        .collectAsStateWithLifecycle(initialValue = AssistantPreferences.DEFAULT_SPEED)
+    var draftSpeed by remember(savedSpeed) { mutableFloatStateOf(savedSpeed) }
+    var previewingVoice by remember { mutableStateOf(false) }
+    val hqState by KokoroHqDownloader.state.collectAsStateWithLifecycle()
     var hqInstalled by remember { mutableStateOf(KokoroHqDownloader.isInstalled(context)) }
-    var downloading by remember { mutableStateOf(false) }
-    var downloadProgress by remember { mutableIntStateOf(0) }
-    var downloadError by remember { mutableStateOf<String?>(null) }
+    var savedBytes by remember { mutableLongStateOf(KokoroHqDownloader.savedBytes(context)) }
+    val unmetered = remember { isUnmetered(context) }
+
+    LaunchedEffect(hqState) {
+        when (hqState) {
+            is KokoroHqDownloader.State.Done -> {
+                hqInstalled = true
+                AssistantPreferences.setHighQuality(context, true)
+                KokoroHqDownloader.clearResult()
+                savedBytes = 0
+            }
+            is KokoroHqDownloader.State.Working -> Unit
+            else -> savedBytes = KokoroHqDownloader.savedBytes(context)
+        }
+    }
 
     var models by remember { mutableStateOf<List<File>>(emptyList()) }
     var refresh by remember { mutableIntStateOf(0) }
@@ -110,6 +131,45 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                HorizontalDivider()
+                Text(
+                    text = "Speaking rate: ${"%.2f".format(draftSpeed)}×",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Slider(
+                    value = draftSpeed,
+                    onValueChange = { draftSpeed = it },
+                    onValueChangeFinished = {
+                        scope.launch { AssistantPreferences.setSpeed(context, draftSpeed) }
+                    },
+                    valueRange = AssistantPreferences.MIN_SPEED..AssistantPreferences.MAX_SPEED,
+                    steps = 9,
+                )
+                OutlinedButton(
+                    enabled = !previewingVoice,
+                    onClick = {
+                        previewingVoice = true
+                        scope.launch {
+                            val sample = KokoroTts(context)
+                            try {
+                                sample.speak(PREVIEW_TEXT, voice.speakerId, draftSpeed)
+                            } catch (_: Exception) {
+                                // The live reply path reports its own errors;
+                                // a silent sample is not worth a dialog.
+                            } finally {
+                                sample.close()
+                                previewingVoice = false
+                            }
+                        }
+                    },
+                ) {
+                    Text(if (previewingVoice) "Playing sample…" else "Preview this voice")
+                }
+                Text(
+                    text = "The preview loads the voice, so the first sample can take a few seconds.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 
@@ -127,12 +187,30 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (downloading) {
-                    LinearProgressIndicator(
-                        progress = { downloadProgress / 100f },
-                        modifier = Modifier.fillMaxWidth(),
+                val working = hqState as? KokoroHqDownloader.State.Working
+                val failure = hqState as? KokoroHqDownloader.State.Failed
+                if (working != null) {
+                    if (working.total > 0) {
+                        LinearProgressIndicator(
+                            progress = { working.progress },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                    Text(
+                        text = when (working.phase) {
+                            KokoroHqDownloader.Phase.Downloading ->
+                                "Downloading… ${working.done / MEGABYTE} of " +
+                                    "${working.total / MEGABYTE} MB " +
+                                    "(${(working.progress * 100).toInt()}%)"
+
+                            KokoroHqDownloader.Phase.Extracting ->
+                                "Unpacking the voice… ${(working.progress * 100).toInt()}% " +
+                                    "(this can take a few minutes)"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
                     )
-                    Text("Downloading… $downloadProgress%", style = MaterialTheme.typography.bodySmall)
                 }
                 if (hqInstalled) {
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -149,47 +227,54 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     }
                     TextButton(
                         onClick = {
-                            KokoroHqDownloader.modelFile(context).delete()
-                            hqInstalled = false
-                            scope.launch { AssistantPreferences.setHighQuality(context, false) }
+                            scope.launch {
+                                KokoroHqDownloader.remove(context)
+                                AssistantPreferences.setHighQuality(context, false)
+                                hqInstalled = false
+                                savedBytes = 0
+                            }
                         },
                     ) { Text("Remove downloaded model") }
-                } else {
+                } else if (working == null) {
                     OutlinedButton(
-                        enabled = !downloading,
                         onClick = {
-                            if (!isUnmetered(context)) {
-                                downloadError = "Connect to Wi-Fi to download the 350 MB voice."
+                            if (!unmetered) {
                                 return@OutlinedButton
                             }
-                            downloading = true
-                            downloadError = null
-                            downloadProgress = 0
-                            scope.launch {
-                                runCatching {
-                                    KokoroHqDownloader.download(context) { percent ->
-                                        downloadProgress = percent
-                                    }
-                                }.onSuccess {
-                                    hqInstalled = true
-                                    AssistantPreferences.setHighQuality(context, true)
-                                }.onFailure { error ->
-                                    downloadError = error.message ?: "Download failed."
-                                }
-                                downloading = false
-                            }
+                            KokoroHqDownloader.start(context)
                         },
-                    ) { Text("Download high-quality voice (350 MB)") }
+                    ) {
+                        Text(
+                            if (savedBytes > 0) {
+                                "Resume download (${savedBytes / MEGABYTE} MB saved)"
+                            } else {
+                                "Download high-quality voice (350 MB)"
+                            },
+                        )
+                    }
                 }
-                downloadError?.let { message ->
+                if (working != null) {
+                    TextButton(onClick = { KokoroHqDownloader.cancel() }) {
+                        Text("Cancel download")
+                    }
+                }
+                if (!unmetered && working == null && !hqInstalled) {
                     Text(
-                        text = message,
+                        text = "Connect to Wi-Fi to download the voice. On mobile data the " +
+                            "button does nothing.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                failure?.let { error ->
+                    Text(
+                        text = error.message,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
                 Text(
-                    text = "Voice changes apply the next time the Assistant starts.",
+                    text = "Voice changes apply from the next reply.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -292,6 +377,11 @@ private fun ModelRow(file: File) {
         }
     }
 }
+
+private const val MEGABYTE = 1024L * 1024L
+
+/** Spoken by "Preview this voice". */
+private const val PREVIEW_TEXT = "Hello, this is how I sound when I read your diary."
 
 private fun formatSize(bytes: Long): String = when {
     bytes >= 1_073_741_824 -> "%.1f GB".format(bytes / 1_073_741_824.0)

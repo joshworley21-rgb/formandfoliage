@@ -3,7 +3,8 @@
 # llama.cpp can constrain sampling to this grammar so the model can only emit
 # a JSON object matching the schema the app expects:
 #
-#   { "intent": "log_hours" | "check_schedule" | "quote" | "other",
+#   { "intent": "log_hours" | "check_schedule" | "next_job" | "mark_job_done"
+#            | "who_owes_me" | "weekly_earnings" | "quote" | "other",
 #     "client_or_topic": "string",
 #     "requires_cloud": boolean }
 #
@@ -15,7 +16,7 @@
 
 root ::= "{" ws "\"intent\"" ws ":" ws intent ws "," ws "\"client_or_topic\"" ws ":" ws topic ws "," ws "\"requires_cloud\"" ws ":" ws boolean ws "}"
 
-intent ::= "\"log_hours\"" | "\"check_schedule\"" | "\"quote\"" | "\"other\""
+intent ::= "\"log_hours\"" | "\"check_schedule\"" | "\"next_job\"" | "\"mark_job_done\"" | "\"who_owes_me\"" | "\"weekly_earnings\"" | "\"quote\"" | "\"other\""
 
 topic ::= "\"" topic-char{0,120} "\""
 topic-char ::= [^"\\] | "\\" (["\\/bfnrt] | "u" hex hex hex hex)

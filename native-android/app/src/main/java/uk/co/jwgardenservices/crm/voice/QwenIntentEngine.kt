@@ -27,7 +27,8 @@ import java.io.File
  *
  * Output contract (also in `assets/intent.gbnf`):
  *
- *   { "intent": "log_hours" | "check_schedule" | "quote" | "other",
+ *   { "intent": "log_hours" | "check_schedule" | "next_job" | "mark_job_done",
+ *     "who_owes_me" | "weekly_earnings" | "quote" | "other",
  *     "client_or_topic": "string",
  *     "requires_cloud": true | false }
  *
@@ -41,6 +42,10 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
     enum class Kind(val wire: String) {
         LogHours("log_hours"),
         CheckSchedule("check_schedule"),
+        NextJob("next_job"),
+        MarkJobDone("mark_job_done"),
+        WhoOwesMe("who_owes_me"),
+        WeeklyEarnings("weekly_earnings"),
         Quote("quote"),
         Other("other"),
     }
@@ -133,12 +138,15 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
         }.getOrDefault("")
         return buildString {
             appendLine("You convert a gardener's spoken command into one JSON object and nothing else.")
-            appendLine("Intents: log_hours (time worked), check_schedule (today, diary, next job),")
+            appendLine("Intents: log_hours (time worked), check_schedule (today, diary),")
+            appendLine("next_job (next appointment or who is next), mark_job_done (finish a job),")
+            appendLine("who_owes_me (unpaid or outstanding invoices),")
+            appendLine("weekly_earnings (what this week has earned),")
             appendLine("quote (price or quote), other (anything else).")
             appendLine("requires_cloud is true when the answer needs live or external data:")
             appendLine("current material prices, supplier rates, a dynamic quote or estimate,")
             appendLine("weather, traffic, or anything not stored on this phone. Otherwise false.")
-            appendLine("Local actions such as logging hours or checking today's schedule are false.")
+            appendLine("Local actions such as logging hours, the diary, money owed or earnings are false.")
             appendLine("client_or_topic is the client or subject mentioned, or an empty string.")
             appendLine("Reply with JSON only, matching this grammar exactly:")
             append(grammar)
@@ -167,13 +175,24 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
     private fun fallback(transcript: String): Intent {
         val text = transcript.lowercase()
         val kind = when {
+            text.containsAny("owe me", "owes", "owed", "unpaid", "outstanding", "invoice") ->
+                Kind.WhoOwesMe
+            text.containsAny("earn", "earned", "earnings", "takings", "made this week", "income") ->
+                Kind.WeeklyEarnings
+            text.containsAny("next job", "next appointment", "next visit", "who's next", "what's next", "whats next") ->
+                Kind.NextJob
+            text.containsAny("mark", "finished", "complete", "completed", "done with") &&
+                !text.containsAny("how many", "hours", "hrs") -> Kind.MarkJobDone
             text.containsAny("hour", "hours", "log", "worked", "work for") -> Kind.LogHours
-            text.containsAny("schedule", "diary", "today", "next job", "what's on", "whats on", "calendar") ->
+            text.containsAny("schedule", "diary", "today", "calendar", "what's on", "whats on") ->
                 Kind.CheckSchedule
             text.containsAny("quote", "price", "cost", "charge", "how much") -> Kind.Quote
             else -> Kind.Other
         }
-        val needsCloud = text.containsAny(
+        // Only a live quote/pricing question leaves the phone. Everything the
+        // CRM already knows is answered locally, even when the same words
+        // ("how much do they owe") could sound like a price question.
+        val needsCloud = kind == Kind.Quote || text.containsAny(
             "weather",
             "forecast",
             "traffic",
@@ -183,10 +202,6 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
             "price list",
             "website",
             "online",
-            "quote",
-            "how much",
-            "cost",
-            "price",
         )
         return Intent(kind, transcript.take(MAX_TOPIC), needsCloud)
     }

@@ -48,3 +48,6 @@ android/local.properties
 
 # Local build secrets (OpenAI key for the hybrid assistant). Never commit.
 apikeys.properties
+
+# Local scratch space (large model archives fetched by scripts).
+.cache/

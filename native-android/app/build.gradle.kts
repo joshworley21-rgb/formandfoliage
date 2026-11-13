@@ -2,7 +2,6 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
 import java.security.MessageDigest
-import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -59,21 +58,8 @@ android {
         buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"$supabaseKey\"")
         buildConfigField("String", "AUTH_SCHEME", "\"uk.co.jwgardenservices.crm\"")
         buildConfigField("String", "AUTH_HOST", "\"password-reset\"")
-        // Only needed for cloud fallback when Qwen flags a query as needing
-        // live data. Kept out of the repo: provide it with
-        // -POPENAI_API_KEY=..., an OPENAI_API_KEY environment variable, or
-        // the git-ignored apikeys.properties at the repository root.
-        val apiKeys = Properties().apply {
-            listOf(
-                rootProject.file("../apikeys.properties"),
-                rootProject.file("apikeys.properties"),
-            ).firstOrNull { it.isFile }?.inputStream()?.use { load(it) }
-        }
-        val openAiKey = providers.gradleProperty("OPENAI_API_KEY")
-            .orElse(providers.environmentVariable("OPENAI_API_KEY"))
-            .orElse(apiKeys.getProperty("OPENAI_API_KEY", ""))
-            .get()
-        buildConfigField("String", "OPENAI_API_KEY", "\"$openAiKey\"")
+        // No OpenAI key: cloud-routed voice turns go through the voice-route
+        // Edge Function, which holds the key in Supabase secrets.
         buildConfigField(
             "String",
             "AUTH_REDIRECT",

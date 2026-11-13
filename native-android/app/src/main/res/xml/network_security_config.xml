@@ -1,13 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-     The VPS voice pipeline is still reached over plain ws:// by the legacy
-     socket session, so exactly that host is allowed cleartext. The offline
-     Vosk assistant never leaves the phone. Everything else keeps the
-     platform default (HTTPS only).
+     Everything the app talks to is HTTPS: Supabase, storage buckets and the
+     Edge Functions. The old voice pipeline on a bare VPS spoke ws:// and has
+     been removed, so no cleartext exception is needed.
 -->
-<network-security-config>
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">45.13.232.205</domain>
-        <!-- Legacy Pipecat socket on the same box -->
-    </domain-config>
-</network-security-config>
+<network-security-config />

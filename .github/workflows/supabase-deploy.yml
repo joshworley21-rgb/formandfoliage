@@ -81,9 +81,13 @@ jobs:
 
       # v2 is a composite action: no Node runtime of its own, so it cannot be
       # caught by the next runtime deprecation the way v1 was by Node 20.
+      #
+      # Pin the version: with `latest` the action has to ask GitHub's API which
+      # release is newest, and unauthenticated runners share IPs, so a busy
+      # morning fails the whole deploy with "rate limit exceeded".
       - uses: supabase/setup-cli@v2
         with:
-          version: latest
+          version: 3.1.0
 
       # config.toml carries a project_id, and if it names a different project
       # from the one being deployed to, the CLI follows the file rather than the
@@ -165,7 +169,9 @@ jobs:
 
       - name: Deploy the Edge Functions
         if: ${{ env.DO_FUNCTIONS == 'true' }}
-        run: supabase functions deploy --project-ref "$PROJECT_REF"
+        # --yes: newer CLIs ask for confirmation when deploying several
+        # functions, and a runner has no terminal to answer with.
+        run: supabase functions deploy --remote="$PROJECT_REF" --yes
 
       - name: Summary
         run: |

@@ -34,6 +34,12 @@ verify_jwt = true
 [functions.address-lookup]
 verify_jwt = true
 
+# Cloud fallback for the voice assistant. Holds the OpenAI key server-side,
+# runs the pricing/quote tools, and returns one spoken sentence. Signed in
+# only, so the endpoint cannot be used as a free token faucet.
+[functions.voice-route]
+verify_jwt = true
+
 # Public: the customer-facing enquiry form posts here from any website, so there
 # is no JWT to verify. Protected by the owner's enquiry_key and a honeypot field.
 [functions.public-enquiry]

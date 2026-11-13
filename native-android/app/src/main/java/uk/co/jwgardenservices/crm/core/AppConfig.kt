@@ -9,18 +9,4 @@ object AppConfig {
     val authScheme: String = BuildConfig.AUTH_SCHEME
     val authHost: String = BuildConfig.AUTH_HOST
     val authRedirect: String = BuildConfig.AUTH_REDIRECT
-
-    /**
-     * The VPS voice pipeline (Pipecat WebSocket transport: Whisper STT,
-     * Ollama brain, Kokoro TTS). Unencrypted ws:// on purpose for now —
-     * move to wss:// behind a domain before using it for anything sensitive.
-     */
-    const val ASSISTANT_WS_URL: String = "ws://45.13.232.205:8765/ws"
-
-    /**
-     * Optional key for the hybrid online fallback. Empty when the build did
-     * not provide OPENAI_API_KEY; cloud-routed queries then speak a friendly
-     * "not configured" message instead of failing.
-     */
-    val openAiApiKey: String = BuildConfig.OPENAI_API_KEY
 }

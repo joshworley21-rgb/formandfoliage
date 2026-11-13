@@ -18,10 +18,16 @@ the phone talks to Supabase directly, and nothing needs a web server.
 | `monzo-callback`     | new — where Monzo returns the browser after authorising      | anyone (a browser mid-OAuth)                              |
 | `monzo-sync`         | new — pulls recent payments and suggests matches             | signed-in user, or the scheduler via the service-role key |
 | `monzo-webhook`      | new — Monzo posts payments here as they land                 | Monzo, via a secret token in the URL                      |
+| `voice-route`        | new — the voice assistant's cloud fallback                   | signed-in user                                            |
 
 `public-quote` is how the customer's accept page reaches a quote: the `quotes`
 table has no anon policy, so this function is the only way in and it returns
 only the fields that page needs.
+
+`voice-route` holds `OPENAI_API_KEY` and the illustrative rate card, so the
+assistant can answer live-pricing and quote turns without a key inside the APK.
+Only those turns leave the phone; the assistant's own clients, jobs, hours and
+invoices are answered on-device.
 
 `create-invoice` has to run here rather than on the phone because
 `next_invoice_number()` is granted to `service_role` only — invoice numbers must
@@ -50,6 +56,9 @@ supabase link --project-ref <your-project-ref>
 # 3. Give the functions their secrets. SUPABASE_URL, SUPABASE_ANON_KEY and
 #    SUPABASE_SERVICE_ROLE_KEY are provided by the platform automatically.
 supabase secrets set RESEND_API_KEY=re_your_key_here
+
+#    Only if you want spoken online rates (voice-route).
+supabase secrets set OPENAI_API_KEY=sk-...
 
 #    Only if you want the Monzo bank feed — see "Monzo bank feed" below.
 supabase secrets set MONZO_CLIENT_ID=oauth2client_... MONZO_CLIENT_SECRET=mnzconf...

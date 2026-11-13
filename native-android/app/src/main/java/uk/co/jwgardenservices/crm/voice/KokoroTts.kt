@@ -43,16 +43,25 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     @Volatile
     private var closed = false
 
-    /** Synthesise [text] with [speakerId] and play it, suspending until the audio has finished. */
-    suspend fun speak(text: String, speakerId: Int = KokoroVoice.BmFable.speakerId) {
+    /** Set by [stopPlayback] so playback does not hold the mic for the rest of the clip. */
+    @Volatile
+    private var stopRequested = false
+
+    /** Synthesise [text] with [speakerId] at [speed] and play it, suspending until the audio has finished. */
+    suspend fun speak(
+        text: String,
+        speakerId: Int = KokoroVoice.BmFable.speakerId,
+        speed: Float = AssistantPreferences.DEFAULT_SPEED,
+    ) {
         val clean = text.trim()
         if (closed || clean.isEmpty()) return
-        CrashLog.note(context, TAG, "speak: ${clean.take(80)} (sid=$speakerId)")
+        CrashLog.note(context, TAG, "speak: ${clean.take(80)} (sid=$speakerId, speed=$speed)")
         speakLock.withLock {
             if (closed) return@withLock
+            stopRequested = false
             val engine = ensureEngine() ?: return@withLock
             val audio = withContext(Dispatchers.Default) {
-                engine.generate(clean, speakerId, SPEED)
+                engine.generate(clean, speakerId, speed.coerceIn(AssistantPreferences.MIN_SPEED, AssistantPreferences.MAX_SPEED))
             }
             if (!closed) play(audio)
         }
@@ -60,7 +69,23 @@ class KokoroTts(private val context: Context) : AutoCloseable {
 
     /** Cut playback short, e.g. when a phone call takes the audio focus. */
     fun stopPlayback() {
+        stopRequested = true
         runCatching { track?.pause() }
+    }
+
+    /**
+     * Drop the loaded engine so the next reply picks up a changed voice or a
+     * newly installed fp32 model. Waits for any sentence in flight.
+     */
+    suspend fun reload() {
+        if (closed) return
+        speakLock.withLock {
+            loadLock.withLock {
+                runCatching { tts?.release() }
+                tts = null
+            }
+        }
+        CrashLog.note(context, TAG, "engine reloaded after a voice change")
     }
 
     private suspend fun ensureEngine(): OfflineTts? {
@@ -77,46 +102,66 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                 // devices. Copying once with ordinary streams is reliable.
                 val highQuality = AssistantPreferences.highQualityFlow(context).first() &&
                     KokoroHqDownloader.isInstalled(context)
-                val modelPath = if (highQuality) {
-                    KokoroHqDownloader.modelFile(context).absolutePath
+                val created = if (highQuality) {
+                    buildEngine(dir, KokoroHqDownloader.modelFile(context), "fp32")
+                        ?: run {
+                            // A corrupt or unsupported download must never leave
+                            // the assistant mute: fall back to the bundled voice.
+                            CrashLog.note(context, TAG, "fp32 model failed to load; using int8")
+                            buildEngine(dir, File(dir, "model.int8.onnx"), "int8")
+                        }
                 } else {
-                    File(dir, "model.int8.onnx").absolutePath
+                    buildEngine(dir, File(dir, "model.int8.onnx"), "int8")
                 }
-                CrashLog.note(context, TAG, "model=${if (highQuality) "fp32" else "int8"}")
-                val config = OfflineTtsConfig(
-                    model = OfflineTtsModelConfig(
-                        kokoro = OfflineTtsKokoroModelConfig(
-                            model = modelPath,
-                            voices = File(dir, "voices.bin").absolutePath,
-                            tokens = File(dir, "tokens.txt").absolutePath,
-                            dataDir = File(dir, "espeak-ng-data").absolutePath,
-                            // The GB lexicon plus en-gb made this build
-                            // produce empty audio, so keep the proven US
-                            // lexicon and let the voice bank decide the accent.
-                            lexicon = File(dir, "lexicon-us-en.txt").absolutePath,
-                            lengthScale = 1.0f,
-                        ),
-                        numThreads = 4,
-                        provider = "cpu",
-                    ),
-                    maxNumSentences = 1,
-                )
-                CrashLog.note(context, TAG, "creating OfflineTts from ${dir.absolutePath}")
-                val created = try {
-                    OfflineTts(assetManager = null, config = config)
-                } catch (error: Exception) {
-                    CrashLog.note(context, TAG, "OfflineTts failed: ${error.message}")
-                    Log.e(TAG, "OfflineTts creation failed", error)
-                    return@withContext null
-                }
-                CrashLog.note(context, TAG, "OfflineTts ready: ${created.sampleRate()} Hz")
-                Log.i(TAG, "Kokoro ready: ${created.sampleRate()} Hz, ${created.numSpeakers()} voices")
-                if (created.sampleRate() != SAMPLE_RATE) {
-                    Log.w(TAG, "Expected $SAMPLE_RATE Hz but the model reports ${created.sampleRate()} Hz")
-                }
+                if (created == null) return@withContext null
                 tts = created
                 created
             }
+        }
+    }
+
+    /**
+     * Create an [OfflineTts] for [model], or null when the runtime refuses it.
+     * Null rather than an exception lets the caller fall back to the bundled
+     * int8 model instead of leaving the assistant silent.
+     */
+    private fun buildEngine(dir: File, model: File, label: String): OfflineTts? {
+        CrashLog.note(context, TAG, "model=$label (${model.length() / 1048576} MB)")
+        val config = OfflineTtsConfig(
+            model = OfflineTtsModelConfig(
+                kokoro = OfflineTtsKokoroModelConfig(
+                    model = model.absolutePath,
+                    voices = File(dir, "voices.bin").absolutePath,
+                    tokens = File(dir, "tokens.txt").absolutePath,
+                    dataDir = File(dir, "espeak-ng-data").absolutePath,
+                    // The GB lexicon plus en-gb made this build produce empty
+                    // audio, so keep the proven US lexicon and let the voice
+                    // bank decide the accent.
+                    lexicon = File(dir, "lexicon-us-en.txt").absolutePath,
+                    lengthScale = 1.0f,
+                ),
+                numThreads = 4,
+                provider = "cpu",
+            ),
+            maxNumSentences = 1,
+        )
+        val started = System.currentTimeMillis()
+        return try {
+            val created = OfflineTts(assetManager = null, config = config)
+            CrashLog.note(
+                context,
+                TAG,
+                "OfflineTts ready ($label) in ${System.currentTimeMillis() - started} ms",
+            )
+            Log.i(TAG, "Kokoro $label ready: ${created.sampleRate()} Hz, ${created.numSpeakers()} voices")
+            if (created.sampleRate() != SAMPLE_RATE) {
+                Log.w(TAG, "Expected $SAMPLE_RATE Hz but the model reports ${created.sampleRate()} Hz")
+            }
+            created
+        } catch (error: Exception) {
+            CrashLog.note(context, TAG, "OfflineTts failed ($label): ${error.message}")
+            Log.e(TAG, "OfflineTts creation failed for $label", error)
+            null
         }
     }
 
@@ -217,8 +262,15 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             if (player.write(pcm, 0, pcm.size) <= 0) return
             player.play()
             // Static playback has no blocking write; wait out the clip and a
-            // small tail so the last syllable is not cut off.
-            delay(pcm.size * 1000L / audio.sampleRate + 60)
+            // small tail so the last syllable is not cut off. Check in slices
+            // so stopPlayback (a phone call taking the mic) releases the
+            // assistant immediately instead of holding it for the whole clip.
+            var remaining = pcm.size * 1000L / audio.sampleRate + 60
+            while (remaining > 0 && !stopRequested && !closed) {
+                val slice = minOf(50L, remaining)
+                delay(slice)
+                remaining -= slice
+            }
         } finally {
             runCatching { player.stop() }
             player.release()
@@ -249,7 +301,5 @@ class KokoroTts(private val context: Context) : AutoCloseable {
 
         /** Bump whenever the set of copied files changes. */
         const val COPY_VERSION = "2"
-
-        const val SPEED = 1.0f
     }
 }

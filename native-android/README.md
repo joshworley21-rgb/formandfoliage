@@ -184,29 +184,39 @@ deliberately left on the web for now. The smaller known gaps:
   `qwen2.5-1.5b-instruct-q4_k_m.gguf`; any `.gguf` works). The result is
   logged as JSON under the `QwenIntent` tag.
 - The JSON contract lives in `app/src/main/assets/intent.gbnf`:
-  `{ "intent": "log_hours" | "check_schedule" | "quote" | "other",
+  `{ "intent": "log_hours" | "check_schedule" | "next_job" | "mark_job_done"
+  | "who_owes_me" | "weekly_earnings" | "quote" | "other",
   "client_or_topic": "string", "requires_cloud": boolean }`.
   The current AAR does not expose llama.cpp's grammar sampler, so the
   grammar is enforced by prompt plus strict validation, with a deterministic
   rule classifier as the fallback; the logged line always matches the
   schema. Swap in a grammar-aware binding (or add the official JNI) to make
   the constraint sampler-level.
+- **Local actions**: `VoiceActionRunner` answers "what's next" (next booked
+  job), "mark Smiths done" (completes that client's next scheduled job at its
+  booked duration), "who owes me" (unpaid invoice totals by client) and
+  "what have I earned this week" (visits since Monday) straight from the Room
+  cache, then speaks the result. A command missing a slot — "log two hours"
+  with no client, or "log Smiths" with no hours — is remembered and completed
+  by the next sentence ("two and a half"), so the conversation takes two
+  turns instead of failing. Client names are matched with a one-letter
+  tolerance for names of five letters or more.
 - **Hybrid routing**: Qwen sets `requires_cloud: true` for live pricing,
   supplier data, dynamic quote calculations, weather/traffic or anything not
   stored on the phone. The service then says "Checking online rates…" and
-  `OpenAiCloudRouter` posts the turn to OpenAI (`gpt-4o-mini`) with two
-  function tools — `fetch_live_pricing(material_type)` and
+  `OpenAiCloudRouter` posts the turn to the `voice-route` Edge Function, which
+  calls OpenAI (`gpt-4o-mini`) with two function tools —
+  `fetch_live_pricing(material_type)` and
   `calculate_commercial_quote(client, scope)`. Only those turns leave the
   phone; everything else stays local. The returned sentence is read aloud by
-  Kokoro. Tool results currently come from an illustrative local rate card
+  Kokoro. Tool results come from an illustrative rate card in the function
   (labelled as an estimate); swap `RATE_CARD`/`calculateQuote` for a real
   supplier API when one exists.
-- **Cloud key**: never committed. Build with
-  `-POPENAI_API_KEY=sk-...` or export `OPENAI_API_KEY`; without it,
-  cloud-routed requests speak "Online rates are not set up on this phone."
-  and the local path keeps working. The key is injected into `BuildConfig`,
-  so it can be extracted from the APK — for a public release, proxy these
-  calls through the Supabase backend instead of shipping the key.
+- **Cloud key**: no OpenAI key is baked into the APK. It lives in the
+  Supabase project as a secret (`supabase secrets set OPENAI_API_KEY=...`)
+  and is only reachable by a signed-in user's token through `voice-route`.
+  Without the secret, cloud-routed turns speak "I couldn't reach the online
+  rates" and the local path keeps working.
 - To install the GGUF on a connected phone and watch the result:
 
   ```
@@ -219,13 +229,11 @@ deliberately left on the web for now. The smaller known gaps:
 - The recognizer is read from assets via `OnlineRecognizer(assetManager,
   config)`. Its endpoint detector (roughly 1.2 s of trailing silence) is what
   decides the speaker has stopped and commits the line.
-- The transcript is display-only for now: no command parsing, replies or
-  server brain is wired to it. `VoiceExecutor` and `parseVoiceCommand` are
-  still in the tree for when that comes back.
-- **Settings → Voice & models** opens the assistant settings: pick the
-  Kokoro profile (`bm_fable` or `bf_emma`) and inspect everything under
-  `filesDir/models`, with size and date. The voice changes on the next
-  reply.
+- **Settings → Voice & models** opens the assistant settings: pick one of the
+  eight British Kokoro profiles (`bf_alice` through `bm_lewis`), set the
+  speaking rate (0.80×–1.30×), preview it, and inspect everything under
+  `filesDir/models`, with size and date. Voice, rate and quality apply from
+  the next reply.
 - **Conversation flow**: there is no extra "Got it." before local answers —
   the reply itself is spoken as soon as the action finishes. Only a
   cloud-routed turn says "Checking online rates…" first.
@@ -239,20 +247,29 @@ deliberately left on the web for now. The smaller known gaps:
   espeak's `en-gb`, and Kokoro's padding silence is trimmed before playback
   so replies are not separated by dead air. Settings → Assistant settings →
   Voice quality can download the full fp32 model (350 MB, Wi-Fi only) for a
-  more natural voice; it applies the next time the Assistant starts. Microphone frames are discarded for
-  the whole utterance so the phone does not transcribe itself; the mic
-  reopens the instant playback finishes, so the next command is hands-free.
-  The Android native TTS engine and its manifest query are gone.
+  more natural voice; it applies from the next reply, no restart needed.
+  `KokoroHqDownloader` prefers the plain `model.onnx` in the public
+  `voice-models` Storage bucket (`scripts/upload-kokoro-fp32.sh` populates
+  it): one resumable HTTP `Range` download with real megabytes and a 60 s
+  stall watchdog. Until that object exists it falls back to the official
+  `.tar.bz2` from GitHub, downloaded to `cacheDir` and then unpacked in a
+  separate "Unpacking" phase — bzip2 on a phone takes minutes, so the two
+  phases are shown separately. Either way the work runs outside the settings
+  screen, so leaving it does not cancel the download, and the bundled int8
+  model is used if the fp32 file ever fails to load. Microphone frames are
+  discarded for the whole utterance so the phone does not transcribe itself;
+  the mic reopens the instant playback finishes, so the next command is
+  hands-free. The Android native TTS engine and its manifest query are gone.
 - `:app:downloadKokoro` extracts only the English pieces from
   `kokoro-int8-multi-lang-v1_0.tar.bz2`: `model.int8.onnx` (109 MB),
   `voices.bin` (27 MB), `tokens.txt`, the US/GB lexicons and the 19 MB
   `espeak-ng-data` phonemizer. The Chinese dictionaries are skipped. int8
-  keeps the APK installable; the optional fp32 model is fetched from the
-  same release by `KokoroHqDownloader` when enabled in settings.
-- LiveKit, Vosk, the VPS call path and the JitPack repository they needed
-  have all been removed. Speech runs on the vendored official
-  `sherpa-onnx-1.13.8.aar` and llama.cpp comes from the llama.android AAR;
-  neither model weights nor the sherpa AAR are committed.
+  keeps the APK installable; the optional fp32 model comes from the Storage
+  bucket when it has been published, and from the same release otherwise.
+- LiveKit, Vosk, the VPS call path, the Pipecat WebSocket session and the
+  JitPack repository they needed have all been removed. Speech runs on the
+  vendored official `sherpa-onnx-1.13.8.aar` and llama.cpp comes from the
+  llama.android AAR; neither model weights nor the sherpa AAR are committed.
 - Known limits: the recognizer is English-only, punctuation and casing are
   not restored, the first utterance waits for the Kokoro model to load
   (a few seconds), and the screen needs to stay on while listening. A
