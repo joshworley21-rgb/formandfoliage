@@ -161,6 +161,16 @@ fun AssistantScreen() {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
 
+        if (listening) {
+            Spacer(Modifier.height(8.dp))
+            LinearProgressIndicator(
+                progress = { state.level },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp),
+            )
+        }
+
         state.message?.let { message ->
             Spacer(Modifier.height(8.dp))
             Text(

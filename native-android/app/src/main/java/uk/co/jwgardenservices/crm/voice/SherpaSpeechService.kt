@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import kotlin.math.sqrt
 
 /**
  * Offline speech recognition for the Assistant tab, backed by sherpa-onnx and
@@ -67,6 +68,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         val partial: String = "",
         /** The last finished utterance. */
         val finalText: String = "",
+        /** Current input loudness, 0..1, for the on-screen meter. */
+        val level: Float = 0f,
     )
 
     private val _state = MutableStateFlow(UiState())
@@ -204,14 +207,32 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @SuppressLint("MissingPermission") // checked by startListening before this point
     private fun process(engine: OnlineRecognizer, record: AudioRecord) {
         val stream = engine.createStream()
+        Log.i(TAG, "Recognition loop starting (source=${record.audioSource})")
         try {
             record.startRecording()
+            if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                fail("The microphone did not start recording.")
+                return
+            }
             val buffer = ShortArray(FRAME_SAMPLES)
+            var frames = 0
             while (listening) {
                 val read = record.read(buffer, 0, buffer.size)
-                if (read <= 0) continue
+                if (read < 0) {
+                    Log.e(TAG, "AudioRecord.read failed with $read")
+                    continue
+                }
+                if (read == 0) continue
                 if (paused) continue
+                frames += 1
                 feed(engine, stream, buffer, read)
+                if (frames % 25 == 0) {
+                    Log.d(
+                        TAG,
+                        "frames=$frames read=$read rms=${_state.value.level} " +
+                            "partial=${_state.value.partial.length} final=${_state.value.finalText.length}",
+                    )
+                }
             }
             finish(engine, stream)
         } catch (error: Exception) {
@@ -232,12 +253,18 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     private fun feed(engine: OnlineRecognizer, stream: OnlineStream, buffer: ShortArray, length: Int) {
         val samples = FloatArray(length) { buffer[it] / 32768.0f }
+        var energy = 0.0
+        for (sample in samples) energy += sample * sample
+        val level = (sqrt(energy / samples.size) * 8).toFloat().coerceIn(0f, 1f)
+
         stream.acceptWaveform(samples, SAMPLE_RATE)
         while (engine.isReady(stream)) engine.decode(stream)
 
         val text = engine.getResult(stream).text.trim()
         if (text.isNotEmpty()) {
-            _state.update { it.copy(partial = text) }
+            _state.update { it.copy(partial = text, level = level) }
+        } else {
+            _state.update { it.copy(level = level) }
         }
         if (engine.isEndpoint(stream)) {
             engine.reset(stream)
@@ -279,6 +306,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 tokens = TOKENS,
                 numThreads = 2,
                 provider = "cpu",
+                modelType = "zipformer",
             ),
             // Commit the line quickly after speech ends: 0.8 s of trailing
             // silence even without recognised words, 0.5 s once something was
@@ -291,7 +319,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             enableEndpoint = true,
             decodingMethod = "greedy_search",
         )
-        return OnlineRecognizer(assetManager = context.assets, config = config)
+        Log.i(TAG, "Loading streaming Zipformer: $ENCODER")
+        return OnlineRecognizer(assetManager = context.assets, config = config).also {
+            Log.i(TAG, "Streaming recognizer ready")
+        }
     }
 
     /** Fail with a clear message instead of a native crash when assets are absent. */
@@ -314,7 +345,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         // Four frames of slack keeps a slow decode from overrunning the buffer.
         val bytes = maxOf(minBytes, FRAME_SAMPLES * 2 * 4)
         val record = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
+            MediaRecorder.AudioSource.VOICE_RECOGNITION,
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
