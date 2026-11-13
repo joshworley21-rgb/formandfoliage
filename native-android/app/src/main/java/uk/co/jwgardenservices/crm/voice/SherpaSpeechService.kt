@@ -306,7 +306,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 tokens = TOKENS,
                 numThreads = 2,
                 provider = "cpu",
-                modelType = "zipformer",
+                // Leave modelType empty: the 06-26 archive reports
+                // "zipformer2" in its ONNX metadata, and forcing "zipformer"
+                // makes the native loader crash while parsing the encoder.
             ),
             // Commit the line quickly after speech ends: 0.8 s of trailing
             // silence even without recognised words, 0.5 s once something was
