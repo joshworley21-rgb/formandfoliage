@@ -54,6 +54,9 @@ class AssistantService : Service() {
     /** Created on first cloud-routed turn; holds the build's API key only. */
     private val cloud by lazy { OpenAiCloudRouter(AppConfig.openAiApiKey) }
 
+    /** Writes spoken commands into the same Room cache the screens use. */
+    private val actions by lazy { VoiceActionRunner() }
+
     private val _speaking = MutableStateFlow(false)
     val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
 
@@ -153,7 +156,11 @@ class AssistantService : Service() {
                         voice.speakerId,
                     )
                 } else {
-                    speaker.speak(confirmationFor(intent), voice.speakerId)
+                    val executed = runCatching { actions.run(text, intent) }
+                        .onFailure { CrashLog.note(this, TAG, "action failed: ${it.message}") }
+                        .getOrNull()
+                    CrashLog.note(this, TAG, "action reply: ${executed ?: "none"}")
+                    speaker.speak(executed ?: confirmationFor(intent), voice.speakerId)
                 }
             } catch (error: Exception) {
                 Log.w(TAG, "Kokoro playback failed", error)
