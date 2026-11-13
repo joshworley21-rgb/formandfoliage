@@ -69,6 +69,7 @@ import uk.co.jwgardenservices.crm.ui.schedule.ScheduleScreen
 import uk.co.jwgardenservices.crm.ui.settings.SettingsScreen
 import uk.co.jwgardenservices.crm.ui.visits.VisitsScreen
 import uk.co.jwgardenservices.crm.ui.voice.AssistantScreen
+import uk.co.jwgardenservices.crm.ui.voice.AssistantSettingsScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -242,7 +243,13 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                         AssistantScreen()
                     }
                     composable(AppDestination.Settings.route) {
-                        SettingsScreen(viewModel = crmViewModel)
+                        SettingsScreen(
+                            viewModel = crmViewModel,
+                            onOpenAssistantSettings = { navController.navigate("assistant-settings") },
+                        )
+                    }
+                    composable("assistant-settings") {
+                        AssistantSettingsScreen(onBack = { navController.popBackStack() })
                     }
                 }
             }

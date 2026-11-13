@@ -153,11 +153,14 @@ deliberately left on the web for now. The smaller known gaps:
 ## Voice assistant (offline speech to text)
 
 - The **Assistant** tab (mic icon, centre of the phone bar between Schedule
-  and Invoices) listens with sherpa-onnx entirely on the phone. Tap the mic
-  to start, tap again to stop; tap the mic a second time after pausing to
-  continue. Partial words appear greyed while the recognizer is still
-  deciding and each finished sentence stays in the panel. Clients lives
-  behind More; staff keep their shorter bar.
+  and Invoices) is hands-free: granting the microphone permission starts a
+  foreground service that owns the recording loop, so there is no
+  push-to-talk button. Speech is recognised entirely on the phone and
+  partial words appear greyed while the recognizer is still deciding.
+  Clients lives behind More; staff keep their shorter bar.
+- **Endpoint detection** commits a line 0.5 s after you stop speaking (or
+  0.8 s of trailing silence before any words were recognised), so each
+  command is finalised without a tap.
 - **Bundled model**: the streaming Zipformer (English, 20M parameters, int8
   encoder/joiner) ships in
   `app/src/main/assets/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/`
@@ -183,6 +186,22 @@ deliberately left on the web for now. The smaller known gaps:
   rule classifier as the fallback; the logged line always matches the
   schema. Swap in a grammar-aware binding (or add the official JNI) to make
   the constraint sampler-level.
+- **Hybrid routing**: Qwen sets `requires_cloud: true` for live pricing,
+  supplier data, dynamic quote calculations, weather/traffic or anything not
+  stored on the phone. The service then says "Checking online rates…" and
+  `OpenAiCloudRouter` posts the turn to OpenAI (`gpt-4o-mini`) with two
+  function tools — `fetch_live_pricing(material_type)` and
+  `calculate_commercial_quote(client, scope)`. Only those turns leave the
+  phone; everything else stays local. The returned sentence is read aloud by
+  Kokoro. Tool results currently come from an illustrative local rate card
+  (labelled as an estimate); swap `RATE_CARD`/`calculateQuote` for a real
+  supplier API when one exists.
+- **Cloud key**: never committed. Build with
+  `-POPENAI_API_KEY=sk-...` or export `OPENAI_API_KEY`; without it,
+  cloud-routed requests speak "Online rates are not set up on this phone."
+  and the local path keeps working. The key is injected into `BuildConfig`,
+  so it can be extracted from the APK — for a public release, proxy these
+  calls through the Supabase backend instead of shipping the key.
 - To install the GGUF on a connected phone and watch the result:
 
   ```
@@ -198,14 +217,25 @@ deliberately left on the web for now. The smaller known gaps:
 - The transcript is display-only for now: no command parsing, replies or
   server brain is wired to it. `VoiceExecutor` and `parseVoiceCommand` are
   still in the tree for when that comes back.
+- **Settings → Voice & models** opens the assistant settings: pick the
+  Kokoro profile (`bm_fable` or `bf_emma`) and inspect everything under
+  `filesDir/models`, with size and date. The voice changes on the next
+  reply.
+- **Verbal filler**: the moment an endpoint commits, Kokoro says "Got it."
+  (or "Checking schedule." for diary-flavoured wording) before the Qwen
+  model runs, so the call never goes silent while the intent is worked out.
+- **Audio focus**: the service takes `AUDIOFOCUS_GAIN_TRANSIENT` when it
+  starts and abandons it on shutdown, so an incoming call or the van's media
+  takes priority; losing focus stops Kokoro mid-sentence.
 - **Spoken confirmation with Kokoro**: once Qwen has classified the line,
   `KokoroTts` synthesises a short reply on-device with Kokoro-82M and plays
   it at 24 kHz. The voice is `bm_fable` (speaker 25 of
   `kokoro-multi-lang-v1_0`). It reads "Logged your hours for <client>",
   "Checking your schedule", "Preparing a quote for <client>" or "Command
   received", depending on the intent. Microphone frames are discarded for
-  the whole utterance so the phone does not transcribe itself; the Android
-  native TTS engine and its manifest query are gone.
+  the whole utterance so the phone does not transcribe itself; the mic
+  reopens the instant playback finishes, so the next command is hands-free.
+  The Android native TTS engine and its manifest query are gone.
 - `:app:downloadKokoro` extracts only the English pieces from
   `kokoro-int8-multi-lang-v1_0.tar.bz2`: `model.int8.onnx` (109 MB),
   `voices.bin` (27 MB), `tokens.txt`, `lexicon-us-en.txt` and the 19 MB

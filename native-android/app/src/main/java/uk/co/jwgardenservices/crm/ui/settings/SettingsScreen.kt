@@ -106,7 +106,10 @@ private fun formOf(settings: Settings?): SettingsForm = if (settings == null) {
 }
 
 @Composable
-fun SettingsScreen(viewModel: CrmViewModel) {
+fun SettingsScreen(
+    viewModel: CrmViewModel,
+    onOpenAssistantSettings: () -> Unit = {},
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -247,6 +250,23 @@ fun SettingsScreen(viewModel: CrmViewModel) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+        }
+
+        item {
+            SectionCard(title = "Offline assistant") {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        text = "Choose the Kokoro voice and check which local models are installed.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    OutlinedButton(onClick = onOpenAssistantSettings) {
+                        Text("Voice & models")
+                    }
                 }
             }
         }

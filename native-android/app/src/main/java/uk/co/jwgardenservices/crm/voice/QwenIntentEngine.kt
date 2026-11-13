@@ -135,8 +135,10 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
             appendLine("You convert a gardener's spoken command into one JSON object and nothing else.")
             appendLine("Intents: log_hours (time worked), check_schedule (today, diary, next job),")
             appendLine("quote (price or quote), other (anything else).")
-            appendLine("requires_cloud is true only when the answer needs live information such as")
-            appendLine("weather, traffic or supplier prices; otherwise false.")
+            appendLine("requires_cloud is true when the answer needs live or external data:")
+            appendLine("current material prices, supplier rates, a dynamic quote or estimate,")
+            appendLine("weather, traffic, or anything not stored on this phone. Otherwise false.")
+            appendLine("Local actions such as logging hours or checking today's schedule are false.")
             appendLine("client_or_topic is the client or subject mentioned, or an empty string.")
             appendLine("Reply with JSON only, matching this grammar exactly:")
             append(grammar)
@@ -171,7 +173,21 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
             text.containsAny("quote", "price", "cost", "charge", "how much") -> Kind.Quote
             else -> Kind.Other
         }
-        val needsCloud = text.containsAny("weather", "forecast", "traffic", "live price")
+        val needsCloud = text.containsAny(
+            "weather",
+            "forecast",
+            "traffic",
+            "supplier",
+            "live price",
+            "current price",
+            "price list",
+            "website",
+            "online",
+            "quote",
+            "how much",
+            "cost",
+            "price",
+        )
         return Intent(kind, transcript.take(MAX_TOPIC), needsCloud)
     }
 

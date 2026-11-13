@@ -87,6 +87,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @Volatile
     private var paused = false
 
+    /** True when playback should reopen the mic; cleared by a user stop. */
+    @Volatile
+    private var resumeAfterPause = false
+
     @Volatile
     private var released = false
 
@@ -145,6 +149,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     fun stopListening() {
         if (!listening) return
         listening = false
+        resumeAfterPause = false
         // read() is blocking, so stop() is what wakes the thread.
         runCatching { audioRecord?.stop() }
         _state.update { it.copy(phase = Phase.Ready) }
@@ -152,13 +157,29 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     fun isListening(): Boolean = listening
 
-    /** Discard microphone frames while the confirmation is spoken. */
+    /**
+     * Discard microphone frames while the confirmation is spoken, remembering
+     * that the mic should reopen as soon as playback finishes.
+     */
     fun pauseForSpeech() {
+        if (!listening) return
         paused = true
+        resumeAfterPause = true
     }
 
-    fun resumeAfterSpeech() {
+    /**
+     * Reopen the microphone once Kokoro has finished. Normally the AudioRecord
+     * loop is still running and this simply lets frames through again; if the
+     * loop ended while the confirmation played, a fresh listening session is
+     * started so the next command needs no tap.
+     */
+    suspend fun resumeAfterSpeech() {
         paused = false
+        val reopen = resumeAfterPause
+        resumeAfterPause = false
+        if (reopen && !listening && !released) {
+            startListening()
+        }
     }
 
     fun clear() {
@@ -168,6 +189,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     override fun close() {
         released = true
         listening = false
+        resumeAfterPause = false
         runCatching { audioRecord?.stop() }
         val worker = thread
         thread = null
@@ -258,11 +280,12 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 numThreads = 2,
                 provider = "cpu",
             ),
-            // Endpoint on roughly 1.4 s of trailing silence, which is what
-            // turns "the speaker stopped" into a finished line on screen.
+            // Commit the line quickly after speech ends: 0.8 s of trailing
+            // silence even without recognised words, 0.5 s once something was
+            // heard. This is what makes the loop hands-free.
             endpointConfig = EndpointConfig(
-                rule1 = EndpointRule(mustContainNonSilence = false, minTrailingSilence = 2.4f, minUtteranceLength = 0f),
-                rule2 = EndpointRule(mustContainNonSilence = true, minTrailingSilence = 1.2f, minUtteranceLength = 0f),
+                rule1 = EndpointRule(mustContainNonSilence = false, minTrailingSilence = 0.8f, minUtteranceLength = 0f),
+                rule2 = EndpointRule(mustContainNonSilence = true, minTrailingSilence = 0.5f, minUtteranceLength = 0f),
                 rule3 = EndpointRule(mustContainNonSilence = false, minTrailingSilence = 0f, minUtteranceLength = 20f),
             ),
             enableEndpoint = true,

@@ -21,8 +21,8 @@ import kotlinx.coroutines.withContext
  *
  * The model, the voice bank and the espeak-ng phonemizer data are read
  * straight from `assets/kokoro-multi-lang-v1_0` (fetched by
- * `:app:downloadKokoro`). The English voice is bm_fable, which is speaker 25
- * in that model's voice bank.
+ * `:app:downloadKokoro`). The voice profile is chosen in the assistant
+ * settings (`bm_fable` by default, also `bf_emma`).
  *
  * Kokoro always synthesises at 24 kHz; [speak] plays the samples through an
  * AudioTrack and returns once playback finishes, so callers can mute the mic
@@ -39,18 +39,23 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     @Volatile
     private var closed = false
 
-    /** Synthesise [text] and play it, suspending until the audio has finished. */
-    suspend fun speak(text: String) {
+    /** Synthesise [text] with [speakerId] and play it, suspending until the audio has finished. */
+    suspend fun speak(text: String, speakerId: Int = KokoroVoice.BmFable.speakerId) {
         val clean = text.trim()
         if (closed || clean.isEmpty()) return
         speakLock.withLock {
             if (closed) return@withLock
             val engine = ensureEngine() ?: return@withLock
             val audio = withContext(Dispatchers.Default) {
-                engine.generate(clean, SID_BM_FABLE, SPEED)
+                engine.generate(clean, speakerId, SPEED)
             }
             if (!closed) play(audio)
         }
+    }
+
+    /** Cut playback short, e.g. when a phone call takes the audio focus. */
+    fun stopPlayback() {
+        runCatching { track?.pause() }
     }
 
     private suspend fun ensureEngine(): OfflineTts? {
@@ -151,8 +156,6 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         const val ASSET_DIR = "kokoro-multi-lang-v1_0"
         const val SAMPLE_RATE = 24_000
 
-        /** bm_fable in kokoro-multi-lang-v1_0's 53-voice bank. */
-        const val SID_BM_FABLE = 25
         const val SPEED = 1.0f
     }
 }

@@ -1,9 +1,12 @@
 package uk.co.jwgardenservices.crm.ui.voice
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
-import android.util.Log
+import android.os.IBinder
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -17,14 +20,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -34,80 +33,83 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.launch
-import uk.co.jwgardenservices.crm.voice.KokoroTts
-import uk.co.jwgardenservices.crm.voice.QwenIntentEngine
+import uk.co.jwgardenservices.crm.voice.AssistantService
 import uk.co.jwgardenservices.crm.voice.SherpaSpeechService
 
 /**
- * The Assistant tab: hold a conversation with the phone, not a server.
+ * The Assistant tab: hands-free, offline conversation with the phone.
  *
- * Tapping the mic loads the sherpa-onnx streaming Zipformer model bundled in
- * assets and then listens entirely offline. Partial words appear greyed while
- * it is still deciding, and the finished sentence is left in the panel.
+ * There is no push-to-talk button. As soon as the microphone permission is
+ * granted the screen starts the foreground [AssistantService], which owns the
+ * recording loop, endpoint detection, the Qwen intent model and Kokoro
+ * playback. The UI only observes state; the service reopens the microphone by
+ * itself when a spoken confirmation ends.
  */
 @Composable
 fun AssistantScreen() {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val service = remember { SherpaSpeechService(context) }
-    val speaker = remember { KokoroTts(context) }
-    val intents = remember { QwenIntentEngine(context) }
-    val state by service.state.collectAsStateWithLifecycle()
-
-    fun micGranted(): Boolean = ContextCompat.checkSelfPermission(
-        context,
-        Manifest.permission.RECORD_AUDIO,
-    ) == PackageManager.PERMISSION_GRANTED
-
-    fun listen() = scope.launch { service.startListening() }
+    var service by remember { mutableStateOf<AssistantService?>(null) }
+    var state by remember { mutableStateOf(SherpaSpeechService.UiState()) }
+    var speaking by remember { mutableStateOf(false) }
+    var granted by remember { mutableStateOf(micGranted(context)) }
 
     val permission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        if (granted) listen()
+    ) { result ->
+        granted = result
+        if (result) service?.ensureListening()
     }
 
-    DisposableEffect(service, intents) {
-        onDispose {
-            speaker.close()
-            intents.close()
-            service.close()
-        }
+    LaunchedEffect(granted) {
+        if (!granted) permission.launch(Manifest.permission.RECORD_AUDIO)
     }
 
-    // sherpa-onnx has finished a sentence: ask the local Qwen model what it
-    // means, then read the confirmation out loud with Kokoro. The mic is
-    // paused for the whole utterance, otherwise the phone would transcribe
-    // itself and answer forever. Qwen logs the intent JSON under QwenIntent.
-    LaunchedEffect(service, speaker, intents) {
-        service.transcripts.collect { text ->
-            val intent = intents.classify(text)
-            val reply = confirmationFor(intent)
-            val paused = service.isListening()
-            if (paused) service.pauseForSpeech()
-            try {
-                runCatching { speaker.speak(reply) }
-                    .onFailure { Log.w("AssistantScreen", "Kokoro playback failed", it) }
-            } finally {
-                if (paused) service.resumeAfterSpeech()
+    DisposableEffect(granted) {
+        if (!granted) return@DisposableEffect onDispose { }
+
+        val intent = Intent(context, AssistantService::class.java)
+        val connection = object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+                val bound = (binder as? AssistantService.LocalBinder)?.service() ?: return
+                service = bound
+                bound.ensureListening()
+            }
+
+            override fun onServiceDisconnected(name: ComponentName?) {
+                service = null
             }
         }
+        ContextCompat.startForegroundService(context, intent)
+        context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
+
+        onDispose {
+            service = null
+            runCatching { context.unbindService(connection) }
+            context.stopService(intent)
+        }
     }
 
-    val listening = state.phase == SherpaSpeechService.Phase.Listening
+    LaunchedEffect(service) {
+        val bound = service ?: return@LaunchedEffect
+        bound.speechState.collect { state = it }
+    }
+    LaunchedEffect(service) {
+        val bound = service ?: return@LaunchedEffect
+        bound.speaking.collect { speaking = it }
+    }
+
+    val listening = state.phase == SherpaSpeechService.Phase.Listening && !speaking
     val busy = state.phase == SherpaSpeechService.Phase.Loading
 
     Column(
@@ -124,28 +126,32 @@ fun AssistantScreen() {
         )
         Spacer(Modifier.height(2.dp))
         Text(
-            text = "Offline speech to text · sherpa-onnx",
+            text = "Hands-free · sherpa-onnx + Kokoro",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(10.dp))
 
+        val (pill, container) = when {
+            !granted -> "Microphone permission needed" to MaterialTheme.colorScheme.errorContainer
+            speaking -> "Speaking…" to MaterialTheme.colorScheme.secondaryContainer
+            state.phase == SherpaSpeechService.Phase.Listening ->
+                "Listening…" to MaterialTheme.colorScheme.primaryContainer
+            state.phase == SherpaSpeechService.Phase.Error ->
+                "Unavailable" to MaterialTheme.colorScheme.errorContainer
+            state.phase == SherpaSpeechService.Phase.Loading ->
+                "Loading model" to MaterialTheme.colorScheme.surfaceContainerHigh
+            state.phase == SherpaSpeechService.Phase.Ready ->
+                "Reopening microphone…" to MaterialTheme.colorScheme.surfaceContainerHigh
+            else -> "Starting…" to MaterialTheme.colorScheme.surfaceContainerHigh
+        }
         StatusPill(
-            text = when (state.phase) {
-                SherpaSpeechService.Phase.Idle -> "Tap the mic to start"
-                SherpaSpeechService.Phase.Loading -> "Loading model"
-                SherpaSpeechService.Phase.Ready -> "Ready"
-                SherpaSpeechService.Phase.Listening -> "Listening…"
-                SherpaSpeechService.Phase.Error -> "Unavailable"
-            },
-            container = when (state.phase) {
-                SherpaSpeechService.Phase.Listening -> MaterialTheme.colorScheme.primaryContainer
-                SherpaSpeechService.Phase.Error -> MaterialTheme.colorScheme.errorContainer
-                else -> MaterialTheme.colorScheme.surfaceContainerHigh
-            },
-            content = when (state.phase) {
-                SherpaSpeechService.Phase.Listening -> MaterialTheme.colorScheme.onPrimaryContainer
-                SherpaSpeechService.Phase.Error -> MaterialTheme.colorScheme.onErrorContainer
+            text = pill,
+            container = container,
+            content = when (container) {
+                MaterialTheme.colorScheme.errorContainer -> MaterialTheme.colorScheme.onErrorContainer
+                MaterialTheme.colorScheme.primaryContainer -> MaterialTheme.colorScheme.onPrimaryContainer
+                MaterialTheme.colorScheme.secondaryContainer -> MaterialTheme.colorScheme.onSecondaryContainer
                 else -> MaterialTheme.colorScheme.onSurfaceVariant
             },
         )
@@ -168,6 +174,13 @@ fun AssistantScreen() {
             )
         }
 
+        if (!granted) {
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = { permission.launch(Manifest.permission.RECORD_AUDIO) }) {
+                Text("Allow microphone")
+            }
+        }
+
         Spacer(Modifier.height(20.dp))
 
         Surface(
@@ -178,7 +191,11 @@ fun AssistantScreen() {
                 .fillMaxWidth()
                 .weight(1f),
         ) {
-            Box(Modifier.fillMaxSize().padding(16.dp)) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+            ) {
                 val hasText = state.finalText.isNotBlank() || state.partial.isNotBlank()
                 if (hasText) {
                     Column(
@@ -203,9 +220,9 @@ fun AssistantScreen() {
                 } else {
                     Text(
                         text = if (listening) {
-                            "Speak normally. The words appear here."
+                            "Listening. Speak naturally — the words appear here."
                         } else {
-                            "Tap the mic below and speak. Everything stays on this phone."
+                            "Everything stays on this phone. Just start speaking."
                         },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -216,7 +233,7 @@ fun AssistantScreen() {
         }
 
         if (state.finalText.isNotBlank()) {
-            TextButton(onClick = { service.clear() }) {
+            TextButton(onClick = { service?.clearTranscript() }) {
                 Icon(
                     imageVector = Icons.Outlined.Delete,
                     contentDescription = null,
@@ -226,66 +243,15 @@ fun AssistantScreen() {
                 Text("Clear")
             }
         } else {
-            Spacer(Modifier.height(48.dp))
+            Spacer(Modifier.height(16.dp))
         }
-
-        IconButton(
-            onClick = {
-                when {
-                    listening -> service.stopListening()
-                    busy -> Unit
-                    !micGranted() -> permission.launch(Manifest.permission.RECORD_AUDIO)
-                    else -> listen()
-                }
-            },
-            enabled = !busy,
-            modifier = Modifier
-                .size(88.dp)
-                .clip(CircleShape)
-                .background(
-                    if (listening) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerHigh
-                    },
-                ),
-        ) {
-            Icon(
-                imageVector = if (listening) Icons.Filled.Stop else Icons.Filled.Mic,
-                contentDescription = if (listening) "Stop listening" else "Start listening",
-                tint = if (listening) {
-                    MaterialTheme.colorScheme.onPrimary
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
-                modifier = Modifier.size(36.dp),
-            )
-        }
-
-        Spacer(Modifier.height(12.dp))
-        Text(
-            text = if (listening) "Tap to stop" else "Tap to listen",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
-/**
- * The spoken confirmation for a classified command. Kept short: it is read
- * back over the top of whatever the microphone just heard.
- */
-private fun confirmationFor(intent: QwenIntentEngine.Intent): String {
-    val topic = intent.clientOrTopic.trim()
-    return when (intent.intent) {
-        QwenIntentEngine.Kind.LogHours ->
-            if (topic.isEmpty()) "Hours logged." else "Logged your hours for $topic."
-        QwenIntentEngine.Kind.CheckSchedule -> "Checking your schedule."
-        QwenIntentEngine.Kind.Quote ->
-            if (topic.isEmpty()) "Preparing your quote." else "Preparing a quote for $topic."
-        QwenIntentEngine.Kind.Other -> "Command received."
-    }
-}
+private fun micGranted(context: Context): Boolean = ContextCompat.checkSelfPermission(
+    context,
+    Manifest.permission.RECORD_AUDIO,
+) == PackageManager.PERMISSION_GRANTED
 
 @Composable
 private fun StatusPill(text: String, container: Color, content: Color) {
