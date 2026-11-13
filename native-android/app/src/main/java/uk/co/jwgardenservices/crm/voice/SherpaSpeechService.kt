@@ -379,16 +379,16 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         const val FRAME_SAMPLES = SAMPLE_RATE / 10
 
         /**
-         * Streaming Zipformer (English, LibriSpeech + GigaSpeech, int8) from
+         * Streaming Zipformer (English, full-size LibriSpeech, int8) from
          * https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models
-         * Bigger than the 20M model it replaces, and far better on real
-         * phone audio. The decoder stays float32, as the model's own int8
-         * instructions say.
+         * Chosen over the 20M model for accuracy and over the 180 MB
+         * GigaSpeech model for APK size, while still emitting partial words
+         * live like a phone call. Decoder stays float32 per the model card.
          */
-        const val MODEL_DIR = "sherpa-onnx-streaming-zipformer-en-2023-06-21"
-        const val ENCODER = "$MODEL_DIR/encoder-epoch-99-avg-1.int8.onnx"
-        const val DECODER = "$MODEL_DIR/decoder-epoch-99-avg-1.onnx"
-        const val JOINER = "$MODEL_DIR/joiner-epoch-99-avg-1.int8.onnx"
+        const val MODEL_DIR = "sherpa-onnx-streaming-zipformer-en-2023-06-26"
+        const val ENCODER = "$MODEL_DIR/encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx"
+        const val DECODER = "$MODEL_DIR/decoder-epoch-99-avg-1-chunk-16-left-128.onnx"
+        const val JOINER = "$MODEL_DIR/joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx"
         const val TOKENS = "$MODEL_DIR/tokens.txt"
     }
 }

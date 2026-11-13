@@ -32,7 +32,9 @@ android {
         // sherpa-onnx ships native libraries for four ABIs (122 MB). Phones
         // need only the two ARM ones; dropping x86 halves the APK.
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            // arm64 only: every phone this runs on is 64-bit, and dropping
+            // the 32-bit copies removes ~25 MB of native speech libraries.
+            abiFilters += listOf("arm64-v8a")
         }
 
         // Public client configuration, overridable from gradle.properties or a
@@ -188,25 +190,25 @@ dependencies {
 // so they are not committed. This task downloads whichever file is missing (or
 // whose checksum no longer matches). preBuild depends on it, so a fresh clone
 // only needs network access once.
-val sherpaModelDir = "src/main/assets/sherpa-onnx-streaming-zipformer-en-2023-06-21"
+val sherpaModelDir = "src/main/assets/sherpa-onnx-streaming-zipformer-en-2023-06-26"
 val sherpaModelUrl =
-    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21/resolve/main"
+    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main"
 val sherpaDownloads: Map<String, Pair<String, String>> = mapOf(
     "libs/sherpa-onnx-1.13.8.aar" to (
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar" to
             "633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96"
         ),
-    "$sherpaModelDir/encoder-epoch-99-avg-1.int8.onnx" to (
-        "$sherpaModelUrl/encoder-epoch-99-avg-1.int8.onnx" to
-            "32c98281c7bd8b63e3e142d007251b37f120572e8fdea9a4f5a79ce22b10ec4f"
+    "$sherpaModelDir/encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx" to (
+        "$sherpaModelUrl/encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx" to
+            "563fde436d16cf7607cf408cd6b30909819d03162652ef389c2450ced3f45ac1"
         ),
-    "$sherpaModelDir/decoder-epoch-99-avg-1.onnx" to (
-        "$sherpaModelUrl/decoder-epoch-99-avg-1.onnx" to
-            "9da02b77cb08826756ec6a88635f35a40374e4164e7c6359121a9145958a6ceb"
+    "$sherpaModelDir/decoder-epoch-99-avg-1-chunk-16-left-128.onnx" to (
+        "$sherpaModelUrl/decoder-epoch-99-avg-1-chunk-16-left-128.onnx" to
+            "7bf787f90b194b307e5a4ad6a34fadb4e748304c35f78a8d66358a05b13ee6ef"
         ),
-    "$sherpaModelDir/joiner-epoch-99-avg-1.int8.onnx" to (
-        "$sherpaModelUrl/joiner-epoch-99-avg-1.int8.onnx" to
-            "831477d390e59a61f1b6a6f763b9903e6c6366ff6034f1ddba613be82637122f"
+    "$sherpaModelDir/joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx" to (
+        "$sherpaModelUrl/joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx" to
+            "d944208d660d67c8d72cd2acaeac971fa5ceb8c80e76c1968148846fedd6e297"
         ),
     "$sherpaModelDir/tokens.txt" to (
         "$sherpaModelUrl/tokens.txt" to
