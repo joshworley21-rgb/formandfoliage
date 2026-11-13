@@ -81,11 +81,10 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                             voices = File(dir, "voices.bin").absolutePath,
                             tokens = File(dir, "tokens.txt").absolutePath,
                             dataDir = File(dir, "espeak-ng-data").absolutePath,
-                            // bm_fable and bf_emma are British voices; the
-                            // GB lexicon and espeak language stop them
-                            // sounding American and robotic.
-                            lexicon = File(dir, "lexicon-gb-en.txt").absolutePath,
-                            lang = "en-gb",
+                            // The GB lexicon plus en-gb made this build
+                            // produce empty audio, so keep the proven US
+                            // lexicon and let the voice bank decide the accent.
+                            lexicon = File(dir, "lexicon-us-en.txt").absolutePath,
                             lengthScale = 1.0f,
                         ),
                         numThreads = 2,
@@ -178,7 +177,10 @@ class KokoroTts(private val context: Context) : AutoCloseable {
 
     private suspend fun play(audio: GeneratedAudio) {
         val samples = trimSilence(audio.samples, audio.sampleRate)
-        if (samples.isEmpty()) return
+        if (samples.isEmpty()) {
+            CrashLog.note(context, TAG, "empty audio returned by Kokoro")
+            return
+        }
         val pcm = ShortArray(samples.size) { index ->
             (samples[index].coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt().toShort()
         }
