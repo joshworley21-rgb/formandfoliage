@@ -16,6 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Offline speech output with Kokoro-82M through sherpa-onnx.
@@ -64,19 +65,22 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         tts?.let { return it }
         return loadLock.withLock {
             tts ?: withContext(Dispatchers.IO) {
-                if (!assetsReady()) {
-                    CrashLog.note(context, TAG, "assets missing")
-                    Log.w(TAG, "Kokoro assets are missing under $ASSET_DIR")
+                val dir = runCatching { modelFiles() }.getOrElse { error ->
+                    CrashLog.note(context, TAG, "asset copy failed: ${error.message}")
+                    Log.w(TAG, "Kokoro assets are missing under $ASSET_DIR", error)
                     return@withContext null
                 }
+                // Real file paths, not the AssetManager: reading the 109 MB
+                // model through AAsset_getBuffer aborts the process on some
+                // devices. Copying once with ordinary streams is reliable.
                 val config = OfflineTtsConfig(
                     model = OfflineTtsModelConfig(
                         kokoro = OfflineTtsKokoroModelConfig(
-                            model = "$ASSET_DIR/model.int8.onnx",
-                            voices = "$ASSET_DIR/voices.bin",
-                            tokens = "$ASSET_DIR/tokens.txt",
-                            dataDir = "$ASSET_DIR/espeak-ng-data",
-                            lexicon = "$ASSET_DIR/lexicon-us-en.txt",
+                            model = File(dir, "model.int8.onnx").absolutePath,
+                            voices = File(dir, "voices.bin").absolutePath,
+                            tokens = File(dir, "tokens.txt").absolutePath,
+                            dataDir = File(dir, "espeak-ng-data").absolutePath,
+                            lexicon = File(dir, "lexicon-us-en.txt").absolutePath,
                             lengthScale = 1.0f,
                         ),
                         numThreads = 2,
@@ -84,8 +88,8 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                     ),
                     maxNumSentences = 1,
                 )
-                CrashLog.note(context, TAG, "creating OfflineTts")
-                val created = OfflineTts(assetManager = context.assets, config = config)
+                CrashLog.note(context, TAG, "creating OfflineTts from ${dir.absolutePath}")
+                val created = OfflineTts(assetManager = null, config = config)
                 CrashLog.note(context, TAG, "OfflineTts ready: ${created.sampleRate()} Hz")
                 Log.i(TAG, "Kokoro ready: ${created.sampleRate()} Hz, ${created.numSpeakers()} voices")
                 if (created.sampleRate() != SAMPLE_RATE) {
@@ -94,6 +98,40 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                 tts = created
                 created
             }
+        }
+    }
+
+    /**
+     * Copy the Kokoro assets into internal storage once and return that
+     * directory. A marker file means a previous copy finished.
+     */
+    private fun modelFiles(): File {
+        val dir = File(context.filesDir, ASSET_DIR)
+        if (File(dir, ".complete").isFile) return dir
+
+        dir.deleteRecursively()
+        dir.mkdirs()
+        val started = System.currentTimeMillis()
+        copyAssetTree(ASSET_DIR, dir)
+        File(dir, ".complete").writeText("1")
+        CrashLog.note(
+            context,
+            TAG,
+            "copied model files in ${System.currentTimeMillis() - started} ms",
+        )
+        return dir
+    }
+
+    private fun copyAssetTree(assetPath: String, target: File) {
+        val children = context.assets.list(assetPath).orEmpty()
+        if (children.isEmpty()) {
+            target.parentFile?.mkdirs()
+            context.assets.open(assetPath).use { input ->
+                target.outputStream().use { output -> input.copyTo(output, 64 * 1024) }
+            }
+        } else {
+            target.mkdirs()
+            children.forEach { child -> copyAssetTree("$assetPath/$child", File(target, child)) }
         }
     }
 
@@ -135,13 +173,6 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             CrashLog.note(context, TAG, "playback finished")
         }
     }
-
-    private fun assetsReady(): Boolean = listOf(
-        "$ASSET_DIR/model.int8.onnx",
-        "$ASSET_DIR/voices.bin",
-        "$ASSET_DIR/tokens.txt",
-        "$ASSET_DIR/lexicon-us-en.txt",
-    ).all { path -> runCatching { context.assets.open(path).close() }.isSuccess }
 
     override fun close() {
         closed = true
