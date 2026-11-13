@@ -278,6 +278,6 @@ private fun confirmationFor(intent: QwenIntentEngine.Intent): String {
         QwenIntentEngine.Kind.CheckSchedule -> "Checking your schedule."
         QwenIntentEngine.Kind.Quote ->
             if (topic.isEmpty()) "Preparing your quote." else "Preparing a quote for $topic."
-        QwenIntentEngine.Kind.Other -> "Command received."
+        QwenIntentEngine.Kind.Other -> "I can log hours, check your schedule or prepare a quote."
     }
 }
