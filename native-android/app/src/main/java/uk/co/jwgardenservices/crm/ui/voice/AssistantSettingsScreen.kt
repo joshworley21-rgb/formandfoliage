@@ -15,6 +15,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,9 +32,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import uk.co.jwgardenservices.crm.core.CrashLog
 import uk.co.jwgardenservices.crm.ui.common.OptionPicker
 import uk.co.jwgardenservices.crm.ui.common.PageHeader
 import uk.co.jwgardenservices.crm.ui.common.SectionCard
+import uk.co.jwgardenservices.crm.ui.common.ShareText
 import uk.co.jwgardenservices.crm.voice.AssistantPreferences
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
 import java.io.File
@@ -54,6 +57,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
 
     var models by remember { mutableStateOf<List<File>>(emptyList()) }
     var refresh by remember { mutableIntStateOf(0) }
+    var crashRefresh by remember { mutableIntStateOf(0) }
+    val crashReport = remember(crashRefresh) { CrashLog.read(context) }
 
     LaunchedEffect(refresh) {
         val dir = File(context.filesDir, "models")
@@ -127,6 +132,40 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                             HorizontalDivider()
                         }
                     }
+                }
+            }
+        }
+
+        SectionCard(title = "Diagnostics") {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = if (crashReport.isNullOrBlank()) {
+                        "No crash recorded. If the assistant disappears unexpectedly, reopen the app and share this report; it includes native crashes and low-memory kills."
+                    } else {
+                        "A crash report is available. Share it to diagnose the last failure."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            ShareText.share(
+                                context,
+                                CrashLog.diagnostics(context),
+                                "Assistant diagnostics",
+                            )
+                        },
+                    ) { Text("Share report") }
+                    TextButton(
+                        onClick = {
+                            CrashLog.clear(context)
+                            crashRefresh += 1
+                        },
+                    ) { Text("Clear") }
                 }
             }
         }

@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import uk.co.jwgardenservices.crm.core.CrashLog
 import kotlin.math.sqrt
 
 /**
@@ -207,6 +208,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @SuppressLint("MissingPermission") // checked by startListening before this point
     private fun process(engine: OnlineRecognizer, record: AudioRecord) {
         val stream = engine.createStream()
+        CrashLog.note(context, TAG, "recognition loop starting (source=${record.audioSource})")
         Log.i(TAG, "Recognition loop starting (source=${record.audioSource})")
         try {
             record.startRecording()

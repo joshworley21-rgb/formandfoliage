@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import uk.co.jwgardenservices.crm.MainActivity
 import uk.co.jwgardenservices.crm.R
 import uk.co.jwgardenservices.crm.core.AppConfig
+import uk.co.jwgardenservices.crm.core.CrashLog
 
 /**
  * Keeps the Assistant microphone alive as a foreground service.
@@ -80,6 +81,7 @@ class AssistantService : Service() {
         speech = SherpaSpeechService(this)
         speaker = KokoroTts(this)
         intents = QwenIntentEngine(this)
+        CrashLog.note(this, TAG, "service created")
         startInForeground()
         requestAudioFocus()
         scope.launch { AssistantPreferences.voiceFlow(this@AssistantService).collect { voice = it } }
@@ -92,6 +94,7 @@ class AssistantService : Service() {
 
     /** Start listening if this is the first bind or the loop stopped. */
     fun ensureListening() {
+        CrashLog.note(this, TAG, "ensureListening")
         scope.launch {
             if (!speech.isListening() && speech.state.value.phase != SherpaSpeechService.Phase.Loading) {
                 speech.startListening()
@@ -104,12 +107,14 @@ class AssistantService : Service() {
     private suspend fun greet() {
         if (greeted) return
         greeted = true
+        CrashLog.note(this, TAG, "greeting with Kokoro")
         val wasListening = speech.isListening()
         if (wasListening) speech.pauseForSpeech()
         _speaking.value = true
         try {
             speaker.speak("How can I help?", voice.speakerId)
         } catch (error: Exception) {
+            CrashLog.note(this, TAG, "greeting failed: ${error.message}")
             Log.w(TAG, "Greeting playback failed", error)
         } finally {
             _speaking.value = false
@@ -121,6 +126,7 @@ class AssistantService : Service() {
 
     private suspend fun handleTranscripts() {
         speech.transcripts.collect { text ->
+            CrashLog.note(this, TAG, "transcript: ${text.take(120)}")
             // Interlock starts before the filler: from here until Kokoro's
             // last sample the microphone frames are discarded, so neither the
             // filler nor the confirmation can feed back into the recognizer.
@@ -132,6 +138,7 @@ class AssistantService : Service() {
                 // Qwen model thinks.
                 speaker.speak(fillerFor(text), voice.speakerId)
                 val intent = intents.classify(text)
+                CrashLog.note(this, TAG, "intent=${intent.intent.wire} cloud=${intent.requiresCloud}")
                 if (intent.requiresCloud) {
                     speaker.speak(CHECKING_ONLINE, voice.speakerId)
                     val answer = runCatching { cloud.route(text, intent.clientOrTopic) }
@@ -165,6 +172,7 @@ class AssistantService : Service() {
     }
 
     override fun onDestroy() {
+        CrashLog.note(this, TAG, "service destroyed")
         abandonAudioFocus()
         scope.cancel()
         speaker.close()

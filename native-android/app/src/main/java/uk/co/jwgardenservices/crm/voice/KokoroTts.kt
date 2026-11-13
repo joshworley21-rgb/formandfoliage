@@ -10,6 +10,7 @@ import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
+import uk.co.jwgardenservices.crm.core.CrashLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
@@ -43,6 +44,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     suspend fun speak(text: String, speakerId: Int = KokoroVoice.BmFable.speakerId) {
         val clean = text.trim()
         if (closed || clean.isEmpty()) return
+        CrashLog.note(context, TAG, "speak: ${clean.take(80)} (sid=$speakerId)")
         speakLock.withLock {
             if (closed) return@withLock
             val engine = ensureEngine() ?: return@withLock
@@ -63,6 +65,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         return loadLock.withLock {
             tts ?: withContext(Dispatchers.IO) {
                 if (!assetsReady()) {
+                    CrashLog.note(context, TAG, "assets missing")
                     Log.w(TAG, "Kokoro assets are missing under $ASSET_DIR")
                     return@withContext null
                 }
@@ -81,7 +84,9 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                     ),
                     maxNumSentences = 1,
                 )
+                CrashLog.note(context, TAG, "creating OfflineTts")
                 val created = OfflineTts(assetManager = context.assets, config = config)
+                CrashLog.note(context, TAG, "OfflineTts ready: ${created.sampleRate()} Hz")
                 Log.i(TAG, "Kokoro ready: ${created.sampleRate()} Hz, ${created.numSpeakers()} voices")
                 if (created.sampleRate() != SAMPLE_RATE) {
                     Log.w(TAG, "Expected $SAMPLE_RATE Hz but the model reports ${created.sampleRate()} Hz")
@@ -116,6 +121,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             .build()
 
         track = player
+        CrashLog.note(context, TAG, "playing ${pcm.size} samples @ ${audio.sampleRate} Hz")
         try {
             if (player.write(pcm, 0, pcm.size) <= 0) return
             player.play()
@@ -126,6 +132,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             runCatching { player.stop() }
             player.release()
             if (track === player) track = null
+            CrashLog.note(context, TAG, "playback finished")
         }
     }
 
