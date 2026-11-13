@@ -190,25 +190,25 @@ dependencies {
 // so they are not committed. This task downloads whichever file is missing (or
 // whose checksum no longer matches). preBuild depends on it, so a fresh clone
 // only needs network access once.
-val sherpaModelDir = "src/main/assets/sherpa-onnx-streaming-zipformer-en-2023-06-26"
+val sherpaModelDir = "src/main/assets/sherpa-onnx-streaming-zipformer-en-2023-06-21"
 val sherpaModelUrl =
-    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main"
+    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21/resolve/main"
 val sherpaDownloads: Map<String, Pair<String, String>> = mapOf(
     "libs/sherpa-onnx-1.13.8.aar" to (
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar" to
             "633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96"
         ),
-    "$sherpaModelDir/encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx" to (
-        "$sherpaModelUrl/encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx" to
-            "563fde436d16cf7607cf408cd6b30909819d03162652ef389c2450ced3f45ac1"
+    "$sherpaModelDir/encoder-epoch-99-avg-1.int8.onnx" to (
+        "$sherpaModelUrl/encoder-epoch-99-avg-1.int8.onnx" to
+            "32c98281c7bd8b63e3e142d007251b37f120572e8fdea9a4f5a79ce22b10ec4f"
         ),
-    "$sherpaModelDir/decoder-epoch-99-avg-1-chunk-16-left-128.onnx" to (
-        "$sherpaModelUrl/decoder-epoch-99-avg-1-chunk-16-left-128.onnx" to
-            "7bf787f90b194b307e5a4ad6a34fadb4e748304c35f78a8d66358a05b13ee6ef"
+    "$sherpaModelDir/decoder-epoch-99-avg-1.onnx" to (
+        "$sherpaModelUrl/decoder-epoch-99-avg-1.onnx" to
+            "9da02b77cb08826756ec6a88635f35a40374e4164e7c6359121a9145958a6ceb"
         ),
-    "$sherpaModelDir/joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx" to (
-        "$sherpaModelUrl/joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx" to
-            "d944208d660d67c8d72cd2acaeac971fa5ceb8c80e76c1968148846fedd6e297"
+    "$sherpaModelDir/joiner-epoch-99-avg-1.int8.onnx" to (
+        "$sherpaModelUrl/joiner-epoch-99-avg-1.int8.onnx" to
+            "831477d390e59a61f1b6a6f763b9903e6c6366ff6034f1ddba613be82637122f"
         ),
     "$sherpaModelDir/tokens.txt" to (
         "$sherpaModelUrl/tokens.txt" to
@@ -278,6 +278,7 @@ val kokoroFiles: Map<String, String> = mapOf(
     "voices.bin" to "1c5a5b983d3d50d8586d437a51f3faa2da7919ce76a013c081e65671a3447c29",
     "tokens.txt" to "6ebb6bb288f20f3ae8d004d3c2ca27697da27c037d75e81a60e2a6a663f95425",
     "lexicon-us-en.txt" to "7daaab53a181be9885b853a8582bf1838186317e5dadacbcef9c426d6fa0da14",
+    "lexicon-gb-en.txt" to "c4cbb37316f62210dff52718a7afcaae24f50c032cc75ab47ae67b831d1049e7",
 )
 
 fun download(url: String, target: File, expectedSha: String) {
@@ -347,6 +348,7 @@ val downloadKokoro by tasks.registering(Exec::class) {
         "kokoro-int8-multi-lang-v1_0/voices.bin",
         "kokoro-int8-multi-lang-v1_0/tokens.txt",
         "kokoro-int8-multi-lang-v1_0/lexicon-us-en.txt",
+        "kokoro-int8-multi-lang-v1_0/lexicon-gb-en.txt",
         "kokoro-int8-multi-lang-v1_0/espeak-ng-data",
     )
     doLast {

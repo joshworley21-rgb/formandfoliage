@@ -17,6 +17,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.abs
 
 /**
  * Offline speech output with Kokoro-82M through sherpa-onnx.
@@ -80,7 +81,11 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                             voices = File(dir, "voices.bin").absolutePath,
                             tokens = File(dir, "tokens.txt").absolutePath,
                             dataDir = File(dir, "espeak-ng-data").absolutePath,
-                            lexicon = File(dir, "lexicon-us-en.txt").absolutePath,
+                            // bm_fable and bf_emma are British voices; the
+                            // GB lexicon and espeak language stop them
+                            // sounding American and robotic.
+                            lexicon = File(dir, "lexicon-gb-en.txt").absolutePath,
+                            lang = "en-gb",
                             lengthScale = 1.0f,
                         ),
                         numThreads = 2,
@@ -122,6 +127,24 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         return dir
     }
 
+    /**
+     * Kokoro pads each clip with silence; trimming it removes the dead air
+     * between the filler and the reply.
+     */
+    private fun trimSilence(samples: FloatArray, sampleRate: Int): FloatArray {
+        if (samples.isEmpty()) return samples
+        val threshold = 0.006f
+        var start = 0
+        while (start < samples.size && abs(samples[start]) < threshold) start++
+        if (start == samples.size) return FloatArray(0)
+        var end = samples.size - 1
+        while (end > start && abs(samples[end]) < threshold) end--
+        val pad = (sampleRate * 0.04f).toInt()
+        val from = (start - pad).coerceAtLeast(0)
+        val to = (end + pad).coerceAtMost(samples.size - 1)
+        return samples.copyOfRange(from, to + 1)
+    }
+
     private fun copyAssetTree(assetPath: String, target: File) {
         val children = context.assets.list(assetPath).orEmpty()
         if (children.isEmpty()) {
@@ -136,9 +159,10 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     }
 
     private suspend fun play(audio: GeneratedAudio) {
-        if (audio.samples.isEmpty()) return
-        val pcm = ShortArray(audio.samples.size) { index ->
-            (audio.samples[index].coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt().toShort()
+        val samples = trimSilence(audio.samples, audio.sampleRate)
+        if (samples.isEmpty()) return
+        val pcm = ShortArray(samples.size) { index ->
+            (samples[index].coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt().toShort()
         }
         val player = AudioTrack.Builder()
             .setAudioAttributes(
@@ -165,7 +189,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             player.play()
             // Static playback has no blocking write; wait out the clip and a
             // small tail so the last syllable is not cut off.
-            delay(pcm.size * 1000L / audio.sampleRate + 100)
+            delay(pcm.size * 1000L / audio.sampleRate + 60)
         } finally {
             runCatching { player.stop() }
             player.release()

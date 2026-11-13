@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.io.IOException
 import uk.co.jwgardenservices.crm.core.CrashLog
 import kotlin.math.sqrt
@@ -297,15 +298,16 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     private fun createRecognizer(): OnlineRecognizer {
         requireModelFiles()
+        val modelDir = copyModelFiles()
         val config = OnlineRecognizerConfig(
             featConfig = FeatureConfig(sampleRate = SAMPLE_RATE, featureDim = FEATURE_DIM),
             modelConfig = OnlineModelConfig(
                 transducer = OnlineTransducerModelConfig(
-                    encoder = ENCODER,
-                    decoder = DECODER,
-                    joiner = JOINER,
+                    encoder = File(modelDir, ENCODER_FILE).absolutePath,
+                    decoder = File(modelDir, DECODER_FILE).absolutePath,
+                    joiner = File(modelDir, JOINER_FILE).absolutePath,
                 ),
-                tokens = TOKENS,
+                tokens = File(modelDir, TOKENS_FILE).absolutePath,
                 numThreads = 2,
                 provider = "cpu",
                 // Leave modelType empty: the 06-26 archive reports
@@ -326,10 +328,37 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             decodingMethod = "modified_beam_search",
             maxActivePaths = 4,
         )
-        Log.i(TAG, "Loading streaming Zipformer: $ENCODER")
-        return OnlineRecognizer(assetManager = context.assets, config = config).also {
+        Log.i(TAG, "Loading streaming Zipformer: ${File(modelDir, ENCODER_FILE)}")
+        return OnlineRecognizer(assetManager = null, config = config).also {
             Log.i(TAG, "Streaming recognizer ready")
         }
+    }
+
+    /**
+     * Stream the model out of assets into internal storage once. The 180 MB
+     * encoder is too large for the AssetManager buffer path, the same way the
+     * Kokoro model was.
+     */
+    private fun copyModelFiles(): File {
+        val dir = File(context.filesDir, MODEL_DIR)
+        val names = listOf(ENCODER_FILE, DECODER_FILE, JOINER_FILE, TOKENS_FILE)
+        if (File(dir, ".complete").isFile && names.all { File(dir, it).isFile }) return dir
+
+        dir.deleteRecursively()
+        dir.mkdirs()
+        val started = System.currentTimeMillis()
+        names.forEach { name ->
+            context.assets.open("$MODEL_DIR/$name").use { input ->
+                File(dir, name).outputStream().use { output -> input.copyTo(output, 64 * 1024) }
+            }
+        }
+        File(dir, ".complete").writeText("1")
+        CrashLog.note(
+            context,
+            TAG,
+            "copied ASR model in ${System.currentTimeMillis() - started} ms",
+        )
+        return dir
     }
 
     /** Fail with a clear message instead of a native crash when assets are absent. */
@@ -383,16 +412,20 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         const val FRAME_SAMPLES = SAMPLE_RATE / 10
 
         /**
-         * Streaming Zipformer (English, full-size LibriSpeech, int8) from
+         * Streaming Zipformer (English, LibriSpeech + GigaSpeech, int8) from
          * https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models
-         * Chosen over the 20M model for accuracy and over the 180 MB
-         * GigaSpeech model for APK size, while still emitting partial words
-         * live like a phone call. Decoder stays float32 per the model card.
+         * The GigaSpeech-trained model hears real phone audio much better
+         * than the smaller LibriSpeech-only ones while still emitting live
+         * partial words. Decoder stays float32 per the model card.
          */
-        const val MODEL_DIR = "sherpa-onnx-streaming-zipformer-en-2023-06-26"
-        const val ENCODER = "$MODEL_DIR/encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx"
-        const val DECODER = "$MODEL_DIR/decoder-epoch-99-avg-1-chunk-16-left-128.onnx"
-        const val JOINER = "$MODEL_DIR/joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx"
-        const val TOKENS = "$MODEL_DIR/tokens.txt"
+        const val MODEL_DIR = "sherpa-onnx-streaming-zipformer-en-2023-06-21"
+        const val ENCODER_FILE = "encoder-epoch-99-avg-1.int8.onnx"
+        const val DECODER_FILE = "decoder-epoch-99-avg-1.onnx"
+        const val JOINER_FILE = "joiner-epoch-99-avg-1.int8.onnx"
+        const val TOKENS_FILE = "tokens.txt"
+        const val ENCODER = "$MODEL_DIR/$ENCODER_FILE"
+        const val DECODER = "$MODEL_DIR/$DECODER_FILE"
+        const val JOINER = "$MODEL_DIR/$JOINER_FILE"
+        const val TOKENS = "$MODEL_DIR/$TOKENS_FILE"
     }
 }

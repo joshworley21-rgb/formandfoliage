@@ -163,15 +163,16 @@ deliberately left on the web for now. The smaller known gaps:
   command is finalised without a tap.
 - On entering the tab the service says "How can I help?" once, then reopens
   the microphone for the first command.
-- **Bundled model**: the full-size streaming Zipformer (English, int8
-  encoder/joiner) ships in
-  `app/src/main/assets/sherpa-onnx-streaming-zipformer-en-2023-06-26/`
-  — about 73 MB in the APK, decoded with modified beam search. It replaces
-  the tiny 20M model, which could not cope with a real phone microphone,
-  while keeping live partial words like a phone call. Builds are arm64-v8a
-  only. Nothing is downloaded at runtime, so the tab works offline.
+- **Bundled model**: the LibriSpeech + GigaSpeech streaming Zipformer
+  (English, int8 encoder/joiner) ships in
+  `app/src/main/assets/sherpa-onnx-streaming-zipformer-en-2023-06-21/`
+  — about 190 MB in the APK, decoded with modified beam search. It is the
+  accuracy-first choice: the smaller 20M and 06-26 models misheard real
+  phone audio, while this one still emits live partial words like a phone
+  call. Builds are arm64-v8a only. Nothing is downloaded at runtime, so the
+  tab works offline.
 - **Not in git**: the AAR, the Zipformer model and the Kokoro voice model
-  are ~280 MB of binaries. `:app:downloadSherpa` fetches the ASR pieces and
+  are ~390 MB of binaries. `:app:downloadSherpa` fetches the ASR pieces and
   `:app:downloadKokoro` downloads and extracts the Kokoro archive (SHA-256
   checked); `preBuild` depends on both, so a fresh clone needs a connection
   for its first build only.
@@ -234,8 +235,10 @@ deliberately left on the web for now. The smaller known gaps:
 - **Spoken confirmation with Kokoro**: once Qwen has classified the line,
   `KokoroTts` synthesises a short reply on-device with Kokoro-82M and plays
   it at 24 kHz. The voice is `bm_fable` (speaker 25 of
-  `kokoro-multi-lang-v1_0`). It reads "Logged your hours for <client>",
-  "Checking your schedule", "Preparing a quote for <client>" or "Command
+  `kokoro-multi-lang-v1_0`). British voices use `lexicon-gb-en.txt` with
+  espeak's `en-gb`, and Kokoro's padding silence is trimmed before playback
+  so replies are not separated by dead air. It reads "Logged your hours for
+  <client>", "Checking your schedule", "Preparing a quote for <client>" or "Command
   received", depending on the intent. Microphone frames are discarded for
   the whole utterance so the phone does not transcribe itself; the mic
   reopens the instant playback finishes, so the next command is hands-free.
