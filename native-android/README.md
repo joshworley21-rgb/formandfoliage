@@ -350,3 +350,6 @@ dropped with a surfaced error only when the server permanently rejects them.
 Do not delete the web app until the native rewrite reaches feature parity. The
 database, Edge Functions, invoice numbering and Monzo integration stay exactly
 as they are; the native app is another client of the same backend.
+
+The CI workflow publishes the installable APK as the `jw-crm-native-apk`
+artifact on every native-android change.
