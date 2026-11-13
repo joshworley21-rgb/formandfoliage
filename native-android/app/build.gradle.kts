@@ -188,26 +188,28 @@ dependencies {
 // so they are not committed. This task downloads whichever file is missing (or
 // whose checksum no longer matches). preBuild depends on it, so a fresh clone
 // only needs network access once.
-val sherpaModelDir = "src/main/assets/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17"
+val sherpaModelDir = "src/main/assets/sherpa-onnx-streaming-zipformer-en-2023-06-21"
+val sherpaModelUrl =
+    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21/resolve/main"
 val sherpaDownloads: Map<String, Pair<String, String>> = mapOf(
     "libs/sherpa-onnx-1.13.8.aar" to (
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar" to
             "633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96"
         ),
     "$sherpaModelDir/encoder-epoch-99-avg-1.int8.onnx" to (
-        "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/encoder-epoch-99-avg-1.int8.onnx" to
-            "3810755ce7c3ab26b42a8bcf39d191308fa27fb0f53358823ba46141d03b7eb3"
+        "$sherpaModelUrl/encoder-epoch-99-avg-1.int8.onnx" to
+            "32c98281c7bd8b63e3e142d007251b37f120572e8fdea9a4f5a79ce22b10ec4f"
         ),
     "$sherpaModelDir/decoder-epoch-99-avg-1.onnx" to (
-        "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/decoder-epoch-99-avg-1.onnx" to
-            "45a7f940ecfb53d89fa270ad11b88b961e53a317203eb24b1c8e95ed208b0f30"
+        "$sherpaModelUrl/decoder-epoch-99-avg-1.onnx" to
+            "9da02b77cb08826756ec6a88635f35a40374e4164e7c6359121a9145958a6ceb"
         ),
     "$sherpaModelDir/joiner-epoch-99-avg-1.int8.onnx" to (
-        "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/joiner-epoch-99-avg-1.int8.onnx" to
-            "e085d73b593cf9b0707f370dbd656d58327d3fe36d80d849202ef81df02cb01e"
+        "$sherpaModelUrl/joiner-epoch-99-avg-1.int8.onnx" to
+            "831477d390e59a61f1b6a6f763b9903e6c6366ff6034f1ddba613be82637122f"
         ),
     "$sherpaModelDir/tokens.txt" to (
-        "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/tokens.txt" to
+        "$sherpaModelUrl/tokens.txt" to
             "49e3c2646595fd907228b3c6787069658f67b17377c60aeb8619c4551b2316fb"
         ),
 )

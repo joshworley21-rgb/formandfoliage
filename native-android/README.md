@@ -161,13 +161,16 @@ deliberately left on the web for now. The smaller known gaps:
 - **Endpoint detection** commits a line 0.5 s after you stop speaking (or
   0.8 s of trailing silence before any words were recognised), so each
   command is finalised without a tap.
-- **Bundled model**: the streaming Zipformer (English, 20M parameters, int8
-  encoder/joiner) ships in
-  `app/src/main/assets/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/`
-  — about 44 MB in the APK. Nothing is downloaded at runtime, so the tab
-  works with no connection at all.
+- On entering the tab the service says "How can I help?" once, then reopens
+  the microphone for the first command.
+- **Bundled model**: the streaming Zipformer trained on LibriSpeech +
+  GigaSpeech (English, int8 encoder/joiner) ships in
+  `app/src/main/assets/sherpa-onnx-streaming-zipformer-en-2023-06-21/`
+  — about 183 MB in the APK, decoded with modified beam search. It replaced
+  the tiny 20M model, which could not cope with a real phone microphone.
+  Nothing is downloaded at runtime, so the tab works with no connection.
 - **Not in git**: the AAR, the Zipformer model and the Kokoro voice model
-  are ~250 MB of binaries. `:app:downloadSherpa` fetches the ASR pieces and
+  are ~390 MB of binaries. `:app:downloadSherpa` fetches the ASR pieces and
   `:app:downloadKokoro` downloads and extracts the Kokoro archive (SHA-256
   checked); `preBuild` depends on both, so a fresh clone needs a connection
   for its first build only.

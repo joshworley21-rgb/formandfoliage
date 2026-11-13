@@ -317,7 +317,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 rule3 = EndpointRule(mustContainNonSilence = false, minTrailingSilence = 0f, minUtteranceLength = 20f),
             ),
             enableEndpoint = true,
-            decodingMethod = "greedy_search",
+            // Beam search costs little on a phone and handles accents and
+            // background noise noticeably better than greedy decoding.
+            decodingMethod = "modified_beam_search",
+            maxActivePaths = 4,
         )
         Log.i(TAG, "Loading streaming Zipformer: $ENCODER")
         return OnlineRecognizer(assetManager = context.assets, config = config).also {
@@ -376,11 +379,13 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         const val FRAME_SAMPLES = SAMPLE_RATE / 10
 
         /**
-         * Streaming Zipformer (English, 20M parameters, int8) from
+         * Streaming Zipformer (English, LibriSpeech + GigaSpeech, int8) from
          * https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models
-         * The decoder stays float32, as the model's own int8 instructions say.
+         * Bigger than the 20M model it replaces, and far better on real
+         * phone audio. The decoder stays float32, as the model's own int8
+         * instructions say.
          */
-        const val MODEL_DIR = "sherpa-onnx-streaming-zipformer-en-20M-2023-02-17"
+        const val MODEL_DIR = "sherpa-onnx-streaming-zipformer-en-2023-06-21"
         const val ENCODER = "$MODEL_DIR/encoder-epoch-99-avg-1.int8.onnx"
         const val DECODER = "$MODEL_DIR/decoder-epoch-99-avg-1.onnx"
         const val JOINER = "$MODEL_DIR/joiner-epoch-99-avg-1.int8.onnx"

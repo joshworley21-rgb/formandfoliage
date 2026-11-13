@@ -57,6 +57,7 @@ class AssistantService : Service() {
     val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
 
     private var voice = KokoroVoice.BmFable
+    private var greeted = false
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
 
@@ -95,6 +96,24 @@ class AssistantService : Service() {
             if (!speech.isListening() && speech.state.value.phase != SherpaSpeechService.Phase.Loading) {
                 speech.startListening()
             }
+            if (speech.isListening()) greet()
+        }
+    }
+
+    /** One spoken welcome per service session, so a fresh tab is not silent. */
+    private suspend fun greet() {
+        if (greeted) return
+        greeted = true
+        val wasListening = speech.isListening()
+        if (wasListening) speech.pauseForSpeech()
+        _speaking.value = true
+        try {
+            speaker.speak("How can I help?", voice.speakerId)
+        } catch (error: Exception) {
+            Log.w(TAG, "Greeting playback failed", error)
+        } finally {
+            _speaking.value = false
+            if (wasListening) speech.resumeAfterSpeech()
         }
     }
 
