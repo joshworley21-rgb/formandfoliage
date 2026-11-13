@@ -94,7 +94,13 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                     maxNumSentences = 1,
                 )
                 CrashLog.note(context, TAG, "creating OfflineTts from ${dir.absolutePath}")
-                val created = OfflineTts(assetManager = null, config = config)
+                val created = try {
+                    OfflineTts(assetManager = null, config = config)
+                } catch (error: Exception) {
+                    CrashLog.note(context, TAG, "OfflineTts failed: ${error.message}")
+                    Log.e(TAG, "OfflineTts creation failed", error)
+                    return@withContext null
+                }
                 CrashLog.note(context, TAG, "OfflineTts ready: ${created.sampleRate()} Hz")
                 Log.i(TAG, "Kokoro ready: ${created.sampleRate()} Hz, ${created.numSpeakers()} voices")
                 if (created.sampleRate() != SAMPLE_RATE) {
@@ -112,13 +118,25 @@ class KokoroTts(private val context: Context) : AutoCloseable {
      */
     private fun modelFiles(): File {
         val dir = File(context.filesDir, ASSET_DIR)
-        if (File(dir, ".complete").isFile) return dir
+        val marker = File(dir, ".complete")
+        val required = listOf(
+            "model.int8.onnx",
+            "voices.bin",
+            "tokens.txt",
+            "lexicon-gb-en.txt",
+            "espeak-ng-data/phontab",
+        )
+        if (marker.isFile && marker.readText().trim() == COPY_VERSION &&
+            required.all { File(dir, it).isFile }
+        ) {
+            return dir
+        }
 
         dir.deleteRecursively()
         dir.mkdirs()
         val started = System.currentTimeMillis()
         copyAssetTree(ASSET_DIR, dir)
-        File(dir, ".complete").writeText("1")
+        File(dir, ".complete").writeText(COPY_VERSION)
         CrashLog.note(
             context,
             TAG,
@@ -217,6 +235,9 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         const val TAG = "KokoroTts"
         const val ASSET_DIR = "kokoro-multi-lang-v1_0"
         const val SAMPLE_RATE = 24_000
+
+        /** Bump whenever the set of copied files changes. */
+        const val COPY_VERSION = "2"
 
         const val SPEED = 1.0f
     }
