@@ -969,6 +969,22 @@ ALTER TABLE public.clients
   ADD COLUMN IF NOT EXISTS payment_reminders boolean NOT NULL DEFAULT false;
 
 -- ─────────────────────────────────────────────────────────────────────
+-- 20261113090000_voice_model_bucket.sql
+-- ─────────────────────────────────────────────────────────────────────
+
+-- Public read bucket for the optional fp32 Kokoro voice.
+--
+-- The 326 MB model does not belong in the APK or in git. The phone downloads
+-- it once from this bucket (see KokoroHqDownloader), and can resume a dropped
+-- connection with an HTTP Range request.
+--
+-- Populate it with scripts/upload-kokoro-fp32.sh. Until then the app falls
+-- back to the official sherpa-onnx archive.
+insert into storage.buckets (id, name, public)
+values ('voice-models', 'voice-models', true)
+on conflict (id) do update set public = true;
+
+-- ─────────────────────────────────────────────────────────────────────
 -- Mark these migrations as applied, so the CLI agrees with reality if it
 -- is ever used against this project.
 -- ─────────────────────────────────────────────────────────────────────
@@ -1026,5 +1042,7 @@ INSERT INTO supabase_migrations.schema_migrations (version, name)
   VALUES ('20260830060000', 'grouped_invoice_lines') ON CONFLICT (version) DO NOTHING;
 INSERT INTO supabase_migrations.schema_migrations (version, name)
   VALUES ('20260831070000', 'payment_reminders_opt_in') ON CONFLICT (version) DO NOTHING;
+INSERT INTO supabase_migrations.schema_migrations (version, name)
+  VALUES ('20261113090000', 'voice_model_bucket') ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
