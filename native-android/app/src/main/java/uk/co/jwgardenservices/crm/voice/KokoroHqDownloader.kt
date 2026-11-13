@@ -422,30 +422,18 @@ object KokoroHqDownloader {
         partial.delete()
         val total = archive.length()
         val jobContext = currentCoroutineContext()
-        var read = 0L
-        var lastReportAt = 0L
 
         try {
             var found = false
             archive.inputStream().use { raw ->
-                val counting = object : FilterInputStream(raw) {
-                    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-                        val count = super.read(buffer, offset, length)
-                        if (count > 0) {
-                            read += count
-                            val now = System.currentTimeMillis()
-                            if (now - lastReportAt > 500) {
-                                lastReportAt = now
-                                _state.value = State.Working(Phase.Extracting, read.coerceAtMost(total), total)
-                            }
-                        }
-                        return count
-                    }
+                val counting = CountingStream(raw, total) { read ->
+                    _state.value = State.Working(Phase.Extracting, read.coerceAtMost(total), total)
                 }
                 BZip2CompressorInputStream(counting, true).use { bzip ->
                     TarArchiveInputStream(bzip).use { tar ->
                         var entry = tar.nextEntry
                         while (entry != null) {
+                            jobContext.ensureActive()
                             if (!entry.isDirectory && entry.name.endsWith("/model.onnx")) {
                                 partial.outputStream().use { output ->
                                     val buffer = ByteArray(256 * 1024)
@@ -484,5 +472,56 @@ object KokoroHqDownloader {
     private fun friendly(error: Exception): String = when {
         error.message.isNullOrBlank() -> "The download failed. Try again to resume."
         else -> error.message!!
+    }
+
+    /**
+     * Counts bytes pulled from [delegate] and reports at most twice a second.
+     *
+     * Both read methods matter. commons-compress pulls bzip2's bit stream one
+     * byte at a time, so a wrapper that only overrides the bulk read reports
+     * nothing at all while a 350 MB archive is decompressed — the unpacking
+     * bar sits at 0% while the phone is working hard.
+     */
+    private class CountingStream(
+        private val delegate: java.io.InputStream,
+        private val total: Long,
+        private val onProgress: (Long) -> Unit,
+    ) : java.io.InputStream() {
+        private var seen = 0L
+        private var sinceCheck = 0
+        private var lastReport = 0L
+
+        override fun read(): Int {
+            val value = delegate.read()
+            if (value >= 0) {
+                seen += 1
+                if (++sinceCheck >= 4096) {
+                    sinceCheck = 0
+                    maybeReport()
+                }
+            }
+            return value
+        }
+
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+            val count = delegate.read(buffer, offset, length)
+            if (count > 0) {
+                seen += count
+                maybeReport()
+            }
+            return count
+        }
+
+        private fun maybeReport() {
+            val now = System.currentTimeMillis()
+            if (now - lastReport >= 500 || seen >= total) {
+                lastReport = now
+                onProgress(seen)
+            }
+        }
+
+        override fun available(): Int = delegate.available()
+
+        override fun close() = delegate.close()
     }
 }
