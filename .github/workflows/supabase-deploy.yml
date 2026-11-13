@@ -117,9 +117,11 @@ jobs:
       # Already-applied migrations are skipped, so running this twice is safe.
       # Goes through the pooler rather than the linked project's direct
       # connection, which is IPv6-only and unreachable from a GitHub runner.
+      # --yes: the CLI asks for confirmation before applying migrations, and a
+      # runner has no terminal to answer with.
       - name: Apply database migrations
         if: ${{ env.DO_MIGRATIONS == 'true' }}
-        run: supabase db push --db-url "$DB_URL_READY"
+        run: supabase db push --db-url "$DB_URL_READY" --yes
 
       # Reports what is actually in the database afterwards. "db push" saying it
       # applied everything only proves it reached *a* database; this shows which
