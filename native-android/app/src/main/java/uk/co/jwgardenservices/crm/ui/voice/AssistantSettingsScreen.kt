@@ -88,7 +88,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     val facts by AssistantMemory.factsFlow(context)
         .collectAsStateWithLifecycle(initialValue = emptyList())
     val cloudConversation by AssistantMemory.cloudConversationFlow(context)
-        .collectAsStateWithLifecycle(initialValue = true)
+        .collectAsStateWithLifecycle(initialValue = false)
     val onlineVoice by AssistantPreferences.onlineVoiceFlow(context)
         .collectAsStateWithLifecycle(initialValue = false)
     val qwenState by QwenModelDownloader.state.collectAsStateWithLifecycle()
@@ -243,15 +243,15 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         },
                     )
                     Text(
-                        text = "Answer unknown questions online",
+                        text = "Ask OpenAI for anything else (costs per reply)",
                         modifier = Modifier.padding(start = 8.dp),
                     )
                 }
                 Text(
-                    text = "A sentence the on-device model cannot place — small talk, a question " +
-                        "about the weather — is asked of the cloud model with the same business " +
-                        "snapshot. Turn this off and everything stays on the phone, at the cost " +
-                        "of a canned reply for open questions.",
+                    text = "Off by default: the diary, hours, jobs and money answers are free " +
+                        "and instant. Turn this on and a sentence they cannot place is sent to " +
+                        "the cloud with the business snapshot, in one request, billed to your " +
+                        "OpenAI key. Off means everything stays on the phone.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

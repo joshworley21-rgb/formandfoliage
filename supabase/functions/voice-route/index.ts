@@ -113,7 +113,10 @@ weekly_earnings, quote, other.
 Use requires_cloud true only when the answer needs live or external data (material
 prices, supplier rates, a dynamic quote, weather, traffic) or when the sentence is
 conversation the app cannot answer from its own records. Local commands — hours,
-diary, next job, finishing a job, money owed, week's earnings — are false.
+diary, next job, finishing a job, money owed, week's earnings — are false. A
+question about a day other than today (tomorrow, next week, next month) is not a
+local diary lookup: use other with requires_cloud true so it can be answered from
+the context.
 client_or_topic is the client or subject mentioned, copied from the business
 context when it names one, otherwise the subject, otherwise an empty string.`;
 
@@ -286,6 +289,40 @@ async function chat(apiKey: string, messages: ChatMessage[]): Promise<ChatMessag
   return message;
 }
 
+async function answerQuestion(
+  apiKey: string,
+  query: string,
+  topic: string,
+  businessContext: string,
+  history: { role?: string; text?: string }[],
+): Promise<string> {
+  const system = businessContext
+    ? `${SYSTEM_PROMPT}\n\nBusiness context:\n${businessContext}`
+    : SYSTEM_PROMPT;
+
+  const messages: ChatMessage[] = [{ role: "system", content: system }];
+  for (const turn of history.slice(-6)) {
+    const role = turn?.role === "user" ? "user" : "assistant";
+    const content = text(turn?.text, 400);
+    if (content) messages.push({ role, content });
+  }
+  messages.push({
+    role: "user",
+    content: `Customer or topic: ${topic || "not stated"}\nSpoken request: ${query}`,
+  });
+
+  const first = await chat(apiKey, messages);
+  const calls = first.tool_calls ?? [];
+  if (calls.length === 0) return (first.content ?? "").trim();
+
+  messages.push(first);
+  for (const call of calls) {
+    messages.push({ role: "tool", content: runTool(call), tool_call_id: call.id });
+  }
+  const second = await chat(apiKey, messages);
+  return (second.content ?? "").trim();
+}
+
 Deno.serve(
   serveJson(async (request) => {
     // Verifying the caller keeps the endpoint from being a free token faucet.
@@ -299,41 +336,33 @@ Deno.serve(
     const businessContext = text(input.context, 2000);
     if (!query) return json({ error: "A spoken query is required" }, 400);
 
-    if (text(input.mode, 20) === "intent") {
+    const mode = text(input.mode, 20) || "answer";
+    if (mode === "intent") {
       return json(await classifyIntent(apiKey, query, businessContext));
     }
 
-    const system = businessContext
-      ? `${SYSTEM_PROMPT}\n\nBusiness context:\n${businessContext}`
-      : SYSTEM_PROMPT;
-
-    const messages: ChatMessage[] = [{ role: "system", content: system }];
-    for (const turn of (input.history ?? []).slice(-6)) {
-      const role = turn?.role === "user" ? "user" : "assistant";
-      const content = text(turn?.text, 400);
-      if (content) messages.push({ role, content });
-    }
-    messages.push({
-      role: "user",
-      content: `Customer or topic: ${topic || "not stated"}\nSpoken request: ${query}`,
-    });
-
-    const first = await chat(apiKey, messages);
-    const calls = first.tool_calls ?? [];
-    if (calls.length === 0) {
-      return json({ answer: (first.content ?? "").trim() });
+    if (mode === "auto") {
+      // One round trip from the phone: classify, and if the turn needs a
+      // spoken answer, produce it here rather than making the app call again.
+      const classified = (await classifyIntent(apiKey, query, businessContext)) as {
+        intent: string;
+        client_or_topic: string;
+        requires_cloud: boolean;
+      };
+      const local = !classified.requires_cloud && classified.intent !== "other";
+      const answer = local
+        ? ""
+        : await answerQuestion(apiKey, query, topic, businessContext, input.history ?? []);
+      return json({ ...classified, answer });
     }
 
-    messages.push(first);
-    for (const call of calls) {
-      messages.push({
-        role: "tool",
-        content: runTool(call),
-        tool_call_id: call.id,
-      });
-    }
-
-    const second = await chat(apiKey, messages);
-    return json({ answer: (second.content ?? "").trim() });
+    const answer = await answerQuestion(
+      apiKey,
+      query,
+      topic,
+      businessContext,
+      input.history ?? [],
+    );
+    return json({ answer });
   }),
 );

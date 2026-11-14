@@ -116,12 +116,14 @@ object AssistantMemory {
     }
 
     /**
-     * Whether a sentence the local model cannot place may be answered by the
-     * cloud model. Off means everything stays on the phone, at the cost of a
-     * canned reply for open questions.
+     * Whether a sentence the rules cannot place may be sent to the cloud.
+     *
+     * Off by default: the free, instant path is the diary, money, hours and
+     * jobs; open conversation costs the owner money per reply, so it is an
+     * explicit opt-in.
      */
     fun cloudConversationFlow(context: Context): Flow<Boolean> =
-        context.assistantMemoryStore.data.map { it[CLOUD_CONVERSATION] ?: true }
+        context.assistantMemoryStore.data.map { it[CLOUD_CONVERSATION] ?: false }
 
     suspend fun setCloudConversation(context: Context, enabled: Boolean) {
         context.assistantMemoryStore.edit { preferences ->

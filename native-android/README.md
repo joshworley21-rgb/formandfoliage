@@ -244,12 +244,14 @@ deliberately left on the web for now. The smaller known gaps:
   cloud is unavailable the rules answer, and an unrecognised sentence gets a
   short apology — the on-device 0.5B is not on the runtime path at all: on
   this phone it took 19 s to classify "hello", which no one will wait for.
-- **Open conversation**: when the model cannot place a sentence (`other`), the
-  assistant asks `voice-route` with the same business snapshot and the last
-  six turns, so it can answer naturally about the owner's clients and diary.
-  The "Answer unknown questions online" switch turns this off and keeps
-  everything on the phone.
-- **Hybrid routing**: Qwen sets `requires_cloud: true` for live pricing,
+- **Open conversation** (off by default): when the rules cannot place a
+  sentence, the assistant can send it to `voice-route` with the business
+  snapshot and the last six turns. The function classifies and, if the turn
+  needs an answer, produces it in the **same response**, so a sentence costs
+  one request and about a second. The switch is labelled with its cost; left
+  off, unrecognised sentences get an instant one-line help reply and nothing
+  leaves the phone.
+- **Hybrid routing**: the classifier sets `requires_cloud: true` for live pricing,
   supplier data, dynamic quote calculations, weather/traffic or anything not
   stored on the phone. The service then says "Checking online rates…" and
   `OpenAiCloudRouter` posts the turn to the `voice-route` Edge Function, which

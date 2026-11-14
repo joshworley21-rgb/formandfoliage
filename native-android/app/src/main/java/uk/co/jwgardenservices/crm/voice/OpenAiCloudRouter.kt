@@ -42,6 +42,9 @@ class OpenAiCloudRouter(
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
+        // Defaults are real fields here: without this, "mode" and the context
+        // never left the phone and the function treated every call as chat.
+        encodeDefaults = true
     }
 
     private val client = OkHttpClient.Builder()
@@ -124,17 +127,34 @@ class OpenAiCloudRouter(
      *
      * Returns null on any failure so the caller can fall back.
      */
-    suspend fun classify(
+    data class CloudReply(
+        val intent: QwenIntentEngine.Intent?,
+        val answer: String,
+    )
+
+    /**
+     * One call, two possible outcomes: a local intent to act on, or the spoken
+     * answer already produced by the function. Either way the phone makes a
+     * single request, which keeps both latency and token spend down.
+     */
+    suspend fun ask(
         query: String,
         context: String,
-    ): QwenIntentEngine.Intent? = withContext(Dispatchers.IO) {
+        history: List<AssistantTurn> = emptyList(),
+    ): CloudReply? = withContext(Dispatchers.IO) {
         val token = accessToken()
         if (token == null) {
             onEvent("intent: no Supabase session")
             return@withContext null
         }
         val body = json.encodeToString(
-            IntentRequest(query = query, context = context.take(2000)),
+            IntentRequest(
+                query = query,
+                context = context.take(2000),
+                history = history.takeLast(6).map {
+                    HistoryTurn(role = if (it.fromUser) "user" else "assistant", text = it.text.take(400))
+                },
+            ),
         ).toRequestBody(JSON)
         val request = Request.Builder()
             .url(endpoint)
@@ -156,23 +176,29 @@ class OpenAiCloudRouter(
                 return@withContext null
             }
             val kind = QwenIntentEngine.Kind.entries.firstOrNull { it.wire == parsed.intent }
-            if (kind == null) {
-                onEvent("intent: unknown '${parsed.intent}'")
+            val intent = kind?.let {
+                QwenIntentEngine.Intent(
+                    intent = it,
+                    clientOrTopic = parsed.clientOrTopic.take(120),
+                    requiresCloud = parsed.requiresCloud,
+                )
+            }
+            // A function without the auto mode may answer without an intent;
+            // use that answer rather than calling again.
+            if (intent == null && parsed.answer.isBlank()) {
+                onEvent("intent: no intent or answer in the response")
                 return@withContext null
             }
-            QwenIntentEngine.Intent(
-                intent = kind,
-                clientOrTopic = parsed.clientOrTopic.take(120),
-                requiresCloud = parsed.requiresCloud,
-            )
+            CloudReply(intent = intent, answer = parsed.answer.trim())
         }
     }
 
     @Serializable
     private data class IntentRequest(
-        val mode: String = "intent",
+        val mode: String = "auto",
         val query: String,
         val context: String = "",
+        val history: List<HistoryTurn> = emptyList(),
     )
 
     @Serializable
@@ -180,6 +206,7 @@ class OpenAiCloudRouter(
         val intent: String = "",
         @SerialName("client_or_topic") val clientOrTopic: String = "",
         @SerialName("requires_cloud") val requiresCloud: Boolean = false,
+        val answer: String = "",
     )
 
     @Serializable

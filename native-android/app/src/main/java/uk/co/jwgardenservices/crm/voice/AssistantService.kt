@@ -265,79 +265,81 @@ class AssistantService : Service() {
         val started = System.currentTimeMillis()
         val context = businessContext()
 
-        // 1. Rules: the common commands are unambiguous and instant. A date
-        //    word ("next week", "tomorrow") means the today-only actions are
-        //    not enough, so those go to the cloud instead.
+        // 1. Rules: the common commands are instant and free. A date word
+        //    ("next week", "tomorrow") means the today-only actions are not
+        //    enough, so those are allowed to go to the cloud.
         val lower = text.lowercase()
         val temporal = TEMPORAL_WORDS.any { lower.contains(it) }
         val quick = IntentRules.classify(text)
         if (!temporal && IntentRules.isConfident(quick.intent) && !quick.requiresCloud) {
-            CrashLog.note(this, TAG, "intent=rules:${quick.intent.wire} in ${System.currentTimeMillis() - started}ms")
+            CrashLog.note(
+                this,
+                TAG,
+                "intent=rules:${quick.intent.wire} in ${System.currentTimeMillis() - started}ms",
+            )
             runIntent(text, quick)
             return
         }
 
-        // 2. Cloud intent. The on-device 0.5B took 19 s for "hello" on this
-        //    phone, so it is no longer on the runtime path at all: when the
-        //    cloud is unavailable the rules answer, and an unrecognised
-        //    sentence gets a short apology instead of a long silence.
-        var online: QwenIntentEngine.Intent? = null
+        // 2. Exactly one optional cloud call. The function classifies and, for
+        //    conversational turns, produces the answer in the same response —
+        //    so a sentence never costs two requests and never waits for the
+        //    slow on-device model.
         if (cloudConversation) {
-            online = runCatching { cloud.classify(text, context) }
-                .onFailure { CrashLog.note(this, TAG, "cloud intent failed: ${it.message}") }
+            val reply = runCatching { cloud.ask(text, context, _turns.value.takeLast(6)) }
+                .onFailure { CrashLog.note(this, TAG, "cloud failed: ${it.message}") }
                 .getOrNull()
-            if (online != null) {
-                CrashLog.note(
-                    this,
-                    TAG,
-                    "intent=cloud:${online.intent.wire} in ${System.currentTimeMillis() - started}ms",
-                )
-            } else {
-                CrashLog.note(this, TAG, "cloud intent unavailable; using the rules")
+
+            if (reply != null) {
+                if (reply.answer.isNotBlank()) {
+                    CrashLog.note(
+                        this,
+                        TAG,
+                        "cloud answered in ${System.currentTimeMillis() - started}ms",
+                    )
+                    say(reply.answer)
+                    return
+                }
+                val intent = reply.intent
+                if (intent != null) {
+                    CrashLog.note(
+                        this,
+                        TAG,
+                        "intent=cloud:${intent.intent.wire} in ${System.currentTimeMillis() - started}ms",
+                    )
+                    if (intent.requiresCloud) {
+                        say("I couldn't get an answer from the online assistant.")
+                    } else {
+                        runIntent(text, intent)
+                    }
+                    return
+                }
             }
+            CrashLog.note(this, TAG, "cloud unavailable; using the rules")
         } else {
             CrashLog.note(this, TAG, "online answers are off; using the rules")
         }
 
-        val intent = online ?: quick
+        // 3. Free fallback: the rules, then a short help line.
+        when {
+            quick.requiresCloud -> say(
+                if (cloudConversation) {
+                    "I couldn't reach the online assistant. Try again when you have signal."
+                } else {
+                    "Online answers are switched off in settings."
+                },
+            )
 
-        if (!cloudConversation && intent.requiresCloud) {
-            say("Online answers are switched off in settings.")
-            return
-        }
-        val conversational = intent.intent == QwenIntentEngine.Kind.Other
-        val needsAWholeAnswer = intent.requiresCloud || (conversational && cloudConversation)
-        if (conversational && !cloudConversation) {
-            say("I didn't catch a command in that. Try asking about your diary, money owed or hours.")
-            return
-        }
-        if (needsAWholeAnswer) {
-            if (intent.requiresCloud) say(CHECKING_ONLINE)
-            val answer = runCatching {
-                cloud.route(text, intent.clientOrTopic, context, _turns.value.takeLast(6))
-            }
-                .onFailure { error -> Log.w(TAG, "Cloud route failed", error) }
-                .getOrNull()
-            say(answer ?: "I couldn't reach the online assistant. Try again when you have signal.")
-            return
-        }
+            quick.intent == QwenIntentEngine.Kind.Other -> say(
+                if (cloudConversation) {
+                    "I couldn't reach the online assistant. Try again when you have signal."
+                } else {
+                    HELP_TEXT
+                },
+            )
 
-        // "What have I got on next week" is not today's diary; the cloud has
-        // the context to answer it, the local action only knows today.
-        if (intent.intent == QwenIntentEngine.Kind.CheckSchedule &&
-            temporal &&
-            cloudConversation
-        ) {
-            val answer = runCatching {
-                cloud.route(text, intent.clientOrTopic, context, _turns.value.takeLast(6))
-            }.getOrNull()
-            if (answer != null) {
-                say(answer)
-                return
-            }
+            else -> runIntent(text, quick)
         }
-
-        runIntent(text, intent)
     }
 
     /** Carry out a local intent and speak its result. */
@@ -521,6 +523,7 @@ class AssistantService : Service() {
         const val CHECKING_ONLINE = "Checking online rates."
         const val LISTENING_TEXT = "Assistant is listening for your next command"
         const val CLOUD_TAG = "CloudRouter"
+        const val HELP_TEXT = "I can log hours, check your diary, mark a job done or tell you who owes you."
         val TEMPORAL_WORDS = listOf("week", "tomorrow", "month", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
         const val MAX_TURNS = 40
 
