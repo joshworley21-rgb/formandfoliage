@@ -59,6 +59,18 @@ class AssistantService : Service() {
     private val _speaking = MutableStateFlow(false)
     val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
 
+    /** True while a call is connected (mic on, or just paused between tabs). */
+    private val _callActive = MutableStateFlow(false)
+    val callActive: StateFlow<Boolean> = _callActive.asStateFlow()
+
+    /** One line of the conversation, kept so leaving the tab does not erase it. */
+    data class Turn(val fromUser: Boolean, val text: String, val at: Long = System.currentTimeMillis())
+
+    private val _turns = MutableStateFlow<List<Turn>>(emptyList())
+    val turns: StateFlow<List<Turn>> = _turns.asStateFlow()
+
+    private var foreground = false
+
     private var voice = KokoroVoice.BmFable
     private var speed = AssistantPreferences.DEFAULT_SPEED
     private var greeted = false
@@ -85,8 +97,6 @@ class AssistantService : Service() {
         speaker = KokoroTts(this)
         intents = QwenIntentEngine(this)
         CrashLog.note(this, TAG, "service created")
-        startInForeground()
-        requestAudioFocus()
         scope.launch { AssistantPreferences.voiceFlow(this@AssistantService).collect { voice = it } }
         scope.launch { AssistantPreferences.speedFlow(this@AssistantService).collect { speed = it } }
         // Swapping between int8 and the downloaded fp32 model should take
@@ -99,7 +109,19 @@ class AssistantService : Service() {
         scope.launch { handleTranscripts() }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_NOT_STICKY
+    /**
+     * A started service is a call. Anything that began with startForegroundService
+     * gets the notification and the microphone; a service that exists only to
+     * serve the bound screen (after the user pressed End) does neither.
+     */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        CrashLog.note(this, TAG, "call starting")
+        endedByUser = false
+        _callActive.value = true
+        startInForeground()
+        scope.launch { ensureListening() }
+        return START_NOT_STICKY
+    }
 
     override fun onBind(intent: Intent?): IBinder = binder
 
@@ -114,7 +136,7 @@ class AssistantService : Service() {
         }
     }
 
-    /** One spoken welcome per service session, so a fresh tab is not silent. */
+    /** One spoken welcome per call, so a fresh tab is not silent. */
     private suspend fun greet() {
         if (greeted) return
         greeted = true
@@ -123,7 +145,7 @@ class AssistantService : Service() {
         if (wasListening) speech.pauseForSpeech()
         _speaking.value = true
         try {
-            speaker.speak("How can I help?", voice.speakerId, speed)
+            say("How can I help?")
         } catch (error: Exception) {
             CrashLog.note(this, TAG, "greeting failed: ${error.message}")
             Log.w(TAG, "Greeting playback failed", error)
@@ -133,11 +155,59 @@ class AssistantService : Service() {
         }
     }
 
-    fun clearTranscript() = speech.clear()
+    /** Speak a reply and add it to the rolling transcript. */
+    private suspend fun say(text: String) {
+        val clean = text.trim()
+        if (clean.isEmpty()) return
+        addTurn(Turn(fromUser = false, text = clean))
+        // Hold audio focus only for the utterance: the call itself can stay
+        // connected across tabs without pausing the van's music all day.
+        val focused = requestAudioFocus()
+        try {
+            speaker.speak(clean, voice.speakerId, speed)
+        } finally {
+            if (focused) abandonAudioFocus()
+        }
+    }
+
+    private fun addTurn(turn: Turn) {
+        _turns.value = (_turns.value + turn).takeLast(MAX_TURNS)
+    }
+
+    /** Close the microphone but keep the service (and the loaded model) alive. */
+    fun pauseListening() {
+        if (!speech.isListening()) return
+        CrashLog.note(this, TAG, "pausing the microphone")
+        speech.stopListening()
+        setNotification("Assistant paused")
+    }
+
+    /**
+     * Hang up: close the microphone, drop the notification and stop being a
+     * started service. The screen may still be bound, so the model stays warm
+     * until the user leaves the tab.
+     */
+    fun endCall() {
+        CrashLog.note(this, TAG, "call ended")
+        endedByUser = true
+        _callActive.value = false
+        speech.stopListening()
+        abandonAudioFocus()
+        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+        foreground = false
+        stopSelf()
+    }
+
+    /** Wipe the conversation, not just the last sentence. */
+    fun clearTranscript() {
+        speech.clear()
+        _turns.value = emptyList()
+    }
 
     private suspend fun handleTranscripts() {
         speech.transcripts.collect { text ->
             CrashLog.note(this, TAG, "transcript: ${text.take(120)}")
+            addTurn(Turn(fromUser = true, text = text))
             // Interlock starts before the filler: from here until Kokoro's
             // last sample the microphone frames are discarded, so neither the
             // filler nor the confirmation can feed back into the recognizer.
@@ -152,7 +222,7 @@ class AssistantService : Service() {
                     .getOrNull()
                 if (followUp != null) {
                     CrashLog.note(this, TAG, "pending reply: ${followUp.take(120)}")
-                    speaker.speak(followUp, voice.speakerId, speed)
+                    say(followUp)
                 } else {
                     answerTurn(text)
                 }
@@ -170,26 +240,23 @@ class AssistantService : Service() {
         val intent = intents.classify(text)
         CrashLog.note(this, TAG, "intent=${intent.intent.wire} cloud=${intent.requiresCloud}")
         if (intent.requiresCloud) {
-            speaker.speak(CHECKING_ONLINE, voice.speakerId, speed)
+            say(CHECKING_ONLINE)
             val answer = runCatching { cloud.route(text, intent.clientOrTopic) }
                 .onFailure { error -> Log.w(TAG, "Cloud route failed", error) }
                 .getOrNull()
-            speaker.speak(
-                answer ?: "I couldn't reach the online rates. Try again when you have signal.",
-                voice.speakerId,
-                speed,
-            )
+            say(answer ?: "I couldn't reach the online rates. Try again when you have signal.")
         } else {
             val executed = runCatching { actions.run(text, intent) }
                 .onFailure { CrashLog.note(this, TAG, "action failed: ${it.message}") }
                 .getOrNull()
             CrashLog.note(this, TAG, "action reply: ${executed ?: "none"}")
-            speaker.speak(executed ?: confirmationFor(intent), voice.speakerId, speed)
+            say(executed ?: confirmationFor(intent))
         }
     }
 
     override fun onDestroy() {
         CrashLog.note(this, TAG, "service destroyed")
+        _callActive.value = false
         abandonAudioFocus()
         scope.cancel()
         speaker.close()
@@ -199,14 +266,16 @@ class AssistantService : Service() {
     }
 
     /**
-     * Ask for transient audio focus when the assistant takes over. Transient
-     * focus is what makes a ringing phone or the van's media pause us, rather
-     * than the assistant talking over the call.
+     * Ask for transient audio focus for one utterance. Transient focus is what
+     * makes a ringing phone or the van's media pause us, rather than the
+     * assistant talking over the call. Returns true when the request should be
+     * released afterwards.
      */
-    private fun requestAudioFocus() {
-        val manager = getSystemService(AudioManager::class.java) ?: return
+    private fun requestAudioFocus(): Boolean {
+        if (focusRequest != null) return false
+        val manager = getSystemService(AudioManager::class.java) ?: return false
         audioManager = manager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
                 .setAudioAttributes(
                     AudioAttributes.Builder()
@@ -218,7 +287,11 @@ class AssistantService : Service() {
                 .setOnAudioFocusChangeListener(focusListener)
                 .build()
             focusRequest = request
-            manager.requestAudioFocus(request)
+            val result = manager.requestAudioFocus(request)
+            // Leave no half-request behind: a refused focus must be retried
+            // next time rather than remembered as held.
+            if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) focusRequest = null
+            result
         } else {
             @Suppress("DEPRECATION")
             manager.requestAudioFocus(
@@ -227,6 +300,7 @@ class AssistantService : Service() {
                 AudioManager.AUDIOFOCUS_GAIN_TRANSIENT,
             )
         }
+        return granted == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
     }
 
     private fun abandonAudioFocus() {
@@ -252,37 +326,58 @@ class AssistantService : Service() {
             manager.createNotificationChannel(channel)
         }
 
-        val open = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("J W Garden Services")
-            .setContentText("Assistant is listening for your next command")
-            .setSmallIcon(R.drawable.ic_notification)
-            .setOngoing(true)
-            .setContentIntent(open)
-            .build()
-
         ServiceCompat.startForeground(
             this,
             NOTIFICATION_ID,
-            notification,
+            buildNotification(LISTENING_TEXT),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             } else {
                 0
             },
         )
+        foreground = true
     }
 
-    private companion object {
+    /** Update the ongoing notification without taking the service down. */
+    private fun setNotification(text: String) {
+        if (!foreground) return
+        runCatching {
+            getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, buildNotification(text))
+        }
+    }
+
+    private fun buildNotification(text: String): Notification {
+        val open = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("J W Garden Services")
+            .setContentText(text)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setOngoing(true)
+            .setContentIntent(open)
+            .build()
+    }
+
+    companion object {
         const val TAG = "AssistantService"
         const val CHANNEL_ID = "assistant_mic"
         const val NOTIFICATION_ID = 41
         const val CHECKING_ONLINE = "Checking online rates."
+        const val LISTENING_TEXT = "Assistant is listening for your next command"
+        const val MAX_TURNS = 40
+
+        /**
+         * Set when the user hangs up, so returning to the tab shows "Start
+         * call" instead of silently reopening the microphone. Reset by the
+         * start action or by a fresh process.
+         */
+        @Volatile
+        var endedByUser: Boolean = false
     }
 }
 

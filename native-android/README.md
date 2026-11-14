@@ -153,16 +153,26 @@ deliberately left on the web for now. The smaller known gaps:
 ## Voice assistant (offline speech to text)
 
 - The **Assistant** tab (mic icon, centre of the phone bar between Schedule
-  and Invoices) is hands-free: granting the microphone permission starts a
-  foreground service that owns the recording loop, so there is no
-  push-to-talk button. Speech is recognised entirely on the phone and
-  partial words appear greyed while the recognizer is still deciding.
-  Clients lives behind More; staff keep their shorter bar.
+  and Invoices) is laid out like a phone call: a status orb, a rolling
+  transcript and one red **End call** button. Granting the microphone
+  permission starts a foreground service that owns the recording loop, so
+  there is no push-to-talk. Speech is recognised entirely on the phone and
+  partial words appear as an italic bubble while the recognizer is still
+  deciding. Clients lives behind More; staff keep their shorter bar.
+- **The call survives the tab.** Leaving the Assistant tab unbinds the screen
+  but does not stop the service; the microphone closes while you are
+  elsewhere and reopens on return, so the 190 MB recognizer is loaded once
+  per call rather than on every visit. **End call** closes the mic, drops the
+  notification and frees the model; the screen then offers **Start call**.
+- **Rolling transcript**: every recognised sentence and every spoken reply is
+  kept in the service (last 40 turns) and shown as a bubble, so the question
+  does not disappear when the answer is read out. Leaving and re-entering the
+  tab keeps the conversation; the bin icon clears it.
 - **Endpoint detection** commits a line 0.5 s after you stop speaking (or
   0.8 s of trailing silence before any words were recognised), so each
   command is finalised without a tap.
-- On entering the tab the service says "How can I help?" once, then reopens
-  the microphone for the first command.
+- The call opens with "How can I help?" once, then reopens the microphone for
+  the first command.
 - **Bundled model**: the LibriSpeech + GigaSpeech streaming Zipformer
   (English, int8 encoder/joiner) ships in
   `app/src/main/assets/sherpa-onnx-streaming-zipformer-en-2023-06-21/`
@@ -237,9 +247,10 @@ deliberately left on the web for now. The smaller known gaps:
 - **Conversation flow**: there is no extra "Got it." before local answers —
   the reply itself is spoken as soon as the action finishes. Only a
   cloud-routed turn says "Checking online rates…" first.
-- **Audio focus**: the service takes `AUDIOFOCUS_GAIN_TRANSIENT` when it
-  starts and abandons it on shutdown, so an incoming call or the van's media
-  takes priority; losing focus stops Kokoro mid-sentence.
+- **Audio focus**: transient focus is requested for each spoken sentence and
+  released as soon as it finishes, so a call or the van's media takes priority
+  without being paused for the whole time the call is connected; losing focus
+  stops Kokoro mid-sentence.
 - **Spoken confirmation with Kokoro**: once Qwen has classified the line,
   `KokoroTts` synthesises a short reply on-device with Kokoro-82M and plays
   it at 24 kHz. The voice is `bm_fable` (speaker 25 of
