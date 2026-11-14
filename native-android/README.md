@@ -225,10 +225,10 @@ deliberately left on the web for now. The smaller known gaps:
   sent anywhere unless a turn goes to the cloud.
 - **Conversation model**: Settings → Conversation model downloads Qwen 2.5
   0.5B Instruct q4_k_m (469 MB, Wi-Fi only) into `files/models/`, resumable
-  like the Kokoro voice. It is the offline classifier: online turns use the
-  cloud's JSON classifier instead because the phone CPU can take tens of
-  seconds over the local model. The model still powers the Understanding
-  check and any command when "Answer unknown questions online" is off.
+  like the Kokoro voice. It is now a measurement tool rather than the runtime
+  classifier: the Understanding check runs sentences through it, and the
+  timings show why it is not used to answer live commands on this hardware.
+  Commands use the rules and the cloud classifier instead.
 - **Understanding check**: Settings → Assistant settings → Understanding check
   runs real commands through the same classifier a call uses and lists what
   it heard against what it should have heard, with an average latency. There
@@ -240,10 +240,10 @@ deliberately left on the web for now. The smaller known gaps:
   deterministic rules on a plain JVM (32/35 today, the misses being slang).
 - **Fast path**: the deterministic rules answer the common, unambiguous
   commands (hours, diary, next job, money owed, week's takings) immediately.
-  Anything else is classified by the cloud function in about a second; the
-  on-device 0.5B model is only used when online answers are switched off or
-  there is no signal. On a phone CPU the model can take tens of seconds, which
-  is why it is a fallback rather than the default.
+  Anything else is classified by the cloud function in about a second. If the
+  cloud is unavailable the rules answer, and an unrecognised sentence gets a
+  short apology — the on-device 0.5B is not on the runtime path at all: on
+  this phone it took 19 s to classify "hello", which no one will wait for.
 - **Open conversation**: when the model cannot place a sentence (`other`), the
   assistant asks `voice-route` with the same business snapshot and the last
   six turns, so it can answer naturally about the owner's clients and diary.

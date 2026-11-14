@@ -36,6 +36,8 @@ class OpenAiCloudRouter(
     private val accessToken: suspend () -> String? = {
         SupabaseProvider.client.auth.currentSessionOrNull()?.accessToken
     },
+    /** Surfaces failures in the assistant log, not just Logcat. */
+    private val onEvent: (String) -> Unit = {},
 ) {
     private val json = Json {
         ignoreUnknownKeys = true
@@ -43,9 +45,17 @@ class OpenAiCloudRouter(
     }
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .callTimeout(30, TimeUnit.SECONDS)
+        .build()
+
+    /** Intent classification is small; never let a bad network hold a reply. */
+    private val intentClient = OkHttpClient.Builder()
+        .connectTimeout(4, TimeUnit.SECONDS)
+        .readTimeout(6, TimeUnit.SECONDS)
+        .callTimeout(7, TimeUnit.SECONDS)
         .build()
 
     /**
@@ -62,7 +72,11 @@ class OpenAiCloudRouter(
         context: String = "",
         history: List<AssistantTurn> = emptyList(),
     ): String = withContext(Dispatchers.IO) {
-        val token = accessToken() ?: throw IOException("Sign in again to use online answers")
+        val token = accessToken()
+        if (token == null) {
+            onEvent("route: no Supabase session")
+            throw IOException("Sign in again to use online answers")
+        }
 
         val body = json.encodeToString(
             SpokenRequest(
@@ -85,11 +99,15 @@ class OpenAiCloudRouter(
         client.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
+                onEvent("route: HTTP ${response.code}")
                 Log.w(TAG, "voice-route HTTP ${response.code}: ${text.take(300)}")
                 throw IOException("Online answers are unavailable right now")
             }
             val parsed = json.decodeFromString<SpokenResponse>(text)
-            if (parsed.error != null) throw IOException(parsed.error)
+            if (parsed.error != null) {
+                onEvent("route: ${parsed.error}")
+                throw IOException(parsed.error)
+            }
             return@withContext parsed.answer.trim().ifBlank {
                 "I found a result online, but no usable answer came back."
             }
@@ -110,7 +128,11 @@ class OpenAiCloudRouter(
         query: String,
         context: String,
     ): QwenIntentEngine.Intent? = withContext(Dispatchers.IO) {
-        val token = accessToken() ?: return@withContext null
+        val token = accessToken()
+        if (token == null) {
+            onEvent("intent: no Supabase session")
+            return@withContext null
+        }
         val body = json.encodeToString(
             IntentRequest(query = query, context = context.take(2000)),
         ).toRequestBody(JSON)
@@ -121,16 +143,23 @@ class OpenAiCloudRouter(
             .post(body)
             .build()
 
-        client.newCall(request).execute().use { response ->
+        intentClient.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
+                onEvent("intent: HTTP ${response.code}")
                 Log.w(TAG, "intent HTTP ${response.code}: ${text.take(200)}")
                 return@withContext null
             }
             val parsed = runCatching { json.decodeFromString<IntentResponse>(text) }.getOrNull()
-                ?: return@withContext null
+            if (parsed == null) {
+                onEvent("intent: unreadable JSON")
+                return@withContext null
+            }
             val kind = QwenIntentEngine.Kind.entries.firstOrNull { it.wire == parsed.intent }
-                ?: return@withContext null
+            if (kind == null) {
+                onEvent("intent: unknown '${parsed.intent}'")
+                return@withContext null
+            }
             QwenIntentEngine.Intent(
                 intent = kind,
                 clientOrTopic = parsed.clientOrTopic.take(120),

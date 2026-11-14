@@ -36,8 +36,9 @@ import kotlin.coroutines.resume
 class CloudVoice(private val context: Context) : AutoCloseable {
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(6, TimeUnit.SECONDS)
-        .readTimeout(25, TimeUnit.SECONDS)
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .callTimeout(18, TimeUnit.SECONDS)
         .build()
 
     private val json = Json {
@@ -65,8 +66,11 @@ class CloudVoice(private val context: Context) : AutoCloseable {
 
         // Some OpenAI voices/models reject `instructions`; retry once without
         // it rather than falling back to a robotic voice over a 400.
-        val first = runCatching { client.newCall(request(text, true, token)).execute() }.getOrNull()
-            ?: return@withContext false
+        val first = runCatching { client.newCall(request(text, true, token)).execute() }
+            .getOrElse { error ->
+                CrashLog.note(context, TAG, "request failed: ${error.message}")
+                return@withContext false
+            }
         val response = if (first.code == 400) {
             first.close()
             runCatching { client.newCall(request(text, false, token)).execute() }.getOrNull()

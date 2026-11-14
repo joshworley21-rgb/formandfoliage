@@ -49,10 +49,11 @@ class AssistantService : Service() {
 
     private lateinit var speech: SherpaSpeechService
     private lateinit var speaker: KokoroTts
-    private lateinit var intents: QwenIntentEngine
 
     /** Created on first cloud-routed turn; holds no secret, only the endpoint. */
-    private val cloud by lazy { OpenAiCloudRouter() }
+    private val cloud by lazy {
+        OpenAiCloudRouter(onEvent = { CrashLog.note(this, CLOUD_TAG, it) })
+    }
 
     /** Writes spoken commands into the same Room cache the screens use. */
     private val actions by lazy { VoiceActionRunner() }
@@ -102,7 +103,6 @@ class AssistantService : Service() {
         super.onCreate()
         speech = SpeechEngine.get(this)
         speaker = KokoroEngine.get(this)
-        intents = QwenEngine.get(this)
         CrashLog.note(this, TAG, "service created")
         scope.launch { AssistantPreferences.voiceFlow(this@AssistantService).collect { voice = it } }
         scope.launch { AssistantPreferences.speedFlow(this@AssistantService).collect { speed = it } }
@@ -170,6 +170,7 @@ class AssistantService : Service() {
         // connected across tabs without pausing the van's music all day.
         val focused = requestAudioFocus()
         try {
+            CrashLog.note(this, TAG, "reply voice=${if (onlineVoice) "online" else "device"}")
             // The natural online voice is optional; any failure falls back to
             // Kokoro rather than leaving the assistant silent.
             val spokenOnline = onlineVoice &&
@@ -276,9 +277,10 @@ class AssistantService : Service() {
             return
         }
 
-        // 2. Cloud intent. A round trip is a second; the on-device 0.5B can
-        //    take tens of seconds on a phone CPU, so it is the offline
-        //    fallback rather than the default.
+        // 2. Cloud intent. The on-device 0.5B took 19 s for "hello" on this
+        //    phone, so it is no longer on the runtime path at all: when the
+        //    cloud is unavailable the rules answer, and an unrecognised
+        //    sentence gets a short apology instead of a long silence.
         var online: QwenIntentEngine.Intent? = null
         if (cloudConversation) {
             online = runCatching { cloud.classify(text, context) }
@@ -290,19 +292,25 @@ class AssistantService : Service() {
                     TAG,
                     "intent=cloud:${online.intent.wire} in ${System.currentTimeMillis() - started}ms",
                 )
+            } else {
+                CrashLog.note(this, TAG, "cloud intent unavailable; using the rules")
             }
+        } else {
+            CrashLog.note(this, TAG, "online answers are off; using the rules")
         }
 
-        val intent = online ?: intents.classify(text, context).also {
-            CrashLog.note(
-                this,
-                TAG,
-                "intent=local:${it.intent.wire} in ${System.currentTimeMillis() - started}ms",
-            )
-        }
+        val intent = online ?: quick
 
+        if (!cloudConversation && intent.requiresCloud) {
+            say("Online answers are switched off in settings.")
+            return
+        }
         val conversational = intent.intent == QwenIntentEngine.Kind.Other
         val needsAWholeAnswer = intent.requiresCloud || (conversational && cloudConversation)
+        if (conversational && !cloudConversation) {
+            say("I didn't catch a command in that. Try asking about your diary, money owed or hours.")
+            return
+        }
         if (needsAWholeAnswer) {
             if (intent.requiresCloud) say(CHECKING_ONLINE)
             val answer = runCatching {
@@ -512,6 +520,7 @@ class AssistantService : Service() {
         const val NOTIFICATION_ID = 41
         const val CHECKING_ONLINE = "Checking online rates."
         const val LISTENING_TEXT = "Assistant is listening for your next command"
+        const val CLOUD_TAG = "CloudRouter"
         val TEMPORAL_WORDS = listOf("week", "tomorrow", "month", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
         const val MAX_TURNS = 40
 
