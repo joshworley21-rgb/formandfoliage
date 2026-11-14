@@ -94,7 +94,7 @@ class AssistantService : Service() {
         super.onCreate()
         speech = SpeechEngine.get(this)
         speaker = KokoroTts(this)
-        intents = QwenIntentEngine(this)
+        intents = QwenEngine.get(this)
         CrashLog.note(this, TAG, "service created")
         scope.launch { AssistantPreferences.voiceFlow(this@AssistantService).collect { voice = it } }
         scope.launch { AssistantPreferences.speedFlow(this@AssistantService).collect { speed = it } }
@@ -335,7 +335,7 @@ class AssistantService : Service() {
         abandonAudioFocus()
         scope.cancel()
         speaker.close()
-        intents.close()
+        // The intent model is process-scoped too; leave it loaded.
         // The recognizer is process-scoped on purpose: close the microphone,
         // but leave the 190 MB model loaded for the next call.
         speech.stopListening()

@@ -85,13 +85,17 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
 
         val reply = runCatching {
             val loaded = loadModel()
-            inferLock.withLock {
-                Llama.complete(
-                    model = loaded,
-                    prompt = "Spoken command: \"${text.replace("\"", "'")}\"",
-                    systemPrompt = systemPrompt(context),
-                    maxTokens = 96,
-                ).text
+            // Inference is native and blocking: keep it off the main thread so
+            // the call UI (and the evaluation screen) stays responsive.
+            withContext(Dispatchers.Default) {
+                inferLock.withLock {
+                    Llama.complete(
+                        model = loaded,
+                        prompt = "Spoken command: \"${text.replace("\"", "'")}\"",
+                        systemPrompt = systemPrompt(context),
+                        maxTokens = 96,
+                    ).text
+                }
             }
         }.onFailure { error ->
             Log.w(TAG, "Local model unavailable (${error.message}); using rules")
@@ -209,41 +213,7 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
     }
 
     /** Deterministic stand-in whenever the model is missing or malformed. */
-    private fun fallback(transcript: String): Intent {
-        val text = transcript.lowercase()
-        val kind = when {
-            text.containsAny("owe me", "owes", "owed", "unpaid", "outstanding", "invoice") ->
-                Kind.WhoOwesMe
-            text.containsAny("earn", "earned", "earnings", "takings", "made this week", "income") ->
-                Kind.WeeklyEarnings
-            text.containsAny("next job", "next appointment", "next visit", "who's next", "what's next", "whats next") ->
-                Kind.NextJob
-            text.containsAny("mark", "finished", "complete", "completed", "done with") &&
-                !text.containsAny("how many", "hours", "hrs") -> Kind.MarkJobDone
-            text.containsAny("hour", "hours", "log", "worked", "work for") -> Kind.LogHours
-            text.containsAny("schedule", "diary", "today", "calendar", "what's on", "whats on") ->
-                Kind.CheckSchedule
-            text.containsAny("quote", "price", "cost", "charge", "how much") -> Kind.Quote
-            else -> Kind.Other
-        }
-        // Only a live quote/pricing question leaves the phone. Everything the
-        // CRM already knows is answered locally, even when the same words
-        // ("how much do they owe") could sound like a price question.
-        val needsCloud = kind == Kind.Quote || text.containsAny(
-            "weather",
-            "forecast",
-            "traffic",
-            "supplier",
-            "live price",
-            "current price",
-            "price list",
-            "website",
-            "online",
-        )
-        return Intent(kind, transcript.take(MAX_TOPIC), needsCloud)
-    }
-
-    private fun String.containsAny(vararg needles: String): Boolean = needles.any { contains(it) }
+    private fun fallback(transcript: String): Intent = IntentRules.classify(transcript)
 
     override fun close() {
         closed = true
@@ -275,4 +245,22 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
             "qwen-1.5b-q4_k_m.gguf",
         )
     }
+}
+
+/**
+ * Process-wide owner of the intent model.
+ *
+ * The GGUF is around 500 MB and takes seconds to load. The service used to
+ * create and release one per call; keeping it here lets the evaluation screen
+ * reuse the same engine safely, and means ending a call does not pay for the
+ * load again. It is freed when Android kills the process.
+ */
+object QwenEngine {
+    @Volatile
+    private var instance: QwenIntentEngine? = null
+
+    fun get(context: Context): QwenIntentEngine =
+        instance ?: synchronized(this) {
+            instance ?: QwenIntentEngine(context.applicationContext).also { instance = it }
+        }
 }

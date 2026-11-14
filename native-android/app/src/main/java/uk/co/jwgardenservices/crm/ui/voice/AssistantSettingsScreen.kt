@@ -49,11 +49,14 @@ import uk.co.jwgardenservices.crm.ui.common.OptionPicker
 import uk.co.jwgardenservices.crm.ui.common.PageHeader
 import uk.co.jwgardenservices.crm.ui.common.SectionCard
 import uk.co.jwgardenservices.crm.ui.common.ShareText
+import uk.co.jwgardenservices.crm.voice.AssistantContext
+import uk.co.jwgardenservices.crm.voice.AssistantEval
 import uk.co.jwgardenservices.crm.voice.AssistantMemory
 import uk.co.jwgardenservices.crm.voice.AssistantPreferences
 import uk.co.jwgardenservices.crm.voice.KokoroHqDownloader
 import uk.co.jwgardenservices.crm.voice.KokoroTts
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
+import uk.co.jwgardenservices.crm.voice.QwenEngine
 import uk.co.jwgardenservices.crm.voice.QwenModelDownloader
 import java.io.File
 import java.time.Instant
@@ -446,6 +449,95 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+
+        SectionCard(title = "Understanding check") {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                var evalRunning by remember { mutableStateOf(false) }
+                var evalDone by remember { mutableIntStateOf(0) }
+                var evalResults by remember { mutableStateOf<List<AssistantEval.Result>>(emptyList()) }
+
+                Text(
+                    text = "Runs ${AssistantEval.CASES.size} real commands — logging hours, the " +
+                        "diary, money owed, quotes — through the same classifier a call uses. Use " +
+                        "it to see what the assistant actually understands, and which phrases it " +
+                        "misses, before deciding whether a bigger model is worth it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!qwenInstalled) {
+                    Text(
+                        text = "No conversation model is installed, so this scores the keyword " +
+                            "rules only. Download the model above for the real number.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                OutlinedButton(
+                    enabled = !evalRunning,
+                    onClick = {
+                        evalRunning = true
+                        evalDone = 0
+                        evalResults = emptyList()
+                        scope.launch {
+                            val engine = QwenEngine.get(context)
+                            val snapshot = AssistantContext().snapshot(emptyList(), emptyList())
+                            evalResults = AssistantEval.run(
+                                classifier = { phrase -> engine.classify(phrase, snapshot) },
+                                onProgress = { done, _ -> evalDone = done },
+                            )
+                            evalRunning = false
+                        }
+                    },
+                ) {
+                    Text(
+                        if (evalRunning) {
+                            "Testing… $evalDone of ${AssistantEval.CASES.size}"
+                        } else {
+                            "Run understanding check"
+                        },
+                    )
+                }
+                if (evalResults.isNotEmpty()) {
+                    val passed = evalResults.count { it.passed }
+                    val average = evalResults.map { it.millis }.average().toInt()
+                    Text(
+                        text = "$passed of ${evalResults.size} understood · about $average ms each",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(320.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(evalResults) { result ->
+                            Column {
+                                Text(
+                                    text = result.case.phrase,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                Text(
+                                    text = if (result.passed) {
+                                        "✓ ${result.actual.wire}"
+                                    } else {
+                                        "✗ heard ${result.actual.wire}, wanted ${result.case.expected.wire}"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (result.passed) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.error
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 

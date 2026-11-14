@@ -227,6 +227,13 @@ deliberately left on the web for now. The smaller known gaps:
   installed the keyword classifier answers instead. 0.5B is deliberate: its
   only job is turning a sentence into the intent JSON; open conversation is
   the cloud's job.
+- **Understanding check**: Settings → Assistant settings → Understanding check
+  runs about 35 real commands through the same classifier a call uses and
+  lists what it heard against what it should have heard, with an average
+  latency. It scores the keyword rules when no model is installed and the
+  model once it is, which is the honest way to decide whether a bigger model
+  or fine-tuning is worth the effort. `IntentRulesTest` runs the same corpus
+  against the deterministic rules on a plain JVM.
 - **Open conversation**: when the model cannot place a sentence (`other`), the
   assistant asks `voice-route` with the same business snapshot and the last
   six turns, so it can answer naturally about the owner's clients and diary.
