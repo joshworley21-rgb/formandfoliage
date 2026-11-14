@@ -17,6 +17,8 @@ type SpokenInput = {
   client_or_topic?: string;
   context?: string;
   history?: { role?: string; text?: string }[];
+  /** "answer" (default) or "intent" — the fast JSON classifier. */
+  mode?: string;
 };
 
 type ChatMessage = {
@@ -104,6 +106,76 @@ const TOOLS = [
     },
   },
 ];
+
+const INTENT_PROMPT = `Convert one spoken command from a UK gardener into a single JSON object.
+Choose intent from: log_hours, check_schedule, next_job, mark_job_done, who_owes_me,
+weekly_earnings, quote, other.
+Use requires_cloud true only when the answer needs live or external data (material
+prices, supplier rates, a dynamic quote, weather, traffic) or when the sentence is
+conversation the app cannot answer from its own records. Local commands — hours,
+diary, next job, finishing a job, money owed, week's earnings — are false.
+client_or_topic is the client or subject mentioned, copied from the business
+context when it names one, otherwise the subject, otherwise an empty string.`;
+
+const INTENT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    intent: {
+      type: "string",
+      enum: [
+        "log_hours",
+        "check_schedule",
+        "next_job",
+        "mark_job_done",
+        "who_owes_me",
+        "weekly_earnings",
+        "quote",
+        "other",
+      ],
+    },
+    client_or_topic: { type: "string" },
+    requires_cloud: { type: "boolean" },
+  },
+  required: ["intent", "client_or_topic", "requires_cloud"],
+};
+
+async function classifyIntent(
+  apiKey: string,
+  query: string,
+  businessContext: string,
+): Promise<unknown> {
+  const system = businessContext
+    ? `${INTENT_PROMPT}\n\nBusiness context:\n${businessContext}`
+    : INTENT_PROMPT;
+  const response = await fetch(OPENAI_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: query },
+      ],
+      temperature: 0,
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: "intent", strict: true, schema: INTENT_SCHEMA },
+      },
+    }),
+  });
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 300);
+    throw new Error(`OpenAI intent HTTP ${response.status}: ${detail}`);
+  }
+  const parsed = (await response.json()) as { choices?: { message?: { content?: string } }[] };
+  const content = parsed.choices?.[0]?.message?.content;
+  if (!content) throw new Error("OpenAI returned no intent");
+  return JSON.parse(content) as unknown;
+}
 
 function round(value: number): number {
   return Math.round(value * 100) / 100;
@@ -226,6 +298,10 @@ Deno.serve(
     const topic = text(input.client_or_topic, 120);
     const businessContext = text(input.context, 2000);
     if (!query) return json({ error: "A spoken query is required" }, 400);
+
+    if (text(input.mode, 20) === "intent") {
+      return json(await classifyIntent(apiKey, query, businessContext));
+    }
 
     const system = businessContext
       ? `${SYSTEM_PROMPT}\n\nBusiness context:\n${businessContext}`

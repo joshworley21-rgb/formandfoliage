@@ -175,8 +175,8 @@ deliberately left on the web for now. The smaller known gaps:
   command is finalised without a tap. Shortening these is the cheapest
   latency win in the whole pipeline; any shorter starts cutting people off
   mid-sentence.
-- The call opens with "How can I help?" once, then reopens the microphone for
-  the first command.
+- The call does not speak a greeting: the microphone opens immediately, so
+  the first command is not delayed by loading and playing a welcome.
 - **Bundled model**: the LibriSpeech + GigaSpeech streaming Zipformer
   (English, int8 encoder/joiner) ships in
   `app/src/main/assets/sherpa-onnx-streaming-zipformer-en-2023-06-21/`
@@ -225,10 +225,10 @@ deliberately left on the web for now. The smaller known gaps:
   sent anywhere unless a turn goes to the cloud.
 - **Conversation model**: Settings → Conversation model downloads Qwen 2.5
   0.5B Instruct q4_k_m (469 MB, Wi-Fi only) into `files/models/`, resumable
-  like the Kokoro voice, and it is warmed when a call starts. Until it is
-  installed the keyword classifier answers instead. 0.5B is deliberate: its
-  only job is turning a sentence into the intent JSON; open conversation is
-  the cloud's job.
+  like the Kokoro voice. It is the offline classifier: online turns use the
+  cloud's JSON classifier instead because the phone CPU can take tens of
+  seconds over the local model. The model still powers the Understanding
+  check and any command when "Answer unknown questions online" is off.
 - **Understanding check**: Settings → Assistant settings → Understanding check
   runs real commands through the same classifier a call uses and lists what
   it heard against what it should have heard, with an average latency. There
@@ -239,9 +239,11 @@ deliberately left on the web for now. The smaller known gaps:
   worth the effort. `IntentRulesTest` runs the same corpus against the
   deterministic rules on a plain JVM (32/35 today, the misses being slang).
 - **Fast path**: the deterministic rules answer the common, unambiguous
-  commands (hours, diary, next job, money owed, week's takings) immediately;
-  the model is only consulted for mark-done, quotes and conversation. That
-  removes roughly a second of silence from the commands used every day.
+  commands (hours, diary, next job, money owed, week's takings) immediately.
+  Anything else is classified by the cloud function in about a second; the
+  on-device 0.5B model is only used when online answers are switched off or
+  there is no signal. On a phone CPU the model can take tens of seconds, which
+  is why it is a fallback rather than the default.
 - **Open conversation**: when the model cannot place a sentence (`other`), the
   assistant asks `voice-route` with the same business snapshot and the last
   six turns, so it can answer naturally about the owner's clients and diary.

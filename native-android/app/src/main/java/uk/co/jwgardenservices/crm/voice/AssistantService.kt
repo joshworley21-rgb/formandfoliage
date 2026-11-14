@@ -23,6 +23,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import uk.co.jwgardenservices.crm.MainActivity
 import uk.co.jwgardenservices.crm.R
@@ -78,7 +79,6 @@ class AssistantService : Service() {
 
     private var voice = KokoroVoice.BmFable
     private var speed = AssistantPreferences.DEFAULT_SPEED
-    private var greeted = false
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
 
@@ -109,9 +109,12 @@ class AssistantService : Service() {
         // Swapping between int8 and the downloaded fp32 model should take
         // effect on the next reply, without restarting the Assistant.
         scope.launch {
-            AssistantPreferences.highQualityFlow(this@AssistantService).collect {
-                speaker.reload()
-            }
+            // drop(1): the initial emission is the current value, not a
+            // change. Reloading on it unloaded a warm fp32 engine at every
+            // call start, which cost several seconds before the first word.
+            AssistantPreferences.highQualityFlow(this@AssistantService)
+                .drop(1)
+                .collect { speaker.reload() }
         }
         scope.launch {
             val saved = AssistantMemory.turns(this@AssistantService)
@@ -137,9 +140,10 @@ class AssistantService : Service() {
         _callActive.value = true
         startInForeground()
         scope.launch { ensureListening() }
-        // Load the intent model while the owner is still talking, so the first
-        // command does not wait for it.
-        scope.launch(kotlinx.coroutines.Dispatchers.Default) { intents.warmUp() }
+        // Warm the voice, not the intent model: online turns are classified
+        // by the cloud, and loading the 0.5B on every call burned CPU for
+        // nothing. The rules and cloud handle the first command; the local
+        // model loads only if it is actually needed.
         scope.launch(kotlinx.coroutines.Dispatchers.Default) { speaker.warmUp() }
         return START_NOT_STICKY
     }
@@ -153,26 +157,6 @@ class AssistantService : Service() {
             if (!speech.isListening() && speech.state.value.phase != SherpaSpeechService.Phase.Loading) {
                 speech.startListening()
             }
-            if (speech.isListening()) greet()
-        }
-    }
-
-    /** One spoken welcome per call, so a fresh tab is not silent. */
-    private suspend fun greet() {
-        if (greeted) return
-        greeted = true
-        CrashLog.note(this, TAG, "greeting with Kokoro")
-        val wasListening = speech.isListening()
-        if (wasListening) speech.pauseForSpeech()
-        _speaking.value = true
-        try {
-            say("How can I help?")
-        } catch (error: Exception) {
-            CrashLog.note(this, TAG, "greeting failed: ${error.message}")
-            Log.w(TAG, "Greeting playback failed", error)
-        } finally {
-            _speaking.value = false
-            if (wasListening) speech.resumeAfterSpeech()
         }
     }
 
@@ -277,20 +261,49 @@ class AssistantService : Service() {
 
     /** Classify one finished sentence and either act locally or ask the cloud. */
     private suspend fun answerTurn(text: String) {
+        val started = System.currentTimeMillis()
         val context = businessContext()
-        // Fast path: the common commands are unambiguous enough that waiting
-        // for a 0.5B model to agree only adds a second of silence.
+
+        // 1. Rules: the common commands are unambiguous and instant. A date
+        //    word ("next week", "tomorrow") means the today-only actions are
+        //    not enough, so those go to the cloud instead.
+        val lower = text.lowercase()
+        val temporal = TEMPORAL_WORDS.any { lower.contains(it) }
         val quick = IntentRules.classify(text)
-        val intent = if (IntentRules.isConfident(quick.intent) && !quick.requiresCloud) {
-            CrashLog.note(this, TAG, "intent=rules:${quick.intent.wire}")
-            quick
-        } else {
-            intents.classify(text, context)
+        if (!temporal && IntentRules.isConfident(quick.intent) && !quick.requiresCloud) {
+            CrashLog.note(this, TAG, "intent=rules:${quick.intent.wire} in ${System.currentTimeMillis() - started}ms")
+            runIntent(text, quick)
+            return
         }
+
+        // 2. Cloud intent. A round trip is a second; the on-device 0.5B can
+        //    take tens of seconds on a phone CPU, so it is the offline
+        //    fallback rather than the default.
+        var online: QwenIntentEngine.Intent? = null
+        if (cloudConversation) {
+            online = runCatching { cloud.classify(text, context) }
+                .onFailure { CrashLog.note(this, TAG, "cloud intent failed: ${it.message}") }
+                .getOrNull()
+            if (online != null) {
+                CrashLog.note(
+                    this,
+                    TAG,
+                    "intent=cloud:${online.intent.wire} in ${System.currentTimeMillis() - started}ms",
+                )
+            }
+        }
+
+        val intent = online ?: intents.classify(text, context).also {
+            CrashLog.note(
+                this,
+                TAG,
+                "intent=local:${it.intent.wire} in ${System.currentTimeMillis() - started}ms",
+            )
+        }
+
         val conversational = intent.intent == QwenIntentEngine.Kind.Other
-        val wantsCloud = intent.requiresCloud || (conversational && cloudConversation)
-        CrashLog.note(this, TAG, "intent=${intent.intent.wire} cloud=$wantsCloud")
-        if (wantsCloud) {
+        val needsAWholeAnswer = intent.requiresCloud || (conversational && cloudConversation)
+        if (needsAWholeAnswer) {
             if (intent.requiresCloud) say(CHECKING_ONLINE)
             val answer = runCatching {
                 cloud.route(text, intent.clientOrTopic, context, _turns.value.takeLast(6))
@@ -298,13 +311,34 @@ class AssistantService : Service() {
                 .onFailure { error -> Log.w(TAG, "Cloud route failed", error) }
                 .getOrNull()
             say(answer ?: "I couldn't reach the online assistant. Try again when you have signal.")
-        } else {
-            val executed = runCatching { actions.run(text, intent) }
-                .onFailure { CrashLog.note(this, TAG, "action failed: ${it.message}") }
-                .getOrNull()
-            CrashLog.note(this, TAG, "action reply: ${executed ?: "none"}")
-            say(executed ?: confirmationFor(intent))
+            return
         }
+
+        // "What have I got on next week" is not today's diary; the cloud has
+        // the context to answer it, the local action only knows today.
+        if (intent.intent == QwenIntentEngine.Kind.CheckSchedule &&
+            temporal &&
+            cloudConversation
+        ) {
+            val answer = runCatching {
+                cloud.route(text, intent.clientOrTopic, context, _turns.value.takeLast(6))
+            }.getOrNull()
+            if (answer != null) {
+                say(answer)
+                return
+            }
+        }
+
+        runIntent(text, intent)
+    }
+
+    /** Carry out a local intent and speak its result. */
+    private suspend fun runIntent(text: String, intent: QwenIntentEngine.Intent) {
+        val executed = runCatching { actions.run(text, intent) }
+            .onFailure { CrashLog.note(this, TAG, "action failed: ${it.message}") }
+            .getOrNull()
+        CrashLog.note(this, TAG, "action reply: ${executed ?: "none"}")
+        say(executed ?: confirmationFor(intent))
     }
 
     /** The business snapshot handed to the local and cloud models. */
@@ -478,6 +512,7 @@ class AssistantService : Service() {
         const val NOTIFICATION_ID = 41
         const val CHECKING_ONLINE = "Checking online rates."
         const val LISTENING_TEXT = "Assistant is listening for your next command"
+        val TEMPORAL_WORDS = listOf("week", "tomorrow", "month", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
         const val MAX_TURNS = 40
 
         /**

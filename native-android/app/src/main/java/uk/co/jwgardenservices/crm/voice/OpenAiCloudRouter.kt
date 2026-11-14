@@ -96,6 +96,63 @@ class OpenAiCloudRouter(
         }
     }
 
+    /**
+     * Cheap JSON intent classification through the same function.
+     *
+     * This exists because the on-device 0.5B model can take tens of seconds on
+     * a phone CPU. A cloud round trip is ~0.5-1 s and much more accurate, so
+     * it is used whenever online answers are allowed; the local model stays
+     * as the offline fallback.
+     *
+     * Returns null on any failure so the caller can fall back.
+     */
+    suspend fun classify(
+        query: String,
+        context: String,
+    ): QwenIntentEngine.Intent? = withContext(Dispatchers.IO) {
+        val token = accessToken() ?: return@withContext null
+        val body = json.encodeToString(
+            IntentRequest(query = query, context = context.take(2000)),
+        ).toRequestBody(JSON)
+        val request = Request.Builder()
+            .url(endpoint)
+            .header("Authorization", "Bearer $token")
+            .header("apikey", anonKey)
+            .post(body)
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                Log.w(TAG, "intent HTTP ${response.code}: ${text.take(200)}")
+                return@withContext null
+            }
+            val parsed = runCatching { json.decodeFromString<IntentResponse>(text) }.getOrNull()
+                ?: return@withContext null
+            val kind = QwenIntentEngine.Kind.entries.firstOrNull { it.wire == parsed.intent }
+                ?: return@withContext null
+            QwenIntentEngine.Intent(
+                intent = kind,
+                clientOrTopic = parsed.clientOrTopic.take(120),
+                requiresCloud = parsed.requiresCloud,
+            )
+        }
+    }
+
+    @Serializable
+    private data class IntentRequest(
+        val mode: String = "intent",
+        val query: String,
+        val context: String = "",
+    )
+
+    @Serializable
+    private data class IntentResponse(
+        val intent: String = "",
+        @SerialName("client_or_topic") val clientOrTopic: String = "",
+        @SerialName("requires_cloud") val requiresCloud: Boolean = false,
+    )
+
     @Serializable
     private data class HistoryTurn(val role: String, val text: String)
 

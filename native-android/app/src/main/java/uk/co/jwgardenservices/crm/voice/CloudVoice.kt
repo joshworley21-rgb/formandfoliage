@@ -8,6 +8,7 @@ import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -15,6 +16,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import uk.co.jwgardenservices.crm.core.AppConfig
+import uk.co.jwgardenservices.crm.core.CrashLog
 import uk.co.jwgardenservices.crm.data.remote.SupabaseProvider
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -38,7 +40,10 @@ class CloudVoice(private val context: Context) : AutoCloseable {
         .readTimeout(25, TimeUnit.SECONDS)
         .build()
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = Json {
+        ignoreUnknownKeys = true
+        explicitNulls = false
+    }
 
     private var player: MediaPlayer? = null
 
@@ -48,31 +53,43 @@ class CloudVoice(private val context: Context) : AutoCloseable {
     suspend fun speak(text: String): Boolean = withContext(Dispatchers.IO) {
         if (text.isBlank()) return@withContext false
         if (!online()) {
-            Log.i(TAG, "no network; using the on-device voice")
+            CrashLog.note(context, TAG, "no network; using the on-device voice")
             return@withContext false
         }
         stopped = false
         val token = SupabaseProvider.client.auth.currentSessionOrNull()?.accessToken
-            ?: return@withContext false
+        if (token == null) {
+            CrashLog.note(context, TAG, "no Supabase session; using the on-device voice")
+            return@withContext false
+        }
 
-        val body = json.encodeToString(SpokenRequest(text.take(600))).toRequestBody(JSON)
-        val request = Request.Builder()
-            .url("${AppConfig.supabaseUrl}/functions/v1/voice-speak")
-            .header("Authorization", "Bearer $token")
-            .header("apikey", AppConfig.supabaseKey)
-            .post(body)
-            .build()
+        // Some OpenAI voices/models reject `instructions`; retry once without
+        // it rather than falling back to a robotic voice over a 400.
+        val first = runCatching { client.newCall(request(text, true, token)).execute() }.getOrNull()
+            ?: return@withContext false
+        val response = if (first.code == 400) {
+            first.close()
+            runCatching { client.newCall(request(text, false, token)).execute() }.getOrNull()
+                ?: return@withContext false
+        } else {
+            first
+        }
 
         val bytes = runCatching {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Log.w(TAG, "voice-speak HTTP ${response.code}: ${response.body?.string()?.take(200)}")
+            response.use { result ->
+                if (!result.isSuccessful) {
+                    CrashLog.note(context, TAG, "voice-speak HTTP ${result.code}")
+                    Log.w(TAG, "voice-speak HTTP ${result.code}: ${result.body?.string()?.take(200)}")
                     return@withContext false
                 }
-                response.body?.bytes()
+                result.body?.bytes()
             }
         }.getOrNull() ?: return@withContext false
-        if (bytes.isEmpty()) return@withContext false
+        if (bytes.isEmpty()) {
+            CrashLog.note(context, TAG, "voice-speak returned no audio")
+            return@withContext false
+        }
+        CrashLog.note(context, TAG, "online voice: ${bytes.size / 1024} KB")
 
         val file = File(context.cacheDir, "assistant-reply.mp3")
         runCatching { file.writeBytes(bytes) }.getOrElse {
@@ -118,6 +135,19 @@ class CloudVoice(private val context: Context) : AutoCloseable {
         }
     }
 
+    private fun request(text: String, withInstructions: Boolean, token: String): Request {
+        val payload = SpeakRequest(
+            input = text.take(600),
+            instructions = if (withInstructions) INSTRUCTIONS else null,
+        )
+        return Request.Builder()
+            .url("${AppConfig.supabaseUrl}/functions/v1/voice-speak")
+            .header("Authorization", "Bearer $token")
+            .header("apikey", AppConfig.supabaseKey)
+            .post(json.encodeToString(payload).toRequestBody(JSON))
+            .build()
+    }
+
     private fun online(): Boolean {
         val manager = context.getSystemService(ConnectivityManager::class.java) ?: return true
         val network = manager.activeNetwork ?: return false
@@ -140,10 +170,21 @@ class CloudVoice(private val context: Context) : AutoCloseable {
     }
 
     @Serializable
-    private data class SpokenRequest(val text: String)
+    private data class SpeakRequest(
+        val model: String = MODEL,
+        val voice: String = VOICE,
+        val input: String,
+        val instructions: String? = null,
+        @SerialName("response_format") val format: String = "mp3",
+    )
 
     private companion object {
         const val TAG = "CloudVoice"
+        const val MODEL = "gpt-4o-mini-tts"
+        const val VOICE = "fable"
+        const val INSTRUCTIONS =
+            "You are the voice of a calm, friendly British gardening assistant. " +
+                "Speak naturally and warmly at a measured pace. No theatrics."
         val JSON = "application/json; charset=utf-8".toMediaType()
     }
 }
