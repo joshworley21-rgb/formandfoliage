@@ -15,6 +15,8 @@ import { requireUser } from "../_shared/supabase.ts";
 type SpokenInput = {
   query?: string;
   client_or_topic?: string;
+  context?: string;
+  history?: { role?: string; text?: string }[];
 };
 
 type ChatMessage = {
@@ -35,15 +37,23 @@ const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const LABOUR_RATE = 35.0;
 const VAT_RATE = 0.2;
 
-const SYSTEM_PROMPT = `You are the phone assistant for JW Garden Services, a UK gardening
-business. Answer spoken questions in at most 45 words, in GBP, with no lists,
-markdown or emoji: your reply is read aloud by a speech engine.
+const SYSTEM_PROMPT = `You are the phone assistant for a UK gardening business. You answer
+spoken questions in at most 45 words, in GBP, with no lists, markdown or emoji:
+your reply is read aloud by a speech engine.
+
+The "business context" section describes the owner's actual business: clients,
+booked jobs, money owed and facts they asked you to remember. Use it. Never
+invent a client, a booking, a debt or a remembered fact that is not in it. If
+the answer is not there, say so plainly and offer to help another way.
 
 Use fetch_live_pricing whenever a material price is needed and
 calculate_commercial_quote whenever a quote, estimate or job total is needed.
 Never invent a price that a tool did not return. If a tool marks its answer as
 an estimate, say so plainly ("that's an estimate"). Ask one short clarifying
-question if the request lacks the material or the scope.`;
+question if the request lacks the material or the scope.
+
+The owner may talk to you casually. Answer briefly and naturally, like a
+competent assistant, but stay on the business.`;
 
 /** Illustrative rate card; swap for a live supplier API later. */
 const RATE_CARD: Record<string, { price: number; unit: string }> = {
@@ -214,15 +224,23 @@ Deno.serve(
     const input = (await request.json()) as SpokenInput;
     const query = text(input.query, 500);
     const topic = text(input.client_or_topic, 120);
+    const businessContext = text(input.context, 2000);
     if (!query) return json({ error: "A spoken query is required" }, 400);
 
-    const messages: ChatMessage[] = [
-      { role: "system", content: SYSTEM_PROMPT },
-      {
-        role: "user",
-        content: `Customer or topic: ${topic || "not stated"}\nSpoken request: ${query}`,
-      },
-    ];
+    const system = businessContext
+      ? `${SYSTEM_PROMPT}\n\nBusiness context:\n${businessContext}`
+      : SYSTEM_PROMPT;
+
+    const messages: ChatMessage[] = [{ role: "system", content: system }];
+    for (const turn of (input.history ?? []).slice(-6)) {
+      const role = turn?.role === "user" ? "user" : "assistant";
+      const content = text(turn?.text, 400);
+      if (content) messages.push({ role, content });
+    }
+    messages.push({
+      role: "user",
+      content: `Customer or topic: ${topic || "not stated"}\nSpoken request: ${query}`,
+    });
 
     const first = await chat(apiKey, messages);
     const calls = first.tool_calls ?? [];

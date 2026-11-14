@@ -63,6 +63,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.launch
 import uk.co.jwgardenservices.crm.voice.AssistantService
+import uk.co.jwgardenservices.crm.voice.AssistantTurn
 import uk.co.jwgardenservices.crm.voice.SherpaSpeechService
 
 /**
@@ -86,7 +87,7 @@ fun AssistantScreen() {
     var state by remember { mutableStateOf(SherpaSpeechService.UiState()) }
     var speaking by remember { mutableStateOf(false) }
     var callActive by remember { mutableStateOf(false) }
-    var turns by remember { mutableStateOf<List<AssistantService.Turn>>(emptyList()) }
+    var turns by remember { mutableStateOf<List<AssistantTurn>>(emptyList()) }
     var granted by remember { mutableStateOf(micGranted(context)) }
 
     val permission = rememberLauncherForActivityResult(
@@ -331,7 +332,7 @@ private fun CallOrb(active: Boolean, speaking: Boolean, loading: Boolean, level:
 
 @Composable
 private fun Transcript(
-    turns: List<AssistantService.Turn>,
+    turns: List<AssistantTurn>,
     partial: String,
     listening: Boolean,
     modifier: Modifier = Modifier,

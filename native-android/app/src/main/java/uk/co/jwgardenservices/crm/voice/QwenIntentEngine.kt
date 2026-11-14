@@ -72,8 +72,12 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
     /**
      * Classify [transcript], log the resulting JSON line to Logcat under the
      * [TAG] tag, and return the structured intent.
+     *
+     * [context] is a compact snapshot of the business (clients, bookings,
+     * money owed, remembered facts). It is what lets a small model resolve
+     * "the Smiths job" or "yesterday" without being trained on this business.
      */
-    suspend fun classify(transcript: String): Intent {
+    suspend fun classify(transcript: String, context: String = ""): Intent {
         val text = transcript.trim()
         if (text.isEmpty() || closed) {
             return Intent(Kind.Other, "", false).also { Log.i(TAG, it.toJson()) }
@@ -85,7 +89,7 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
                 Llama.complete(
                     model = loaded,
                     prompt = "Spoken command: \"${text.replace("\"", "'")}\"",
-                    systemPrompt = systemPrompt(),
+                    systemPrompt = systemPrompt(context),
                     maxTokens = 96,
                 ).text
             }
@@ -96,6 +100,17 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
         val intent = reply?.let { coerce(it, text) } ?: fallback(text)
         Log.i(TAG, intent.toJson())
         return intent
+    }
+
+    /**
+     * Load the model in the background when a call starts, so the first
+     * command does not have to wait for it. Missing models are not an error:
+     * the rule classifier handles those turns.
+     */
+    suspend fun warmUp() {
+        if (closed) return
+        runCatching { loadModel() }
+            .onFailure { Log.i(TAG, "No local intent model yet (${it.message})") }
     }
 
     private suspend fun loadModel(): LlamaModel {
@@ -132,7 +147,7 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
 
     private fun modelsDir(): File = File(context.filesDir, "models")
 
-    private fun systemPrompt(): String {
+    private fun systemPrompt(businessContext: String): String {
         val grammar = runCatching {
             context.assets.open(GRAMMAR_ASSET).bufferedReader().use { it.readText() }
         }.getOrDefault("")
@@ -145,9 +160,31 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
             appendLine("quote (price or quote), other (anything else).")
             appendLine("requires_cloud is true when the answer needs live or external data:")
             appendLine("current material prices, supplier rates, a dynamic quote or estimate,")
-            appendLine("weather, traffic, or anything not stored on this phone. Otherwise false.")
+            appendLine("weather, traffic, anything conversational, or anything not stored on this")
+            appendLine("phone. Otherwise false.")
             appendLine("Local actions such as logging hours, the diary, money owed or earnings are false.")
             appendLine("client_or_topic is the client or subject mentioned, or an empty string.")
+            appendLine("Match names to the client list below; copy the client's name as written.")
+            if (businessContext.isNotBlank()) {
+                appendLine()
+                appendLine("Business context:")
+                appendLine(businessContext.take(1600))
+            }
+            appendLine()
+            appendLine("Examples:")
+            appendLine("Spoken command: \"logged three hours at the Smiths yesterday\"")
+            appendLine("{\"intent\":\"log_hours\",\"client_or_topic\":\"Smiths\",\"requires_cloud\":false}")
+            appendLine("Spoken command: \"what's next\"")
+            appendLine("{\"intent\":\"next_job\",\"client_or_topic\":\"\",\"requires_cloud\":false}")
+            appendLine("Spoken command: \"who still owes me\"")
+            appendLine("{\"intent\":\"who_owes_me\",\"client_or_topic\":\"\",\"requires_cloud\":false}")
+            appendLine("Spoken command: \"finished the Jones job\"")
+            appendLine("{\"intent\":\"mark_job_done\",\"client_or_topic\":\"Jones\",\"requires_cloud\":false}")
+            appendLine("Spoken command: \"how much for forty square metres of turf\"")
+            appendLine("{\"intent\":\"quote\",\"client_or_topic\":\"turf 40 square metres\",\"requires_cloud\":true}")
+            appendLine("Spoken command: \"what's the weather doing tomorrow\"")
+            appendLine("{\"intent\":\"other\",\"client_or_topic\":\"weather tomorrow\",\"requires_cloud\":true}")
+            appendLine()
             appendLine("Reply with JSON only, matching this grammar exactly:")
             append(grammar)
         }
@@ -232,6 +269,7 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
 
         /** Tried in order before any other `.gguf` in the models folder. */
         val PREFERRED_NAMES = listOf(
+            QwenModelDownloader.FILE_NAME,
             "qwen2.5-1.5b-instruct-q4_k_m.gguf",
             "qwen1.5-1.8b-chat-q4_k_m.gguf",
             "qwen-1.5b-q4_k_m.gguf",

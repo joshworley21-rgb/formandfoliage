@@ -50,14 +50,29 @@ class OpenAiCloudRouter(
 
     /**
      * Ask the cloud model to handle [query]. Returns a short spoken answer.
-     * Throws [IOException] on network/API failure so the caller can apologise
-     * out loud.
+     *
+     * [context] is the same business snapshot the local model sees, so the
+     * cloud answer can talk about the owner's clients, diary and memories
+     * rather than generic advice. Throws [IOException] on network/API failure
+     * so the caller can apologise out loud.
      */
-    suspend fun route(query: String, clientOrTopic: String): String = withContext(Dispatchers.IO) {
-        val token = accessToken() ?: throw IOException("Sign in again to use online rates")
+    suspend fun route(
+        query: String,
+        clientOrTopic: String,
+        context: String = "",
+        history: List<AssistantTurn> = emptyList(),
+    ): String = withContext(Dispatchers.IO) {
+        val token = accessToken() ?: throw IOException("Sign in again to use online answers")
 
         val body = json.encodeToString(
-            SpokenRequest(query = query, clientOrTopic = clientOrTopic),
+            SpokenRequest(
+                query = query,
+                clientOrTopic = clientOrTopic,
+                context = context.take(2000),
+                history = history.takeLast(6).map {
+                    HistoryTurn(role = if (it.fromUser) "user" else "assistant", text = it.text.take(400))
+                },
+            ),
         ).toRequestBody(JSON)
 
         val request = Request.Builder()
@@ -71,7 +86,7 @@ class OpenAiCloudRouter(
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 Log.w(TAG, "voice-route HTTP ${response.code}: ${text.take(300)}")
-                throw IOException("Online rates are unavailable right now")
+                throw IOException("Online answers are unavailable right now")
             }
             val parsed = json.decodeFromString<SpokenResponse>(text)
             if (parsed.error != null) throw IOException(parsed.error)
@@ -82,9 +97,14 @@ class OpenAiCloudRouter(
     }
 
     @Serializable
+    private data class HistoryTurn(val role: String, val text: String)
+
+    @Serializable
     private data class SpokenRequest(
         val query: String,
         @SerialName("client_or_topic") val clientOrTopic: String,
+        val context: String = "",
+        val history: List<HistoryTurn> = emptyList(),
     )
 
     @Serializable

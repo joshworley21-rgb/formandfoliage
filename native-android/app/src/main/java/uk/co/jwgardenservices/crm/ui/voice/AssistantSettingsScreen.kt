@@ -13,7 +13,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
@@ -45,10 +49,12 @@ import uk.co.jwgardenservices.crm.ui.common.OptionPicker
 import uk.co.jwgardenservices.crm.ui.common.PageHeader
 import uk.co.jwgardenservices.crm.ui.common.SectionCard
 import uk.co.jwgardenservices.crm.ui.common.ShareText
+import uk.co.jwgardenservices.crm.voice.AssistantMemory
 import uk.co.jwgardenservices.crm.voice.AssistantPreferences
 import uk.co.jwgardenservices.crm.voice.KokoroHqDownloader
 import uk.co.jwgardenservices.crm.voice.KokoroTts
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
+import uk.co.jwgardenservices.crm.voice.QwenModelDownloader
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
@@ -75,6 +81,26 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     var hqInstalled by remember { mutableStateOf(KokoroHqDownloader.isInstalled(context)) }
     var savedBytes by remember { mutableLongStateOf(KokoroHqDownloader.savedBytes(context)) }
     val unmetered = remember { isUnmetered(context) }
+
+    val facts by AssistantMemory.factsFlow(context)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val cloudConversation by AssistantMemory.cloudConversationFlow(context)
+        .collectAsStateWithLifecycle(initialValue = true)
+    val qwenState by QwenModelDownloader.state.collectAsStateWithLifecycle()
+    var qwenInstalled by remember { mutableStateOf(QwenModelDownloader.isInstalled(context)) }
+    var qwenSaved by remember { mutableLongStateOf(QwenModelDownloader.savedBytes(context)) }
+
+    LaunchedEffect(qwenState) {
+        when (qwenState) {
+            is QwenModelDownloader.State.Done -> {
+                qwenInstalled = true
+                QwenModelDownloader.clearResult()
+                qwenSaved = 0
+            }
+            is QwenModelDownloader.State.Working -> Unit
+            else -> qwenSaved = QwenModelDownloader.savedBytes(context)
+        }
+    }
 
     LaunchedEffect(hqState) {
         when (hqState) {
@@ -170,6 +196,148 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+
+        SectionCard(title = "Conversation & memory") {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Switch(
+                        checked = cloudConversation,
+                        onCheckedChange = { enabled ->
+                            scope.launch { AssistantMemory.setCloudConversation(context, enabled) }
+                        },
+                    )
+                    Text(
+                        text = "Answer unknown questions online",
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+                Text(
+                    text = "A sentence the on-device model cannot place — small talk, a question " +
+                        "about the weather — is asked of the cloud model with the same business " +
+                        "snapshot. Turn this off and everything stays on the phone, at the cost " +
+                        "of a canned reply for open questions.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                HorizontalDivider()
+                Text(
+                    text = "What it remembers",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+                if (facts.isEmpty()) {
+                    Text(
+                        text = "Say “remember that …” to teach it something about the business. " +
+                            "“What do you remember?” reads the list back, “forget …” removes one.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    facts.forEach { fact ->
+                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Text(
+                                text = fact.text,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(
+                                onClick = {
+                                    scope.launch { AssistantMemory.forget(context, fact.text) }
+                                },
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Delete,
+                                    contentDescription = "Forget this",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        SectionCard(title = "Conversation model") {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = if (qwenInstalled) {
+                        "Qwen 2.5 0.5B is installed. Sentences are matched against your clients, " +
+                            "diary and remembered facts on the phone; only open questions go online."
+                    } else {
+                        "Without a model the assistant only understands keyword patterns. Qwen 2.5 " +
+                            "0.5B (469 MB) can be downloaded once over Wi-Fi; it turns a sentence into " +
+                            "an intent and applies the next time you speak."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val qwenWorking = qwenState as? QwenModelDownloader.State.Working
+                val qwenFailure = qwenState as? QwenModelDownloader.State.Failed
+                if (qwenWorking != null) {
+                    LinearProgressIndicator(
+                        progress = { qwenWorking.progress },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "Downloading… ${qwenWorking.done / MEGABYTE} of " +
+                            "${qwenWorking.total / MEGABYTE} MB " +
+                            "(${(qwenWorking.progress * 100).toInt()}%)",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (qwenInstalled) {
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                QwenModelDownloader.remove(context)
+                                qwenInstalled = false
+                                qwenSaved = 0
+                            }
+                        },
+                    ) { Text("Remove conversation model") }
+                } else if (qwenWorking == null) {
+                    OutlinedButton(
+                        onClick = {
+                            if (!unmetered) return@OutlinedButton
+                            QwenModelDownloader.start(context)
+                        },
+                    ) {
+                        Text(
+                            if (qwenSaved > 0) {
+                                "Resume download (${qwenSaved / MEGABYTE} MB saved)"
+                            } else {
+                                "Download conversation model (469 MB)"
+                            },
+                        )
+                    }
+                }
+                if (qwenWorking != null) {
+                    TextButton(onClick = { QwenModelDownloader.cancel() }) {
+                        Text("Cancel download")
+                    }
+                }
+                if (!unmetered && qwenWorking == null && !qwenInstalled) {
+                    Text(
+                        text = "Connect to Wi-Fi to download the model.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                qwenFailure?.let { error ->
+                    Text(
+                        text = error.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
         }
 

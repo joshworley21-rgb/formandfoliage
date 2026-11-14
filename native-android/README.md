@@ -211,6 +211,25 @@ deliberately left on the web for now. The smaller known gaps:
   by the next sentence ("two and a half"), so the conversation takes two
   turns instead of failing. Client names are matched with a one-letter
   tolerance for names of five letters or more.
+- **Memory and business context**: before each sentence the assistant is given
+  a compact snapshot — business name and VAT, today's date, up to 30 client
+  names, the next five jobs, what is owed, this week's takings and anything
+  the owner asked it to remember. "Remember that the Smiths' gate sticks"
+  stores a local fact; "what do you remember" reads them back; "forget …" or
+  "forget everything" removes them. Facts and the last 24 turns live in a
+  DataStore file (`assistant_memory`), so they survive restarts. Nothing is
+  sent anywhere unless a turn goes to the cloud.
+- **Conversation model**: Settings → Conversation model downloads Qwen 2.5
+  0.5B Instruct q4_k_m (469 MB, Wi-Fi only) into `files/models/`, resumable
+  like the Kokoro voice, and it is warmed when a call starts. Until it is
+  installed the keyword classifier answers instead. 0.5B is deliberate: its
+  only job is turning a sentence into the intent JSON; open conversation is
+  the cloud's job.
+- **Open conversation**: when the model cannot place a sentence (`other`), the
+  assistant asks `voice-route` with the same business snapshot and the last
+  six turns, so it can answer naturally about the owner's clients and diary.
+  The "Answer unknown questions online" switch turns this off and keeps
+  everything on the phone.
 - **Hybrid routing**: Qwen sets `requires_cloud: true` for live pricing,
   supplier data, dynamic quote calculations, weather/traffic or anything not
   stored on the phone. The service then says "Checking online rates…" and

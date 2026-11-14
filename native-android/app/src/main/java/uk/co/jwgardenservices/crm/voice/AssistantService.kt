@@ -63,13 +63,12 @@ class AssistantService : Service() {
     private val _callActive = MutableStateFlow(false)
     val callActive: StateFlow<Boolean> = _callActive.asStateFlow()
 
-    /** One line of the conversation, kept so leaving the tab does not erase it. */
-    data class Turn(val fromUser: Boolean, val text: String, val at: Long = System.currentTimeMillis())
-
-    private val _turns = MutableStateFlow<List<Turn>>(emptyList())
-    val turns: StateFlow<List<Turn>> = _turns.asStateFlow()
+    private val _turns = MutableStateFlow<List<AssistantTurn>>(emptyList())
+    val turns: StateFlow<List<AssistantTurn>> = _turns.asStateFlow()
 
     private var foreground = false
+    private var cloudConversation = true
+    private val assistantContext = AssistantContext()
 
     private var voice = KokoroVoice.BmFable
     private var speed = AssistantPreferences.DEFAULT_SPEED
@@ -106,6 +105,13 @@ class AssistantService : Service() {
                 speaker.reload()
             }
         }
+        scope.launch {
+            val saved = AssistantMemory.turns(this@AssistantService)
+            if (saved.isNotEmpty() && _turns.value.isEmpty()) _turns.value = saved
+        }
+        scope.launch {
+            AssistantMemory.cloudConversationFlow(this@AssistantService).collect { cloudConversation = it }
+        }
         scope.launch { handleTranscripts() }
     }
 
@@ -120,6 +126,9 @@ class AssistantService : Service() {
         _callActive.value = true
         startInForeground()
         scope.launch { ensureListening() }
+        // Load the intent model while the owner is still talking, so the first
+        // command does not wait for it.
+        scope.launch(kotlinx.coroutines.Dispatchers.Default) { intents.warmUp() }
         return START_NOT_STICKY
     }
 
@@ -159,7 +168,7 @@ class AssistantService : Service() {
     private suspend fun say(text: String) {
         val clean = text.trim()
         if (clean.isEmpty()) return
-        addTurn(Turn(fromUser = false, text = clean))
+        addTurn(AssistantTurn(fromUser = false, text = clean))
         // Hold audio focus only for the utterance: the call itself can stay
         // connected across tabs without pausing the van's music all day.
         val focused = requestAudioFocus()
@@ -170,8 +179,9 @@ class AssistantService : Service() {
         }
     }
 
-    private fun addTurn(turn: Turn) {
+    private fun addTurn(turn: AssistantTurn) {
         _turns.value = (_turns.value + turn).takeLast(MAX_TURNS)
+        scope.launch { AssistantMemory.appendTurn(this@AssistantService, turn) }
     }
 
     /** Close the microphone but keep the service (and the loaded model) alive. */
@@ -202,12 +212,13 @@ class AssistantService : Service() {
     fun clearTranscript() {
         speech.clear()
         _turns.value = emptyList()
+        scope.launch { AssistantMemory.clearTurns(this@AssistantService) }
     }
 
     private suspend fun handleTranscripts() {
         speech.transcripts.collect { text ->
             CrashLog.note(this, TAG, "transcript: ${text.take(120)}")
-            addTurn(Turn(fromUser = true, text = text))
+            addTurn(AssistantTurn(fromUser = true, text = text))
             // Interlock starts before the filler: from here until Kokoro's
             // last sample the microphone frames are discarded, so neither the
             // filler nor the confirmation can feed back into the recognizer.
@@ -215,6 +226,13 @@ class AssistantService : Service() {
             if (wasListening) speech.pauseForSpeech()
             _speaking.value = true
             try {
+                val remembered = runCatching { memoryCommand(text) }
+                    .onFailure { CrashLog.note(this, TAG, "memory command failed: ${it.message}") }
+                    .getOrNull()
+                if (remembered != null) {
+                    say(remembered)
+                    return@collect
+                }
                 // A previous turn may have asked "How many hours?" — finish
                 // that before treating this sentence as a new command.
                 val followUp = runCatching { actions.continuePending(text) }
@@ -237,14 +255,19 @@ class AssistantService : Service() {
 
     /** Classify one finished sentence and either act locally or ask the cloud. */
     private suspend fun answerTurn(text: String) {
-        val intent = intents.classify(text)
-        CrashLog.note(this, TAG, "intent=${intent.intent.wire} cloud=${intent.requiresCloud}")
-        if (intent.requiresCloud) {
-            say(CHECKING_ONLINE)
-            val answer = runCatching { cloud.route(text, intent.clientOrTopic) }
+        val context = businessContext()
+        val intent = intents.classify(text, context)
+        val conversational = intent.intent == QwenIntentEngine.Kind.Other
+        val wantsCloud = intent.requiresCloud || (conversational && cloudConversation)
+        CrashLog.note(this, TAG, "intent=${intent.intent.wire} cloud=$wantsCloud")
+        if (wantsCloud) {
+            if (intent.requiresCloud) say(CHECKING_ONLINE)
+            val answer = runCatching {
+                cloud.route(text, intent.clientOrTopic, context, _turns.value.takeLast(6))
+            }
                 .onFailure { error -> Log.w(TAG, "Cloud route failed", error) }
                 .getOrNull()
-            say(answer ?: "I couldn't reach the online rates. Try again when you have signal.")
+            say(answer ?: "I couldn't reach the online assistant. Try again when you have signal.")
         } else {
             val executed = runCatching { actions.run(text, intent) }
                 .onFailure { CrashLog.note(this, TAG, "action failed: ${it.message}") }
@@ -252,6 +275,58 @@ class AssistantService : Service() {
             CrashLog.note(this, TAG, "action reply: ${executed ?: "none"}")
             say(executed ?: confirmationFor(intent))
         }
+    }
+
+    /** The business snapshot handed to the local and cloud models. */
+    private suspend fun businessContext(): String {
+        val facts = runCatching { AssistantMemory.facts(this).map { it.text } }.getOrDefault(emptyList())
+        return assistantContext.snapshot(facts, _turns.value.takeLast(8))
+    }
+
+    /**
+     * "Remember …", "forget …", "what do you remember?". Handled before the
+     * intent classifier so it works even with no GGUF installed.
+     */
+    private suspend fun memoryCommand(text: String): String? {
+        val lower = text.lowercase().trim()
+        if (lower.contains("what do you remember") ||
+            lower.contains("what have you remembered") ||
+            lower == "what do you know"
+        ) {
+            val facts = AssistantMemory.facts(this)
+            if (facts.isEmpty()) return "I haven't been told anything to remember yet."
+            return "I remember: " + facts.joinToString("; ") { it.text } + "."
+        }
+        if (lower.startsWith("forget everything") ||
+            lower == "forget it all" ||
+            lower == "forget all of it"
+        ) {
+            AssistantMemory.forgetEverything(this)
+            return "Done. My memory is empty."
+        }
+        Regex(
+            "^\\s*(?:please\\s+)?remember(?:\\s+that)?\\s+(.+)$",
+            RegexOption.IGNORE_CASE,
+        ).find(text)?.let { match ->
+            val fact = match.groupValues[1].trim()
+            if (fact.isBlank()) return null
+            val added = AssistantMemory.remember(this, fact)
+            return if (added) "I'll remember that." else "I already had that one."
+        }
+        Regex(
+            "^\\s*(?:please\\s+)?forget(?:\\s+that)?\\s+(.+)$",
+            RegexOption.IGNORE_CASE,
+        ).find(text)?.let { match ->
+            val needle = match.groupValues[1].trim()
+            if (needle.isBlank()) return null
+            val removed = AssistantMemory.forget(this, needle)
+            return when {
+                removed == 0 -> "I don't have anything about that."
+                removed == 1 -> "Forgotten."
+                else -> "Forgotten $removed things."
+            }
+        }
+        return null
     }
 
     override fun onDestroy() {
