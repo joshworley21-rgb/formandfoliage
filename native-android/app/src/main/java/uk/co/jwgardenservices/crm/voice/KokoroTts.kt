@@ -12,6 +12,9 @@ import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import uk.co.jwgardenservices.crm.core.CrashLog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
@@ -64,6 +67,60 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                 engine.generate(clean, speakerId, speed.coerceIn(AssistantPreferences.MIN_SPEED, AssistantPreferences.MAX_SPEED))
             }
             if (!closed) play(audio)
+        }
+    }
+
+    /** Load the model in the background so the first reply is not delayed by it. */
+    suspend fun warmUp() {
+        if (closed) return
+        ensureEngine()
+    }
+
+    /**
+     * Speak a reply sentence by sentence: the first sentence starts playing as
+     * soon as it is synthesised, while the rest are generated ahead. For a
+     * multi-sentence answer this removes most of the wait before the first
+     * word, which is the difference between "thinking" and "replying".
+     */
+    suspend fun speakStreaming(
+        text: String,
+        speakerId: Int = KokoroVoice.BmFable.speakerId,
+        speed: Float = AssistantPreferences.DEFAULT_SPEED,
+    ) {
+        val clean = text.trim()
+        if (closed || clean.isEmpty()) return
+        val chunks = sentences(clean)
+        if (chunks.size <= 1) {
+            speak(clean, speakerId, speed)
+            return
+        }
+        CrashLog.note(context, TAG, "speakStreaming: ${chunks.size} sentences")
+        speakLock.withLock {
+            if (closed) return@withLock
+            stopRequested = false
+            val engine = ensureEngine() ?: return@withLock
+            coroutineScope {
+                val audio = Channel<GeneratedAudio>(2)
+                val producer = launch(Dispatchers.Default) {
+                    try {
+                        for (chunk in chunks) {
+                            if (stopRequested || closed) break
+                            audio.send(engine.generate(chunk, speakerId, speed))
+                        }
+                    } finally {
+                        audio.close()
+                    }
+                }
+                try {
+                    for (generated in audio) {
+                        if (stopRequested || closed) break
+                        play(generated)
+                    }
+                } finally {
+                    producer.cancel()
+                    audio.close()
+                }
+            }
         }
     }
 
@@ -216,6 +273,12 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         return samples.copyOfRange(from, to + 1)
     }
 
+    /** Split on sentence punctuation; Kokoro handles a short sentence best. */
+    private fun sentences(text: String): List<String> =
+        text.split(Regex("(?<=[.!?])\\s+"))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+
     private fun copyAssetTree(assetPath: String, target: File) {
         val children = context.assets.list(assetPath).orEmpty()
         if (children.isEmpty()) {
@@ -302,4 +365,19 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         /** Bump whenever the set of copied files changes. */
         const val COPY_VERSION = "2"
     }
+}
+
+/**
+ * Process-wide owner of the Kokoro voice, for the same reason as the speech
+ * and intent models: loading 110 MB before the first reply is felt, and the
+ * Settings preview should not create a second copy.
+ */
+object KokoroEngine {
+    @Volatile
+    private var instance: KokoroTts? = null
+
+    fun get(context: android.content.Context): KokoroTts =
+        instance ?: synchronized(this) {
+            instance ?: KokoroTts(context.applicationContext).also { instance = it }
+        }
 }

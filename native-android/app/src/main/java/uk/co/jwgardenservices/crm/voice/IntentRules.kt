@@ -63,4 +63,19 @@ object IntentRules {
     }
 
     private fun String.containsAny(vararg needles: String): Boolean = needles.any { contains(it) }
+    /**
+     * Kinds the rules are reliably right about, used as a fast path so common
+     * commands do not wait for the language model. Mark-done and quote are
+     * excluded: "did you finish the quote?" is too easy to misread.
+     */
+    fun isConfident(kind: QwenIntentEngine.Kind): Boolean = when (kind) {
+        QwenIntentEngine.Kind.LogHours,
+        QwenIntentEngine.Kind.CheckSchedule,
+        QwenIntentEngine.Kind.NextJob,
+        QwenIntentEngine.Kind.WhoOwesMe,
+        QwenIntentEngine.Kind.WeeklyEarnings -> true
+
+        else -> false
+    }
+
 }

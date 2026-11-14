@@ -68,6 +68,8 @@ class AssistantService : Service() {
 
     private var foreground = false
     private var cloudConversation = true
+    private var onlineVoice = false
+    private var cloudVoice: CloudVoice? = null
     private val assistantContext = AssistantContext()
 
     private var voice = KokoroVoice.BmFable
@@ -77,9 +79,11 @@ class AssistantService : Service() {
     private var focusRequest: AudioFocusRequest? = null
 
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
-        // A call or another assistant taking over must win: stop Kokoro.
+        // A call or another assistant taking over must win: stop whichever
+        // voice has the floor.
         if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
             speaker.stopPlayback()
+            cloudVoice?.stop()
         }
     }
 
@@ -93,7 +97,7 @@ class AssistantService : Service() {
     override fun onCreate() {
         super.onCreate()
         speech = SpeechEngine.get(this)
-        speaker = KokoroTts(this)
+        speaker = KokoroEngine.get(this)
         intents = QwenEngine.get(this)
         CrashLog.note(this, TAG, "service created")
         scope.launch { AssistantPreferences.voiceFlow(this@AssistantService).collect { voice = it } }
@@ -112,6 +116,9 @@ class AssistantService : Service() {
         scope.launch {
             AssistantMemory.cloudConversationFlow(this@AssistantService).collect { cloudConversation = it }
         }
+        scope.launch {
+            AssistantPreferences.onlineVoiceFlow(this@AssistantService).collect { onlineVoice = it }
+        }
         scope.launch { handleTranscripts() }
     }
 
@@ -129,6 +136,7 @@ class AssistantService : Service() {
         // Load the intent model while the owner is still talking, so the first
         // command does not wait for it.
         scope.launch(kotlinx.coroutines.Dispatchers.Default) { intents.warmUp() }
+        scope.launch(kotlinx.coroutines.Dispatchers.Default) { speaker.warmUp() }
         return START_NOT_STICKY
     }
 
@@ -173,11 +181,18 @@ class AssistantService : Service() {
         // connected across tabs without pausing the van's music all day.
         val focused = requestAudioFocus()
         try {
-            speaker.speak(clean, voice.speakerId, speed)
+            // The natural online voice is optional; any failure falls back to
+            // Kokoro rather than leaving the assistant silent.
+            val spokenOnline = onlineVoice &&
+                runCatching { onlineSpeaker().speak(clean) }.getOrDefault(false)
+            if (!spokenOnline) speaker.speakStreaming(clean, voice.speakerId, speed)
         } finally {
             if (focused) abandonAudioFocus()
         }
     }
+
+    private fun onlineSpeaker(): CloudVoice =
+        cloudVoice ?: CloudVoice(this).also { cloudVoice = it }
 
     private fun addTurn(turn: AssistantTurn) {
         _turns.value = (_turns.value + turn).takeLast(MAX_TURNS)
@@ -256,7 +271,15 @@ class AssistantService : Service() {
     /** Classify one finished sentence and either act locally or ask the cloud. */
     private suspend fun answerTurn(text: String) {
         val context = businessContext()
-        val intent = intents.classify(text, context)
+        // Fast path: the common commands are unambiguous enough that waiting
+        // for a 0.5B model to agree only adds a second of silence.
+        val quick = IntentRules.classify(text)
+        val intent = if (IntentRules.isConfident(quick.intent) && !quick.requiresCloud) {
+            CrashLog.note(this, TAG, "intent=rules:${quick.intent.wire}")
+            quick
+        } else {
+            intents.classify(text, context)
+        }
         val conversational = intent.intent == QwenIntentEngine.Kind.Other
         val wantsCloud = intent.requiresCloud || (conversational && cloudConversation)
         CrashLog.note(this, TAG, "intent=${intent.intent.wire} cloud=$wantsCloud")
@@ -334,8 +357,10 @@ class AssistantService : Service() {
         _callActive.value = false
         abandonAudioFocus()
         scope.cancel()
-        speaker.close()
-        // The intent model is process-scoped too; leave it loaded.
+        speaker.stopPlayback()
+        cloudVoice?.close()
+        cloudVoice = null
+        // Kokoro and the intent model are process-scoped too; leave them loaded.
         // The recognizer is process-scoped on purpose: close the microphone,
         // but leave the 190 MB model loaded for the next call.
         speech.stopListening()

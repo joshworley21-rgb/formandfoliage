@@ -40,6 +40,10 @@ verify_jwt = true
 [functions.voice-route]
 verify_jwt = true
 
+# The optional natural voice: text in, MP3 out. Same key, same auth rule.
+[functions.voice-speak]
+verify_jwt = true
+
 # Public: the customer-facing enquiry form posts here from any website, so there
 # is no JWT to verify. Protected by the owner's enquiry_key and a honeypot field.
 [functions.public-enquiry]

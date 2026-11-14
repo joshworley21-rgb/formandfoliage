@@ -1,17 +1,26 @@
 package uk.co.jwgardenservices.crm.voice
 
+import android.content.Context
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+
 /**
  * A small, fixed evaluation set for the assistant's understanding.
  *
- * Thirty-odd commands a gardener would actually say, with the intent the app
- * should act on. The Settings screen runs them through the same classifier a
- * call uses; the unit test runs them through [IntentRules]. That turns "can we
- * make it smarter?" into a number: how many phrases it understands today, and
- * which ones it misses.
+ * Runs through the same classifier a call uses, either the 12-phrase quick set
+ * or all 35, and keeps its progress in an application-scoped coroutine so
+ * leaving Settings (or switching apps briefly) does not throw the run away.
+ * The unit test scores [IntentRules] against the same corpus.
  *
  * The last four cases are deliberate paraphrases that the keyword rules do
- * not catch. They are there to show what the model buys, not to fail the
- * build.
+ * not catch. They are there to show what the model buys, not to fail a build.
  */
 object AssistantEval {
 
@@ -32,6 +41,29 @@ object AssistantEval {
         val cloudOk: Boolean get() = case.cloud == null || actualCloud == case.cloud
         val passed: Boolean get() = kindOk && cloudOk
     }
+
+    sealed interface State {
+        data object Idle : State
+        data class Running(val done: Int, val total: Int, val label: String) : State
+        data class Done(val results: List<Result>) : State
+        data class Failed(val message: String) : State
+    }
+
+    /** A short run for a quick check; covers every intent at least once. */
+    val QUICK: List<Case> = listOf(
+        Case("logged three hours at the Smiths yesterday", QwenIntentEngine.Kind.LogHours),
+        Case("four hours for Mrs Jones", QwenIntentEngine.Kind.LogHours),
+        Case("what's on today", QwenIntentEngine.Kind.CheckSchedule),
+        Case("have I got anything booked this afternoon", QwenIntentEngine.Kind.CheckSchedule),
+        Case("what's next", QwenIntentEngine.Kind.NextJob),
+        Case("who's my next job", QwenIntentEngine.Kind.NextJob),
+        Case("finished the Jones job", QwenIntentEngine.Kind.MarkJobDone),
+        Case("mark the Smiths job done", QwenIntentEngine.Kind.MarkJobDone),
+        Case("who owes me money", QwenIntentEngine.Kind.WhoOwesMe),
+        Case("what have I earned this week", QwenIntentEngine.Kind.WeeklyEarnings),
+        Case("how much for forty square metres of turf", QwenIntentEngine.Kind.Quote, cloud = true),
+        Case("tell me a joke", QwenIntentEngine.Kind.Other),
+    )
 
     val CASES: List<Case> = listOf(
         // Logging time — the most common spoken command.
@@ -88,26 +120,54 @@ object AssistantEval {
         Case("who haven't I been paid by", QwenIntentEngine.Kind.WhoOwesMe),
     )
 
-    /**
-     * Run every case through [classifier]. [onProgress] is called with
-     * (done, total) after each phrase so the UI can show a moving counter.
-     */
-    suspend fun run(
-        classifier: suspend (String) -> QwenIntentEngine.Intent,
-        onProgress: (Int, Int) -> Unit = { _, _ -> },
-    ): List<Result> {
-        val results = ArrayList<Result>(CASES.size)
-        CASES.forEachIndexed { index, case ->
-            val started = System.currentTimeMillis()
-            val intent = classifier(case.phrase)
-            results += Result(
-                case = case,
-                actual = intent.intent,
-                actualCloud = intent.requiresCloud,
-                millis = System.currentTimeMillis() - started,
-            )
-            onProgress(index + 1, CASES.size)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val _state = MutableStateFlow<State>(State.Idle)
+    val state: StateFlow<State> = _state.asStateFlow()
+
+    private var job: Job? = null
+
+    fun start(context: Context, full: Boolean) {
+        if (job?.isActive == true) return
+        val cases = if (full) CASES else QUICK
+        job = scope.launch {
+            val engine = QwenEngine.get(context)
+            val snapshot = AssistantContext().snapshot(emptyList(), emptyList())
+            _state.value = State.Running(0, cases.size, "Loading the model…")
+            // Load once, outside the per-phrase timer.
+            runCatching { engine.warmUp() }
+            val results = ArrayList<Result>(cases.size)
+            try {
+                cases.forEachIndexed { index, case ->
+                    if (!isActive) return@launch
+                    _state.value = State.Running(index, cases.size, case.phrase)
+                    val started = System.currentTimeMillis()
+                    val intent = engine.classify(case.phrase, snapshot)
+                    results += Result(
+                        case = case,
+                        actual = intent.intent,
+                        actualCloud = intent.requiresCloud,
+                        millis = System.currentTimeMillis() - started,
+                    )
+                    _state.value = State.Running(index + 1, cases.size, case.phrase)
+                }
+                _state.value = State.Done(results)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _state.value = State.Failed(error.message ?: "The check failed.")
+            }
         }
-        return results
+    }
+
+    fun cancel() {
+        job?.cancel()
+        job = null
+        _state.value = State.Idle
+    }
+
+    fun clear() {
+        if (job?.isActive == true) return
+        job = null
+        _state.value = State.Idle
     }
 }

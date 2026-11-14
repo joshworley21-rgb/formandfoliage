@@ -54,7 +54,7 @@ import uk.co.jwgardenservices.crm.voice.AssistantEval
 import uk.co.jwgardenservices.crm.voice.AssistantMemory
 import uk.co.jwgardenservices.crm.voice.AssistantPreferences
 import uk.co.jwgardenservices.crm.voice.KokoroHqDownloader
-import uk.co.jwgardenservices.crm.voice.KokoroTts
+import uk.co.jwgardenservices.crm.voice.KokoroEngine
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
 import uk.co.jwgardenservices.crm.voice.QwenEngine
 import uk.co.jwgardenservices.crm.voice.QwenModelDownloader
@@ -89,6 +89,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = emptyList())
     val cloudConversation by AssistantMemory.cloudConversationFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
+    val onlineVoice by AssistantPreferences.onlineVoiceFlow(context)
+        .collectAsStateWithLifecycle(initialValue = false)
     val qwenState by QwenModelDownloader.state.collectAsStateWithLifecycle()
     var qwenInstalled by remember { mutableStateOf(QwenModelDownloader.isInstalled(context)) }
     var qwenSaved by remember { mutableLongStateOf(QwenModelDownloader.savedBytes(context)) }
@@ -179,14 +181,15 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     onClick = {
                         previewingVoice = true
                         scope.launch {
-                            val sample = KokoroTts(context)
                             try {
-                                sample.speak(PREVIEW_TEXT, voice.speakerId, draftSpeed)
+                                // Shared with the call, so previewing does not
+                                // load a second copy of the voice.
+                                KokoroEngine.get(context)
+                                    .speak(PREVIEW_TEXT, voice.speakerId, draftSpeed)
                             } catch (_: Exception) {
                                 // The live reply path reports its own errors;
                                 // a silent sample is not worth a dialog.
                             } finally {
-                                sample.close()
                                 previewingVoice = false
                             }
                         }
@@ -197,6 +200,31 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 Text(
                     text = "The preview loads the voice, so the first sample can take a few seconds.",
                     style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "The preview loads the voice, so the first sample can take a few seconds.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                HorizontalDivider()
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Switch(
+                        checked = onlineVoice,
+                        onCheckedChange = { enabled ->
+                            scope.launch { AssistantPreferences.setOnlineVoice(context, enabled) }
+                        },
+                    )
+                    Text(
+                        text = "Natural online voice",
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+                Text(
+                    text = "Uses OpenAI's voice through your Supabase function when there is " +
+                        "signal, and falls back to Kokoro when there is not. Only the reply text " +
+                        "is sent — never your voice. It is billed to your OpenAI key per character.",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -457,15 +485,15 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                var evalRunning by remember { mutableStateOf(false) }
-                var evalDone by remember { mutableIntStateOf(0) }
-                var evalResults by remember { mutableStateOf<List<AssistantEval.Result>>(emptyList()) }
+                val evalState by AssistantEval.state.collectAsStateWithLifecycle()
+                val running = evalState as? AssistantEval.State.Running
+                val finished = evalState as? AssistantEval.State.Done
 
                 Text(
-                    text = "Runs ${AssistantEval.CASES.size} real commands — logging hours, the " +
-                        "diary, money owed, quotes — through the same classifier a call uses. Use " +
-                        "it to see what the assistant actually understands, and which phrases it " +
-                        "misses, before deciding whether a bigger model is worth it.",
+                    text = "Runs real commands — logging hours, the diary, money owed, " +
+                        "quotes — through the same classifier a call uses. Use it to see what " +
+                        "the assistant actually understands, and which phrases it misses, " +
+                        "before deciding whether a bigger model is worth it.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -477,36 +505,40 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
-                OutlinedButton(
-                    enabled = !evalRunning,
-                    onClick = {
-                        evalRunning = true
-                        evalDone = 0
-                        evalResults = emptyList()
-                        scope.launch {
-                            val engine = QwenEngine.get(context)
-                            val snapshot = AssistantContext().snapshot(emptyList(), emptyList())
-                            evalResults = AssistantEval.run(
-                                classifier = { phrase -> engine.classify(phrase, snapshot) },
-                                onProgress = { done, _ -> evalDone = done },
-                            )
-                            evalRunning = false
+                if (running == null) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { AssistantEval.start(context, full = false) }) {
+                            Text("Quick check (12)")
                         }
-                    },
-                ) {
-                    Text(
-                        if (evalRunning) {
-                            "Testing… $evalDone of ${AssistantEval.CASES.size}"
-                        } else {
-                            "Run understanding check"
+                        OutlinedButton(onClick = { AssistantEval.start(context, full = true) }) {
+                            Text("Full check (35)")
+                        }
+                    }
+                } else {
+                    LinearProgressIndicator(
+                        progress = {
+                            if (running.total > 0) running.done.toFloat() / running.total else 0f
                         },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "${running.done} of ${running.total} · ${running.label}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = { AssistantEval.cancel() }) { Text("Stop") }
+                }
+                (evalState as? AssistantEval.State.Failed)?.let { failure ->
+                    Text(
+                        text = failure.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
                     )
                 }
-                if (evalResults.isNotEmpty()) {
-                    val passed = evalResults.count { it.passed }
-                    val average = evalResults.map { it.millis }.average().toInt()
+                if (finished != null) {
+                    val passed = finished.results.count { it.passed }
+                    val average = finished.results.map { it.millis }.average().toInt()
                     Text(
-                        text = "$passed of ${evalResults.size} understood · about $average ms each",
+                        text = "$passed of ${finished.results.size} understood · about $average ms each",
                         style = MaterialTheme.typography.titleSmall,
                     )
                     LazyColumn(
@@ -515,7 +547,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                             .height(320.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        items(evalResults) { result ->
+                        items(finished.results) { result ->
                             Column {
                                 Text(
                                     text = result.case.phrase,
@@ -537,6 +569,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                             }
                         }
                     }
+                    TextButton(onClick = { AssistantEval.clear() }) { Text("Clear results") }
                 }
             }
         }

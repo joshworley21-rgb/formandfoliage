@@ -32,6 +32,7 @@ private val Context.assistantDataStore by preferencesDataStore(name = "assistant
 private val VOICE_KEY = stringPreferencesKey("kokoro_voice")
 private val HIGH_QUALITY_KEY = booleanPreferencesKey("kokoro_high_quality")
 private val SPEED_KEY = floatPreferencesKey("kokoro_speed")
+private val ONLINE_VOICE_KEY = booleanPreferencesKey("online_voice")
 
 object AssistantPreferences {
 
@@ -68,6 +69,21 @@ object AssistantPreferences {
     suspend fun setSpeed(context: Context, speed: Float) {
         context.assistantDataStore.edit { preferences ->
             preferences[SPEED_KEY] = speed.coerceIn(MIN_SPEED, MAX_SPEED)
+        }
+    }
+
+    /**
+     * Use the OpenAI voice through the voice-speak function when online.
+     * Falls back to Kokoro when the request fails, so the assistant is never
+     * silent.
+     */
+    fun onlineVoiceFlow(context: Context): Flow<Boolean> = context.assistantDataStore.data.map { preferences ->
+        preferences[ONLINE_VOICE_KEY] ?: false
+    }
+
+    suspend fun setOnlineVoice(context: Context, enabled: Boolean) {
+        context.assistantDataStore.edit { preferences ->
+            preferences[ONLINE_VOICE_KEY] = enabled
         }
     }
 }

@@ -228,12 +228,18 @@ deliberately left on the web for now. The smaller known gaps:
   only job is turning a sentence into the intent JSON; open conversation is
   the cloud's job.
 - **Understanding check**: Settings → Assistant settings → Understanding check
-  runs about 35 real commands through the same classifier a call uses and
-  lists what it heard against what it should have heard, with an average
-  latency. It scores the keyword rules when no model is installed and the
-  model once it is, which is the honest way to decide whether a bigger model
-  or fine-tuning is worth the effort. `IntentRulesTest` runs the same corpus
-  against the deterministic rules on a plain JVM.
+  runs real commands through the same classifier a call uses and lists what
+  it heard against what it should have heard, with an average latency. There
+  is a 12-phrase quick run and a 35-phrase full run; the work is
+  application-scoped, so leaving Settings does not throw it away. It scores
+  the keyword rules when no model is installed and the model once it is,
+  which is the honest way to decide whether a bigger model or fine-tuning is
+  worth the effort. `IntentRulesTest` runs the same corpus against the
+  deterministic rules on a plain JVM (32/35 today, the misses being slang).
+- **Fast path**: the deterministic rules answer the common, unambiguous
+  commands (hours, diary, next job, money owed, week's takings) immediately;
+  the model is only consulted for mark-done, quotes and conversation. That
+  removes roughly a second of silence from the commands used every day.
 - **Open conversation**: when the model cannot place a sentence (`other`), the
   assistant asks `voice-route` with the same business snapshot and the last
   six turns, so it can answer naturally about the owner's clients and diary.
@@ -298,7 +304,15 @@ deliberately left on the web for now. The smaller known gaps:
   model is used if the fp32 file ever fails to load. Microphone frames are
   discarded for the whole utterance so the phone does not transcribe itself;
   the mic reopens the instant playback finishes, so the next command is
-  hands-free. The Android native TTS engine and its manifest query are gone.
+  hands-free. Kokoro is process-scoped and warmed when a call starts, and a
+  multi-sentence reply is synthesised sentence by sentence so the first words
+  play while the rest is still generating.
+- **Natural online voice** (optional, Settings → Kokoro voice): reply text is
+  posted to the `voice-speak` Edge Function, which returns OpenAI
+  `gpt-4o-mini-tts` audio. It falls back to Kokoro when offline or when the
+  request fails. Only the reply text is sent, never the owner's speech; it is
+  billed to the project's OpenAI key per character. The Android native TTS
+  engine and its manifest query are gone.
 - `:app:downloadKokoro` extracts only the English pieces from
   `kokoro-int8-multi-lang-v1_0.tar.bz2`: `model.int8.onnx` (109 MB),
   `voices.bin` (27 MB), `tokens.txt`, the US/GB lexicons and the 19 MB
