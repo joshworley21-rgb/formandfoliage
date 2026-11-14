@@ -356,13 +356,7 @@ Deno.serve(
       return json({ ...classified, answer });
     }
 
-    const answer = await answerQuestion(
-      apiKey,
-      query,
-      topic,
-      businessContext,
-      input.history ?? [],
-    );
+    const answer = await answerQuestion(apiKey, query, topic, businessContext, input.history ?? []);
     return json({ answer });
   }),
 );
