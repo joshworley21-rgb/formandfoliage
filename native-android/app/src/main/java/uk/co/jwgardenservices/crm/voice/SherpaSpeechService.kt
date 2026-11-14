@@ -429,3 +429,22 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         const val TOKENS = "$MODEL_DIR/$TOKENS_FILE"
     }
 }
+
+/**
+ * Process-wide owner of the speech recognizer.
+ *
+ * The model is ~190 MB and takes seconds to build. The Assistant service can
+ * be destroyed when a call ends and the screen unbinds, but the phone's
+ * process usually lives on; keeping the recognizer here means "Start call"
+ * reuses it instead of reloading the model. It is freed when Android kills
+ * the process, which is the only time a reload is unavoidable.
+ */
+object SpeechEngine {
+    @Volatile
+    private var instance: SherpaSpeechService? = null
+
+    fun get(context: Context): SherpaSpeechService =
+        instance ?: synchronized(this) {
+            instance ?: SherpaSpeechService(context.applicationContext).also { instance = it }
+        }
+}

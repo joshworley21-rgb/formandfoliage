@@ -92,7 +92,7 @@ class AssistantService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        speech = SherpaSpeechService(this)
+        speech = SpeechEngine.get(this)
         speaker = KokoroTts(this)
         intents = QwenIntentEngine(this)
         CrashLog.note(this, TAG, "service created")
@@ -336,7 +336,9 @@ class AssistantService : Service() {
         scope.cancel()
         speaker.close()
         intents.close()
-        speech.close()
+        // The recognizer is process-scoped on purpose: close the microphone,
+        // but leave the 190 MB model loaded for the next call.
+        speech.stopListening()
         super.onDestroy()
     }
 

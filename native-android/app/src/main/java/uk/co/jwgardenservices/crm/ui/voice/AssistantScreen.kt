@@ -159,7 +159,7 @@ fun AssistantScreen() {
     val status = when {
         !granted -> "Microphone permission needed"
         !callActive -> "Call ended"
-        loading -> "Loading offline voice…"
+        loading -> "Connecting…"
         speaking -> "Speaking…"
         state.phase == SherpaSpeechService.Phase.Listening -> "Listening…"
         state.phase == SherpaSpeechService.Phase.Error -> "Unavailable"

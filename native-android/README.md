@@ -161,9 +161,11 @@ deliberately left on the web for now. The smaller known gaps:
   deciding. Clients lives behind More; staff keep their shorter bar.
 - **The call survives the tab.** Leaving the Assistant tab unbinds the screen
   but does not stop the service; the microphone closes while you are
-  elsewhere and reopens on return, so the 190 MB recognizer is loaded once
-  per call rather than on every visit. **End call** closes the mic, drops the
-  notification and frees the model; the screen then offers **Start call**.
+  elsewhere and reopens on return. The recognizer itself is process-scoped
+  (`SpeechEngine`), so even **End call** followed by a new call reuses the
+  loaded 190 MB model — it is rebuilt only when Android kills the app.
+  **End call** closes the mic and drops the notification; the screen then
+  offers **Start call**.
 - **Rolling transcript**: every recognised sentence and every spoken reply is
   kept in the service (last 40 turns) and shown as a bubble, so the question
   does not disappear when the answer is read out. Leaving and re-entering the
