@@ -170,9 +170,11 @@ deliberately left on the web for now. The smaller known gaps:
   kept in the service (last 40 turns) and shown as a bubble, so the question
   does not disappear when the answer is read out. Leaving and re-entering the
   tab keeps the conversation; the bin icon clears it.
-- **Endpoint detection** commits a line 0.5 s after you stop speaking (or
-  0.8 s of trailing silence before any words were recognised), so each
-  command is finalised without a tap.
+- **Endpoint detection** commits a line 0.4 s after you stop speaking (or
+  0.65 s of trailing silence before any words were recognised), so each
+  command is finalised without a tap. Shortening these is the cheapest
+  latency win in the whole pipeline; any shorter starts cutting people off
+  mid-sentence.
 - The call opens with "How can I help?" once, then reopens the microphone for
   the first command.
 - **Bundled model**: the LibriSpeech + GigaSpeech streaming Zipformer

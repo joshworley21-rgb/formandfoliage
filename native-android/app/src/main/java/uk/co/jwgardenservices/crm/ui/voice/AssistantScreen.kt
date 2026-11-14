@@ -86,6 +86,7 @@ fun AssistantScreen() {
     var service by remember { mutableStateOf<AssistantService?>(null) }
     var state by remember { mutableStateOf(SherpaSpeechService.UiState()) }
     var speaking by remember { mutableStateOf(false) }
+    var thinking by remember { mutableStateOf(false) }
     var callActive by remember { mutableStateOf(false) }
     var turns by remember { mutableStateOf<List<AssistantTurn>>(emptyList()) }
     var granted by remember { mutableStateOf(micGranted(context)) }
@@ -150,6 +151,7 @@ fun AssistantScreen() {
         val bound = service ?: return@LaunchedEffect
         launch { bound.speechState.collect { state = it } }
         launch { bound.speaking.collect { speaking = it } }
+        launch { bound.thinking.collect { thinking = it } }
         launch { bound.callActive.collect { callActive = it } }
         launch { bound.turns.collect { turns = it } }
     }
@@ -160,6 +162,7 @@ fun AssistantScreen() {
         !granted -> "Microphone permission needed"
         !callActive -> "Call ended"
         loading -> "Connecting…"
+        thinking -> "Thinking…"
         speaking -> "Speaking…"
         state.phase == SherpaSpeechService.Phase.Listening -> "Listening…"
         state.phase == SherpaSpeechService.Phase.Error -> "Unavailable"
@@ -205,7 +208,7 @@ fun AssistantScreen() {
 
         CallOrb(
             active = callActive,
-            speaking = speaking,
+            speaking = speaking || thinking,
             loading = loading,
             level = if (listening) state.level else 0f,
         )

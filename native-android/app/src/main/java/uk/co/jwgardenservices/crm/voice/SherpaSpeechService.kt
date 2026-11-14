@@ -314,12 +314,13 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 // "zipformer2" in its ONNX metadata, and forcing "zipformer"
                 // makes the native loader crash while parsing the encoder.
             ),
-            // Commit the line quickly after speech ends: 0.8 s of trailing
-            // silence even without recognised words, 0.5 s once something was
-            // heard. This is what makes the loop hands-free.
+            // Commit the line quickly after speech ends: 0.65 s of trailing
+            // silence even without recognised words, 0.4 s once something was
+            // heard. Shorter than this starts cutting people off mid-sentence;
+            // longer is pure dead air before the reply.
             endpointConfig = EndpointConfig(
-                rule1 = EndpointRule(mustContainNonSilence = false, minTrailingSilence = 0.8f, minUtteranceLength = 0f),
-                rule2 = EndpointRule(mustContainNonSilence = true, minTrailingSilence = 0.5f, minUtteranceLength = 0f),
+                rule1 = EndpointRule(mustContainNonSilence = false, minTrailingSilence = 0.65f, minUtteranceLength = 0f),
+                rule2 = EndpointRule(mustContainNonSilence = true, minTrailingSilence = 0.4f, minUtteranceLength = 0f),
                 rule3 = EndpointRule(mustContainNonSilence = false, minTrailingSilence = 0f, minUtteranceLength = 20f),
             ),
             enableEndpoint = true,

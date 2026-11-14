@@ -93,7 +93,9 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
                         model = loaded,
                         prompt = "Spoken command: \"${text.replace("\"", "'")}\"",
                         systemPrompt = systemPrompt(context),
-                        maxTokens = 96,
+                        // The answer is a small JSON object; 64 tokens is
+                        // plenty and halves the time spent generating it.
+                        maxTokens = 64,
                     ).text
                 }
             }
@@ -172,7 +174,7 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
             if (businessContext.isNotBlank()) {
                 appendLine()
                 appendLine("Business context:")
-                appendLine(businessContext.take(1600))
+                appendLine(businessContext.take(1100))
             }
             appendLine()
             appendLine("Examples:")

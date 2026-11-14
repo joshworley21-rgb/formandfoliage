@@ -59,6 +59,10 @@ class AssistantService : Service() {
     private val _speaking = MutableStateFlow(false)
     val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
 
+    /** True while a heard sentence is being classified and acted on. */
+    private val _thinking = MutableStateFlow(false)
+    val thinking: StateFlow<Boolean> = _thinking.asStateFlow()
+
     /** True while a call is connected (mic on, or just paused between tabs). */
     private val _callActive = MutableStateFlow(false)
     val callActive: StateFlow<Boolean> = _callActive.asStateFlow()
@@ -176,6 +180,7 @@ class AssistantService : Service() {
     private suspend fun say(text: String) {
         val clean = text.trim()
         if (clean.isEmpty()) return
+        _thinking.value = false
         addTurn(AssistantTurn(fromUser = false, text = clean))
         // Hold audio focus only for the utterance: the call itself can stay
         // connected across tabs without pausing the van's music all day.
@@ -234,6 +239,7 @@ class AssistantService : Service() {
         speech.transcripts.collect { text ->
             CrashLog.note(this, TAG, "transcript: ${text.take(120)}")
             addTurn(AssistantTurn(fromUser = true, text = text))
+            _thinking.value = true
             // Interlock starts before the filler: from here until Kokoro's
             // last sample the microphone frames are discarded, so neither the
             // filler nor the confirmation can feed back into the recognizer.
@@ -262,6 +268,7 @@ class AssistantService : Service() {
             } catch (error: Exception) {
                 Log.w(TAG, "Kokoro playback failed", error)
             } finally {
+                _thinking.value = false
                 _speaking.value = false
                 if (wasListening) speech.resumeAfterSpeech()
             }
