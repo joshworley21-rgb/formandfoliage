@@ -33,6 +33,7 @@ private val VOICE_KEY = stringPreferencesKey("kokoro_voice")
 private val HIGH_QUALITY_KEY = booleanPreferencesKey("kokoro_high_quality")
 private val SPEED_KEY = floatPreferencesKey("kokoro_speed")
 private val ONLINE_VOICE_KEY = booleanPreferencesKey("online_voice")
+private val PIPER_KEY = stringPreferencesKey("piper_voice")
 
 object AssistantPreferences {
 
@@ -84,6 +85,25 @@ object AssistantPreferences {
     suspend fun setOnlineVoice(context: Context, enabled: Boolean) {
         context.assistantDataStore.edit { preferences ->
             preferences[ONLINE_VOICE_KEY] = enabled
+        }
+    }
+
+    /**
+     * A downloaded Piper voice, or null for Kokoro. Selecting one replaces
+     * Kokoro entirely; the eight Kokoro speakers stay available for when no
+     * Piper voice is selected.
+     */
+    fun piperVoiceFlow(context: Context): Flow<PiperVoice?> = context.assistantDataStore.data.map { preferences ->
+        PiperVoice.entries.firstOrNull { it.name == preferences[PIPER_KEY] }
+    }
+
+    suspend fun setPiperVoice(context: Context, voice: PiperVoice?) {
+        context.assistantDataStore.edit { preferences ->
+            if (voice == null) {
+                preferences.remove(PIPER_KEY)
+            } else {
+                preferences[PIPER_KEY] = voice.name
+            }
         }
     }
 }

@@ -56,6 +56,8 @@ import uk.co.jwgardenservices.crm.voice.AssistantPreferences
 import uk.co.jwgardenservices.crm.voice.KokoroHqDownloader
 import uk.co.jwgardenservices.crm.voice.KokoroEngine
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
+import uk.co.jwgardenservices.crm.voice.PiperVoice
+import uk.co.jwgardenservices.crm.voice.PiperVoiceDownloader
 import uk.co.jwgardenservices.crm.voice.QwenEngine
 import uk.co.jwgardenservices.crm.voice.QwenModelDownloader
 import java.io.File
@@ -227,6 +229,158 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+
+        SectionCard(title = "Piper voices (faster)") {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                val piperState by PiperVoiceDownloader.state.collectAsStateWithLifecycle()
+                val selectedPiper by AssistantPreferences.piperVoiceFlow(context)
+                    .collectAsStateWithLifecycle(initialValue = null)
+                var installedPiper by remember {
+                    mutableStateOf(
+                        PiperVoice.entries
+                            .filter { PiperVoiceDownloader.isInstalled(context, it) }
+                            .toSet(),
+                    )
+                }
+
+                LaunchedEffect(piperState) {
+                    val done = piperState as? PiperVoiceDownloader.State.Done ?: return@LaunchedEffect
+                    installedPiper = installedPiper + done.voice
+                    AssistantPreferences.setPiperVoice(context, done.voice)
+                    KokoroEngine.get(context).reload()
+                    PiperVoiceDownloader.clearResult()
+                }
+
+                Text(
+                    text = "Piper voices are smaller and faster than Kokoro, so replies start " +
+                        "sooner and the phone has more memory left. Download one, tap Use, then " +
+                        "Preview this voice above to hear it. Selecting a Piper voice replaces " +
+                        "Kokoro until you switch back.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                PiperVoice.entries.forEach { voice ->
+                    val working = (piperState as? PiperVoiceDownloader.State.Working)
+                        ?.takeIf { it.voice == voice }
+                    val failure = (piperState as? PiperVoiceDownloader.State.Failed)
+                        ?.takeIf { it.voice == voice }
+                    val installed = voice in installedPiper
+
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(voice.label, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    text = if (installed) {
+                                        "Installed"
+                                    } else {
+                                        "${voice.bytes / MEGABYTE} MB"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            if (selectedPiper == voice) {
+                                Text(
+                                    text = "In use",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+
+                        when {
+                            working != null -> {
+                                LinearProgressIndicator(
+                                    progress = { working.progress },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Text(
+                                    text = when (working.phase) {
+                                        PiperVoiceDownloader.Phase.Downloading ->
+                                            "Downloading… ${working.done / MEGABYTE} of " +
+                                                "${working.total / MEGABYTE} MB"
+                                        PiperVoiceDownloader.Phase.Extracting ->
+                                            "Unpacking… ${(working.progress * 100).toInt()}%"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                TextButton(onClick = { PiperVoiceDownloader.cancel() }) {
+                                    Text("Cancel")
+                                }
+                            }
+
+                            installed -> Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                if (selectedPiper != voice) {
+                                    TextButton(
+                                        onClick = {
+                                            scope.launch {
+                                                AssistantPreferences.setPiperVoice(context, voice)
+                                                KokoroEngine.get(context).reload()
+                                            }
+                                        },
+                                    ) { Text("Use") }
+                                }
+                                TextButton(
+                                    onClick = {
+                                        scope.launch {
+                                            PiperVoiceDownloader.remove(context, voice)
+                                            installedPiper = installedPiper - voice
+                                            if (selectedPiper == voice) {
+                                                AssistantPreferences.setPiperVoice(context, null)
+                                                KokoroEngine.get(context).reload()
+                                            }
+                                        }
+                                    },
+                                ) { Text("Remove") }
+                            }
+
+                            else -> {
+                                val saved = PiperVoiceDownloader.savedBytes(context, voice)
+                                OutlinedButton(
+                                    onClick = {
+                                        if (!unmetered) return@OutlinedButton
+                                        PiperVoiceDownloader.start(context, voice)
+                                    },
+                                ) {
+                                    Text(
+                                        if (saved > 0) {
+                                            "Resume (${saved / MEGABYTE} MB saved)"
+                                        } else {
+                                            "Download ${voice.label.substringBefore(" —")}"
+                                        },
+                                    )
+                                }
+                            }
+                        }
+
+                        failure?.let { error ->
+                            Text(
+                                text = error.message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                    HorizontalDivider()
+                }
+
+                if (selectedPiper != null) {
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                AssistantPreferences.setPiperVoice(context, null)
+                                KokoroEngine.get(context).reload()
+                            }
+                        },
+                    ) { Text("Use Kokoro instead") }
+                }
             }
         }
 
@@ -416,7 +570,12 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         Switch(
                             checked = highQuality,
                             onCheckedChange = { enabled ->
-                                scope.launch { AssistantPreferences.setHighQuality(context, enabled) }
+                                scope.launch {
+                                    AssistantPreferences.setHighQuality(context, enabled)
+                                    // Reflect the choice in the preview even if
+                                    // no call is running to reload it.
+                                    KokoroEngine.get(context).reload()
+                                }
                             },
                         )
                         Text(

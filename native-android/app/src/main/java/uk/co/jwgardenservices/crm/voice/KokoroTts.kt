@@ -9,6 +9,7 @@ import com.k2fsa.sherpa.onnx.GeneratedAudio
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import uk.co.jwgardenservices.crm.core.CrashLog
 import kotlinx.coroutines.Dispatchers
@@ -63,8 +64,11 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             if (closed) return@withLock
             stopRequested = false
             val engine = ensureEngine() ?: return@withLock
+            // Piper voices are single-speaker; Kokoro has 53. Sending Kokoro's
+            // speaker id to a VITS model can index past its table.
+            val sid = if (engine.numSpeakers() <= 1) 0 else speakerId
             val audio = withContext(Dispatchers.Default) {
-                engine.generate(clean, speakerId, speed.coerceIn(AssistantPreferences.MIN_SPEED, AssistantPreferences.MAX_SPEED))
+                engine.generate(clean, sid, speed.coerceIn(AssistantPreferences.MIN_SPEED, AssistantPreferences.MAX_SPEED))
             }
             if (!closed) play(audio)
         }
@@ -99,13 +103,14 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             if (closed) return@withLock
             stopRequested = false
             val engine = ensureEngine() ?: return@withLock
+            val sid = if (engine.numSpeakers() <= 1) 0 else speakerId
             coroutineScope {
                 val audio = Channel<GeneratedAudio>(2)
                 val producer = launch(Dispatchers.Default) {
                     try {
                         for (chunk in chunks) {
                             if (stopRequested || closed) break
-                            audio.send(engine.generate(chunk, speakerId, speed))
+                            audio.send(engine.generate(chunk, sid, speed))
                         }
                     } finally {
                         audio.close()
@@ -154,26 +159,62 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                     Log.w(TAG, "Kokoro assets are missing under $ASSET_DIR", error)
                     return@withContext null
                 }
-                // Real file paths, not the AssetManager: reading the 109 MB
-                // model through AAsset_getBuffer aborts the process on some
-                // devices. Copying once with ordinary streams is reliable.
-                val highQuality = AssistantPreferences.highQualityFlow(context).first() &&
-                    KokoroHqDownloader.isInstalled(context)
-                val created = if (highQuality) {
-                    buildEngine(dir, KokoroHqDownloader.modelFile(context), "fp32")
-                        ?: run {
-                            // A corrupt or unsupported download must never leave
-                            // the assistant mute: fall back to the bundled voice.
-                            CrashLog.note(context, TAG, "fp32 model failed to load; using int8")
-                            buildEngine(dir, File(dir, "model.int8.onnx"), "int8")
-                        }
+                // A downloaded Piper voice, when selected, replaces Kokoro
+                // entirely: it loads faster and is lighter on the phone.
+                val piper = AssistantPreferences.piperVoiceFlow(context).first()
+                    ?.takeIf { PiperVoiceDownloader.isInstalled(context, it) }
+                val created = if (piper != null) {
+                    buildVits(PiperVoiceDownloader.dir(context, piper), piper)
+                        ?: buildKokoroVoice(dir)
                 } else {
-                    buildEngine(dir, File(dir, "model.int8.onnx"), "int8")
+                    buildKokoroVoice(dir)
                 }
                 if (created == null) return@withContext null
                 tts = created
                 created
             }
+        }
+    }
+
+    /** Kokoro at the selected quality, falling back to int8 on failure. */
+    private suspend fun buildKokoroVoice(dir: File): OfflineTts? {
+        val highQuality = AssistantPreferences.highQualityFlow(context).first() &&
+            KokoroHqDownloader.isInstalled(context)
+        return if (highQuality) {
+            buildEngine(dir, KokoroHqDownloader.modelFile(context), "fp32")
+                ?: run {
+                    CrashLog.note(context, TAG, "fp32 model failed to load; using int8")
+                    buildEngine(dir, File(dir, "model.int8.onnx"), "int8")
+                }
+        } else {
+            buildEngine(dir, File(dir, "model.int8.onnx"), "int8")
+        }
+    }
+
+    /** A downloaded Piper (VITS) voice. */
+    private fun buildVits(dir: File, voice: PiperVoice): OfflineTts? {
+        CrashLog.note(context, TAG, "model=piper:${voice.id}")
+        val config = OfflineTtsConfig(
+            model = OfflineTtsModelConfig(
+                vits = OfflineTtsVitsModelConfig(
+                    model = File(dir, "model.onnx").absolutePath,
+                    tokens = File(dir, "tokens.txt").absolutePath,
+                    dataDir = File(dir, "espeak-ng-data").absolutePath,
+                    lengthScale = 1.0f,
+                ),
+                numThreads = 4,
+                provider = "cpu",
+            ),
+            maxNumSentences = 1,
+        )
+        return try {
+            val created = OfflineTts(assetManager = null, config = config)
+            CrashLog.note(context, TAG, "OfflineTts ready (piper ${voice.id})")
+            created
+        } catch (error: Exception) {
+            CrashLog.note(context, TAG, "Piper engine failed: ${error.message}")
+            Log.e(TAG, "Piper engine creation failed", error)
+            null
         }
     }
 

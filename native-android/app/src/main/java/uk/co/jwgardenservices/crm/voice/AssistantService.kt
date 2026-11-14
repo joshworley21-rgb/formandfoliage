@@ -106,6 +106,12 @@ class AssistantService : Service() {
         CrashLog.note(this, TAG, "service created")
         scope.launch { AssistantPreferences.voiceFlow(this@AssistantService).collect { voice = it } }
         scope.launch { AssistantPreferences.speedFlow(this@AssistantService).collect { speed = it } }
+        // Selecting a downloaded Piper voice rebuilds the engine on the next reply.
+        scope.launch {
+            AssistantPreferences.piperVoiceFlow(this@AssistantService).drop(1).collect {
+                speaker.reload()
+            }
+        }
         // Swapping between int8 and the downloaded fp32 model should take
         // effect on the next reply, without restarting the Assistant.
         scope.launch {
