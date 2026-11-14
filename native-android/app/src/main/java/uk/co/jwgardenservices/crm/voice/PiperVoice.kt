@@ -45,6 +45,8 @@ enum class PiperVoice(
     Jenny("vits-piper-en_GB-jenny_dioco-medium", "jenny — British female", 67_225_842),
     Northern("vits-piper-en_GB-northern_english_male-medium", "northern — British male", 67_210_490),
     Cori("vits-piper-en_GB-cori-high", "cori — British female (high)", 115_574_061),
+    Dii("vits-piper-en_GB-dii-high", "dii — British (high)", 67_229_442),
+    Miro("vits-piper-en_GB-miro-high", "miro — British (high)", 67_194_499),
     ;
 
     val url: String

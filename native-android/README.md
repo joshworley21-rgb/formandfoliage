@@ -314,8 +314,9 @@ deliberately left on the web for now. The smaller known gaps:
   multi-sentence reply is synthesised sentence by sentence so the first words
   play while the rest is still generating.
 - **Piper voices** (optional, free, Settings → Assistant settings → Piper
-  voices): four British VITS voices from the official sherpa-onnx releases —
-  alan, jenny, northern English male and cori-high, 67–110 MB each. They load
+  voices): British VITS voices from the official sherpa-onnx releases — alan,
+  jenny, northern English male, cori-high, dii-high and miro-high, 67–110 MB
+  each. They load
   faster than fp32 Kokoro, use less memory and often sound less synthetic;
   selecting one replaces Kokoro until "Use Kokoro instead". Downloads resume
   like the other models, and the same "Preview this voice" button auditions
