@@ -75,7 +75,19 @@ jobs:
 
       - name: Unit tests
         working-directory: native-android
-        run: ./gradlew :app:testDebugUnitTest --no-daemon -Dorg.gradle.jvmargs="-Xmx2048m -XX:MaxMetaspaceSize=512m"
+        run: |
+          # Surface the compiler/test error as a check annotation: the raw log
+          # needs admin rights, an annotation is readable from the API.
+          set -o pipefail
+          ./gradlew :app:testDebugUnitTest --no-daemon \
+            -Dorg.gradle.jvmargs="-Xmx2048m -XX:MaxMetaspaceSize=512m" 2>&1 | tee /tmp/unit-tests.log || {
+            status=$?
+            grep -E "^e: |FAILED|Execution failed|Caused by|error:" /tmp/unit-tests.log |
+              head -25 | while IFS= read -r line; do
+                echo "::error title=Android build::$line"
+              done
+            exit $status
+          }
 
       - name: Build signed release APK
         if: env.SIGNED == 'true'
