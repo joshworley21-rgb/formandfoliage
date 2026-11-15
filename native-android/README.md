@@ -189,8 +189,20 @@ deliberately left on the web for now. The smaller known gaps:
   command is finalised without a tap. Shortening these is the cheapest
   latency win in the whole pipeline; any shorter starts cutting people off
   mid-sentence.
-- The call does not speak a greeting: the microphone opens immediately, so
-  the first command is not delayed by loading and playing a welcome.
+- **Pickup greeting**: a fresh call answers with a short "Hello?" before the
+  microphone opens, and the tab changes from Connecting… to Listening… when
+  the line is ready. The clip is generated with the cached filler while the
+  recogniser loads, so it does not delay the first command. Re-entering the
+  tab does not repeat it, and it is skipped if the caller has already started
+  speaking. Settings → Assistant settings → Call turns it off.
+- **Warm start**: once the assistant has been used, the app loads the
+  recogniser in the background after launch, so a returning caller opens the
+  tab to a warm model instead of watching the 190 MB asset load. First ever
+  use still loads it. The voice warms in parallel at call start.
+- **First reply**: the business snapshot (Room + DataStore reads) is built
+  only when a turn actually goes to the cloud. The local commands — diary,
+  hours, notes, invoices, takings — answer without it. A cloud turn still
+  covers its wait with the cached "Let me check." after 300 ms.
 - **Bundled model**: the LibriSpeech + GigaSpeech streaming Zipformer
   (English, int8 encoder/joiner) ships in
   `app/src/main/assets/sherpa-onnx-streaming-zipformer-en-2023-06-21/`

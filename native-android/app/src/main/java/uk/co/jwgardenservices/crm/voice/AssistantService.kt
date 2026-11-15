@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import uk.co.jwgardenservices.crm.MainActivity
@@ -83,6 +84,13 @@ class AssistantService : Service() {
 
     private var voice = KokoroVoice.BmFable
     private var speed = AssistantPreferences.DEFAULT_SPEED
+
+    /** Whether a fresh call answers with a short "Hello?". */
+    private var pickupGreeting = true
+
+    /** Set once the caller has said something in this call. */
+    @Volatile
+    private var heardInCall = false
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
 
@@ -145,6 +153,9 @@ class AssistantService : Service() {
         scope.launch {
             AssistantPreferences.onlineVoiceFlow(this@AssistantService).collect { onlineVoice = it }
         }
+        scope.launch {
+            AssistantPreferences.pickupFlow(this@AssistantService).collect { pickupGreeting = it }
+        }
         scope.launch { handleTranscripts() }
     }
 
@@ -154,17 +165,57 @@ class AssistantService : Service() {
      * serve the bound screen (after the user pressed End) does neither.
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        CrashLog.note(this, TAG, "call starting")
+        // Returning to the tab starts the service again but is not a new call:
+        // only a call that was not already connected gets the pickup greeting.
+        val fresh = !_callActive.value
+        CrashLog.note(this, TAG, if (fresh) "call starting" else "call resuming")
         endedByUser = false
+        if (fresh) heardInCall = false
         _callActive.value = true
         startInForeground()
+        scope.launch { AssistantPreferences.markUsed(this@AssistantService) }
         scope.launch { ensureListening() }
-        // Warm the voice, not the intent model: online turns are classified
-        // by the cloud, and loading the 0.5B on every call burned CPU for
-        // nothing. The rules and cloud handle the first command; the local
-        // model loads only if it is actually needed.
-        scope.launch(kotlinx.coroutines.Dispatchers.Default) { speaker.warmUp() }
+        // The voice warms in parallel with the recogniser. A fresh call then
+        // answers with the cached "Hello?" instead of a dead line.
+        scope.launch(Dispatchers.Default) {
+            val callVoice = runCatching { AssistantPreferences.voiceFlow(this@AssistantService).first() }
+                .getOrDefault(voice)
+            val callSpeed = runCatching { AssistantPreferences.speedFlow(this@AssistantService).first() }
+                .getOrDefault(speed)
+            voice = callVoice
+            speed = callSpeed
+            speaker.warmUp()
+            runCatching { speaker.prepareFiller(callVoice.speakerId, callSpeed) }
+            if (fresh && pickupGreeting) answerWithPickup(callVoice.speakerId, callSpeed)
+        }
         return START_NOT_STICKY
+    }
+
+    /** Say "Hello?" at the start of a fresh call, then reopen the mic. */
+    private suspend fun answerWithPickup(speakerId: Int, speed: Float) {
+        // Wait for the line to connect before answering. This is both the
+        // phone-call order and what stops the recogniser hearing the greeting
+        // when the ASR model finishes loading mid-sentence.
+        val connected = withTimeoutOrNull(8_000) {
+            speech.state.first {
+                it.phase == SherpaSpeechService.Phase.Listening ||
+                    it.phase == SherpaSpeechService.Phase.Error
+            }
+            speech.isListening()
+        } ?: false
+        if (!connected) return
+        if (!_callActive.value || heardInCall || _thinking.value || _speaking.value) return
+        if (speech.state.value.partial.isNotBlank()) return
+        val started = System.currentTimeMillis()
+        speech.pauseForSpeech()
+        _speaking.value = true
+        try {
+            speaker.speakPickup(speakerId, speed)
+        } finally {
+            _speaking.value = false
+            speech.resumeAfterSpeech()
+            CrashLog.note(this, TAG, "pickup in ${System.currentTimeMillis() - started}ms")
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
@@ -173,12 +224,11 @@ class AssistantService : Service() {
     fun ensureListening() {
         CrashLog.note(this, TAG, "ensureListening")
         scope.launch {
-            if (!speech.isListening() && speech.state.value.phase != SherpaSpeechService.Phase.Loading) {
-                speech.startListening()
-            }
-            // Prepare the cached filler while the owner is still drawing
-            // breath; it is what covers the first slow cloud turn.
-            runCatching { speaker.prepareFiller(voice.speakerId, speed) }
+            // startListening waits for an in-flight preload rather than
+            // skipping the call, so a warm-up at app launch never leaves the
+            // microphone closed. The voice and its cached clips are prepared
+            // by onStartCommand, where the saved voice is read first.
+            speech.startListening()
         }
     }
 
@@ -244,6 +294,7 @@ class AssistantService : Service() {
 
     private suspend fun handleTranscripts() {
         speech.transcripts.collect { text ->
+            heardInCall = true
             CrashLog.note(this, TAG, "transcript: ${text.take(120)}")
             addTurn(AssistantTurn(fromUser = true, text = text))
             _thinking.value = true
@@ -321,8 +372,6 @@ class AssistantService : Service() {
             }
         }
 
-        val context = businessContext()
-
         // 1. Rules: the common commands are instant and free. A date word
         //    ("next week", "tomorrow") means the today-only actions are not
         //    enough, so those are allowed to go to the cloud. The commands
@@ -350,11 +399,14 @@ class AssistantService : Service() {
             return
         }
 
-        // 2. Exactly one optional cloud call. The function classifies and, for
-        //    conversational turns, produces the answer in the same response —
-        //    so a sentence never costs two requests and never waits for the
-        //    removed local model.
+        // 2. Exactly one optional cloud call. The business snapshot is built
+        //    only now, and only when a cloud call is actually allowed: a local
+        //    answer never pays for the Room/DataStore reads.
         if (cloudConversation) {
+            val context = businessContext()
+            // The function classifies and, for conversational turns, produces
+            // the answer in the same response — so a sentence never costs two
+            // requests and never waits for the removed local model.
             val reply = runCatching {
                 coroutineScope {
                     val pending = async { cloud.ask(text, context, _turns.value.takeLast(6)) }

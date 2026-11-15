@@ -49,6 +49,9 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     private val fillers = java.util.concurrent.ConcurrentHashMap<Int, GeneratedAudio>()
     private var fillerIndex = 0
 
+    /** Cached "Hello?" for the start of a call, so pickup is instant. */
+    private var pickup: GeneratedAudio? = null
+
     /** Phonon 31m, when downloaded and selected; otherwise this class's own engines. */
     private var phonon: PhononSpeech? = null
 
@@ -160,12 +163,42 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                     engine.generate(FILLER_TEXTS[0], sid, speed)
                 }
             }
+            // The pickup clip is generated in the same pass, so answering a
+            // call never waits for synthesis.
+            if (pickup == null) {
+                pickup = withContext(Dispatchers.Default) {
+                    engine.generate(PICKUP_TEXT, sid, speed)
+                }
+            }
+        }
+    }
+
+    /** Answer the call with a short "Hello?", using the cached clip when warm. */
+    suspend fun speakPickup(
+        speakerId: Int = KokoroVoice.BmFable.speakerId,
+        speed: Float = AssistantPreferences.DEFAULT_SPEED,
+    ) {
+        if (closed) return
+        if (phononActive()) {
+            runCatching { phononSpeech().speak(PICKUP_TEXT) }
+            return
+        }
+        speakLock.withLock {
+            if (closed) return@withLock
+            val engine = ensureEngine() ?: return@withLock
+            val sid = speakerFor(engine, speakerId)
+            val audio = pickup ?: withContext(Dispatchers.Default) {
+                engine.generate(PICKUP_TEXT, sid, speed)
+            }.also { pickup = it }
+            stopRequested = false
+            play(audio)
         }
     }
 
     /** Drop the cached clips when the voice or speed changes. */
     fun clearFiller() {
         fillers.clear()
+        pickup = null
     }
 
     /**
@@ -572,6 +605,9 @@ class KokoroTts(private val context: Context) : AutoCloseable {
 
         /** Bump whenever the set of copied files changes. */
         const val COPY_VERSION = "2"
+
+        /** Said once when a fresh call connects. */
+        const val PICKUP_TEXT = "Hello?"
 
         /** Rotated while a slower answer is on its way. */
         val FILLER_TEXTS = listOf(

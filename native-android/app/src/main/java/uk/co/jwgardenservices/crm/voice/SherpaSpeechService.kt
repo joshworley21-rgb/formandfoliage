@@ -84,6 +84,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     /** Serialises starts: three ensureListening calls must not open three mics. */
     private val startLock = Mutex()
 
+    /** Serialises model loading, so a warm-up and a call cannot both build it. */
+    private val loadLock = Mutex()
+
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
@@ -130,6 +133,53 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     private var bargeFrames = 0
 
     /**
+     * Load the recogniser without opening the microphone.
+     *
+     * Called from the app process when the assistant has been used before, so
+     * the 190 MB model is already in memory by the time the tab opens. It is
+     * safe to call while a call is starting: [loadLock] makes the two share
+     * one load instead of racing.
+     */
+    suspend fun prepare() {
+        if (released || recognizer != null) return
+        ensureRecognizer()
+    }
+
+    /** Build the recogniser once, under a lock shared by prepare and listen. */
+    private suspend fun ensureRecognizer(): OnlineRecognizer? {
+        recognizer?.let { return it }
+        return loadLock.withLock {
+            recognizer?.let { return@withLock it }
+            _state.update { it.copy(phase = Phase.Loading, message = "Loading offline speech model…") }
+            val started = System.currentTimeMillis()
+            val created = try {
+                withContext(Dispatchers.IO) { createRecognizer() }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.e(TAG, "Could not load the sherpa-onnx model", error)
+                fail("The offline speech model could not be loaded. Check assets/$MODEL_DIR.")
+                return@withLock null
+            }
+            if (released) {
+                created.release()
+                null
+            } else {
+                recognizer = created
+                CrashLog.note(
+                    context,
+                    TAG,
+                    "recogniser ready in ${System.currentTimeMillis() - started}ms",
+                )
+                _state.update { state ->
+                    if (state.phase == Phase.Loading) state.copy(phase = Phase.Ready, message = null) else state
+                }
+                created
+            }
+        }
+    }
+
+    /**
      * Open the mic, loading the model from assets the first time. Returns
      * immediately if already listening; never leaves a half-started loop.
      */
@@ -141,23 +191,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         try {
         if (released || listening) return
 
-        if (recognizer == null) {
-            _state.update { it.copy(phase = Phase.Loading, message = "Loading offline speech model…") }
-            try {
-                val created = withContext(Dispatchers.IO) { createRecognizer() }
-                if (released) {
-                    created.release()
-                    return
-                }
-                recognizer = created
-            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                Log.e(TAG, "Could not load the sherpa-onnx model", error)
-                fail("The offline speech model could not be loaded. Check assets/$MODEL_DIR.")
-                return
-            }
-        }
+        if (ensureRecognizer() == null) return
 
         if (!hasMicPermission()) {
             fail("Microphone permission is needed to listen.")

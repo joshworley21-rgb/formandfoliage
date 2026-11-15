@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 /**
@@ -37,6 +38,8 @@ private val ONLINE_VOICE_KEY = booleanPreferencesKey("online_voice")
 private val PIPER_KEY = stringPreferencesKey("piper_voice")
 private val MIC_SOURCE_KEY = stringPreferencesKey("mic_source")
 private val PHONON_KEY = booleanPreferencesKey("phonon_enabled")
+private val PICKUP_KEY = booleanPreferencesKey("pickup_greeting")
+private val USED_KEY = booleanPreferencesKey("assistant_used")
 
 /**
  * Where the microphone audio comes from.
@@ -154,4 +157,31 @@ object AssistantPreferences {
             }
         }
     }
+
+    /**
+     * Say a short "Hello?" when a fresh call connects. On by default: it is
+     * what makes the tab feel like ringing someone rather than opening a
+     * form. It is skipped when the caller has already started speaking.
+     */
+    fun pickupFlow(context: Context): Flow<Boolean> = context.assistantDataStore.data.map { preferences ->
+        preferences[PICKUP_KEY] ?: true
+    }
+
+    suspend fun setPickup(context: Context, enabled: Boolean) {
+        context.assistantDataStore.edit { preferences ->
+            preferences[PICKUP_KEY] = enabled
+        }
+    }
+
+    /**
+     * Remember that the assistant has been used, so the next app launch can
+     * load the recogniser in the background. The 190 MB model then does not
+     * have to load in front of the first command.
+     */
+    suspend fun markUsed(context: Context) {
+        context.assistantDataStore.edit { preferences -> preferences[USED_KEY] = true }
+    }
+
+    suspend fun usedBefore(context: Context): Boolean =
+        context.assistantDataStore.data.first()[USED_KEY] ?: false
 }

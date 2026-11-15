@@ -85,6 +85,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = false)
     val onlineVoice by AssistantPreferences.onlineVoiceFlow(context)
         .collectAsStateWithLifecycle(initialValue = false)
+    val pickupGreeting by AssistantPreferences.pickupFlow(context)
+        .collectAsStateWithLifecycle(initialValue = true)
     val micSource by AssistantPreferences.micSourceFlow(context)
         .collectAsStateWithLifecycle(initialValue = MicSource.Communication)
     val phononEnabled by AssistantPreferences.phononFlow(context)
@@ -469,6 +471,33 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
+            }
+        }
+
+        SectionCard(title = "Call") {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Switch(
+                        checked = pickupGreeting,
+                        onCheckedChange = { enabled ->
+                            scope.launch { AssistantPreferences.setPickup(context, enabled) }
+                        },
+                    )
+                    Text(
+                        text = "Say \"Hello?\" when a call connects",
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+                Text(
+                    text = "A fresh call answers with a short hello before the microphone opens. " +
+                        "The clip is prepared when the call starts, so it does not cost the first " +
+                        "reply. Turning it off makes the assistant listen immediately.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 

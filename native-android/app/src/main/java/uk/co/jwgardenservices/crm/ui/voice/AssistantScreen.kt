@@ -167,7 +167,7 @@ fun AssistantScreen() {
         state.phase == SherpaSpeechService.Phase.Listening -> "Listening…"
         state.phase == SherpaSpeechService.Phase.Error -> "Unavailable"
         state.phase == SherpaSpeechService.Phase.Ready -> "Reconnecting…"
-        else -> "Starting…"
+        else -> "Connecting…"
     }
 
     Column(
