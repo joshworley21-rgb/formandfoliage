@@ -185,8 +185,9 @@ deliberately left on the web for now. The smaller known gaps:
   phone audio, while this one still emits live partial words like a phone
   call. Builds are arm64-v8a only. Nothing is downloaded at runtime, so the
   tab works offline.
-- **Not in git**: the AAR, the Zipformer model, the Silero VAD model and the
-  Kokoro voice model are ~390 MB of binaries. `:app:downloadSherpa` fetches the ASR pieces and
+- **Not in git**: the AAR, the Zipformer model and the Kokoro voice model are
+  ~390 MB of binaries; the 640 KB Silero VAD model is checked in so no build
+  depends on fetching it. `:app:downloadSherpa` fetches the ASR pieces and
   `:app:downloadKokoro` downloads and extracts the Kokoro archive (SHA-256
   checked); `preBuild` depends on both, so a fresh clone needs a connection
   for its first build only.
@@ -328,8 +329,8 @@ deliberately left on the web for now. The smaller known gaps:
   `AcousticEchoCanceler`, so the assistant can hear an interruption over its
   own speech. Talking over it for about 300 ms cuts playback and hands the
   floor back immediately. Turn ends are detected by **Silero VAD** (a 640 KB
-  model fetched by `:app:downloadSileroVad`) with the recognizer's endpoint
-  as a fallback. Replies split at clauses and conjunctions every ~6 words so
+  `silero_vad.onnx` checked into assets) with the recognizer's endpoint as a
+  fallback. Replies split at clauses and conjunctions every ~6 words so
   the first audio starts sooner, and four cached "thinker" clips ("Let me
   check.", "One moment.", …) rotate to cover a slow cloud turn. Settings →
   Microphone switches to `VOICE_RECOGNITION` for accuracy at the cost of
