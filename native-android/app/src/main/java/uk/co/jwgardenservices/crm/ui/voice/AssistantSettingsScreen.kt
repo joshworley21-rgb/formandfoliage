@@ -257,11 +257,11 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 }
 
                 Text(
-                    text = "Piper, Kitten and Supertonic voices are smaller and faster than Kokoro, " +
-                        "so replies start sooner and the phone has more memory left. Download one, " +
-                        "tap Use, then Preview this voice above to hear it. Kitten is the smallest; " +
-                        "Supertonic has ten styles but currently uses its first. Selecting one " +
-                        "replaces Kokoro until you switch back.",
+                    text = "Piper, Kitten, Supertonic and Coqui voices are smaller and faster than " +
+                        "Kokoro, so replies start sooner and the phone has more memory left. " +
+                        "Download one, tap Use, then Preview this voice above to hear it. Kitten " +
+                        "is the smallest; Supertonic has ten styles but currently uses its first. " +
+                        "Selecting one replaces Kokoro until you switch back.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

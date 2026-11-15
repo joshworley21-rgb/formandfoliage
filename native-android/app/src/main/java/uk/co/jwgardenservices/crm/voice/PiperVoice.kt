@@ -59,6 +59,7 @@ enum class PiperVoice(
         128_774_318,
         LocalVoiceEngine.Supertonic,
     ),
+    LjSpeech("vits-coqui-en-ljspeech", "ljspeech — US English (Coqui)", 115_418_583),
     ;
 
     val url: String
