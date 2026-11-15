@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.automirrored.outlined.Assignment
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.EventAvailable
+import androidx.compose.material.icons.outlined.Navigation
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -127,6 +129,7 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
     var sheetJob by remember { mutableStateOf<ScheduledJob?>(null) }
     var saveError by remember { mutableStateOf<String?>(null) }
     var monthCursor by remember { mutableStateOf(YearMonth.now()) }
+    var route by remember { mutableStateOf<Pair<String, List<RouteStop>>?>(null) }
     val listState = rememberLazyListState()
     val appContext = LocalContext.current
 
@@ -275,6 +278,32 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
             val jobs = jobsByDay[day].orEmpty().sortedBy { it.startsAt }
             if (day == selectedDay || jobs.isNotEmpty()) {
                 item(key = "day-$day") { DayHeading(day = day, isToday = day == today) }
+                if (day == selectedDay && jobs.isNotEmpty()) {
+                    val stops = jobs.map { job ->
+                        val client = state.clients.firstOrNull { it.id == job.clientId }
+                        RouteStop(
+                            time = parseTimestamp(job.startsAt),
+                            client = client?.name ?: clientNames[job.clientId] ?: "Client",
+                            address = client?.address,
+                            phone = client?.phone,
+                        )
+                    }
+                    if (stops.any { !it.address.isNullOrBlank() }) {
+                        item(key = "route-$day") {
+                            TextButton(
+                                onClick = { route = day.formatDayMonthYear() to stops },
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Navigation,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text("Route")
+                            }
+                        }
+                    }
+                }
                 if (jobs.isEmpty()) {
                     item(key = "empty-$day") {
                         Text(
@@ -309,6 +338,14 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
                 item { Spacer(Modifier.padding(bottom = 6.dp)) }
             }
         }
+    }
+
+    route?.let { (title, stops) ->
+        RouteDialog(
+            title = "Route for $title",
+            stops = stops,
+            onDismiss = { route = null },
+        )
     }
 
     if (booking) {

@@ -150,6 +150,20 @@ deliberately left on the web for now. The smaller known gaps:
 - Sentry needs a project and a `SENTRY_DSN` secret in the GitHub repo.
 - The month grid shows at most two job chips per day; `+N` points at the agenda.
 
+## Schedule, routes and messages
+
+- **Route**: tapping a day in Schedule shows a **Route** button above its jobs.
+  It lists that day's stops in time order and opens Google Maps directions
+  with the client addresses as waypoints (up to nine; the rest are listed and
+  skipped). No maps key and no server call are involved — the phone's maps app
+  does the work. Jobs without an address are shown but left out of the route.
+- **Text and WhatsApp**: the message icon on a client, in a job sheet, and on
+  each route stop opens an editable draft. The draft can go to the phone's SMS
+  app or WhatsApp (`wa.me`, with UK leading zeros converted to `+44`). Messages
+  are never sent automatically: the app opens with the draft and the owner
+  taps send. The job sheet and route stops prefill "I'm on my way"; the client
+  card prefills a greeting.
+
 ## Voice assistant (offline speech to text)
 
 - The **Assistant** tab (mic icon, centre of the phone bar between Schedule

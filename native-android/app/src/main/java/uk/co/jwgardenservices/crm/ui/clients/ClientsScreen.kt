@@ -283,7 +283,12 @@ private fun ClientCard(client: Client, isStaff: Boolean, onClick: (() -> Unit)?,
                     )
                 }
             }
-            ContactButtons(phone = client.phone, address = client.address)
+            ContactButtons(
+                phone = client.phone,
+                address = client.address,
+                clientName = client.name,
+                defaultMessage = "Hi ${client.name}, ",
+            )
             IconButton(onClick = { onPhotos?.invoke() }) {
                 Icon(Icons.Outlined.PhotoCamera, contentDescription = "Job photos for ${client.name}")
             }

@@ -155,7 +155,12 @@ fun JobSheetDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                ContactButtons(phone = clientPhone, address = clientAddress)
+                ContactButtons(
+                    phone = clientPhone,
+                    address = clientAddress,
+                    clientName = clientName,
+                    defaultMessage = "Hi $clientName, I'm on my way and should be with you shortly.",
+                )
                 Text(
                     text = "Tick off tasks and attach photos of completed work.",
                     style = MaterialTheme.typography.bodySmall,

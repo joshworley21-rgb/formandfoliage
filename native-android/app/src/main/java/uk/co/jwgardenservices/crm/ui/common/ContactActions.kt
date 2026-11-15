@@ -15,6 +15,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -27,12 +31,19 @@ private fun launch(context: Context, intent: Intent, missing: String) {
     }
 }
 
-/** Call, text and navigate shortcuts. Buttons only appear for details that exist. */
+/** Call, text/WhatsApp and navigate shortcuts. Buttons only appear for details that exist. */
 @Composable
-fun ContactButtons(phone: String?, address: String?, modifier: Modifier = Modifier) {
+fun ContactButtons(
+    phone: String?,
+    address: String?,
+    clientName: String? = null,
+    defaultMessage: String? = null,
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     val number = phone?.trim()?.takeIf { it.isNotEmpty() }
     val place = address?.trim()?.takeIf { it.isNotEmpty() }
+    var messaging by remember { mutableStateOf(false) }
     if (number == null && place == null) return
 
     Row(modifier = modifier) {
@@ -42,10 +53,8 @@ fun ContactButtons(phone: String?, address: String?, modifier: Modifier = Modifi
             ) {
                 Icon(Icons.Outlined.Call, contentDescription = "Call", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
             }
-            IconButton(
-                onClick = { launch(context, Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$number")), "No messaging app found") },
-            ) {
-                Icon(Icons.Outlined.Sms, contentDescription = "Text", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+            IconButton(onClick = { messaging = true }) {
+                Icon(Icons.Outlined.Sms, contentDescription = "Text or WhatsApp", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
             }
         }
         if (place != null) {
@@ -58,5 +67,14 @@ fun ContactButtons(phone: String?, address: String?, modifier: Modifier = Modifi
                 Icon(Icons.Outlined.Navigation, contentDescription = "Navigate", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
             }
         }
+    }
+
+    if (messaging && number != null) {
+        MessageDialog(
+            phone = number,
+            title = if (clientName.isNullOrBlank()) "Message" else "Message $clientName",
+            initialMessage = defaultMessage ?: "Hi ${clientName ?: "there"}, ",
+            onDismiss = { messaging = false },
+        )
     }
 }
