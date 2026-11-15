@@ -122,6 +122,11 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @Volatile
     private var pausedAt = 0L
 
+    /** False with the accuracy-first microphone source: no echo canceller. */
+    @Volatile
+    private var bargeEnabled = true
+
+    @Volatile
     private var bargeFrames = 0
 
     /**
