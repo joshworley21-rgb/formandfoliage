@@ -46,8 +46,9 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     private var tts: OfflineTts? = null
     private var track: AudioTrack? = null
 
-    /** Pre-synthesised "Let me check." so a slow cloud turn is not silent. */
-    private var filler: GeneratedAudio? = null
+    /** Pre-synthesised "thinker" clips, rotated so a slow turn is not silent. */
+    private val fillers = java.util.concurrent.ConcurrentHashMap<Int, GeneratedAudio>()
+    private var fillerIndex = 0
 
     private enum class EngineKind { Kokoro, Piper, Kitten, Supertonic }
 
@@ -104,9 +105,11 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             if (closed) return@withLock
             val engine = ensureEngine() ?: return@withLock
             val sid = speakerFor(engine, speakerId)
-            val audio = filler ?: withContext(Dispatchers.Default) {
-                engine.generate(FILLER_TEXT, sid, speed)
-            }.also { filler = it }
+            val index = fillerIndex % FILLER_TEXTS.size
+            fillerIndex++
+            val audio = fillers[index] ?: withContext(Dispatchers.Default) {
+                engine.generate(FILLER_TEXTS[index], sid, speed)
+            }.also { fillers[index] = it }
             stopRequested = false
             play(audio)
         }
@@ -120,20 +123,24 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         speakerId: Int = KokoroVoice.BmFable.speakerId,
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
     ) {
-        if (closed || filler != null) return
+        if (closed) return
         speakLock.withLock {
-            if (closed || filler != null) return@withLock
+            if (closed) return@withLock
             val engine = ensureEngine() ?: return@withLock
             val sid = speakerFor(engine, speakerId)
-            filler = withContext(Dispatchers.Default) {
-                engine.generate(FILLER_TEXT, sid, speed)
+            // Only the first clip is prepared eagerly; the rest are generated
+            // on demand so a fast first command never waits for four clips.
+            if (fillers[0] == null) {
+                fillers[0] = withContext(Dispatchers.Default) {
+                    engine.generate(FILLER_TEXTS[0], sid, speed)
+                }
             }
         }
     }
 
-    /** Drop the cached filler when the voice or speed changes. */
+    /** Drop the cached clips when the voice or speed changes. */
     fun clearFiller() {
-        filler = null
+        fillers.clear()
     }
 
     /**
@@ -201,7 +208,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             loadLock.withLock {
                 runCatching { tts?.release() }
                 tts = null
-                filler = null
+                fillers.clear()
             }
         }
         CrashLog.note(context, TAG, "engine reloaded after a voice change")
@@ -445,33 +452,34 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     }
 
     /**
-     * Split for speech. Sentence boundaries first; a sentence over ~120
-     * characters is broken at commas so the first audio starts sooner. Short
-     * replies stay a single clip, which keeps the prosody natural.
+     * Split for speech. Clauses and conjunctions become separate clips so the
+     * first words are synthesised after ~6 words rather than a whole sentence,
+     * which is what makes a reply feel immediate. Intonation resets at each
+     * boundary, so the minimum is kept at six words.
      */
     private fun speechChunks(text: String): List<String> {
-        val sentences = text.split(Regex("(?<=[.!?])\\s+"))
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
+        val parts = text.split(
+            Regex(
+                "(?<=[.!?])\\s+|(?<=[,;:])\\s+|\\s+(?=(?:and|or|but|then)\\b)",
+                RegexOption.IGNORE_CASE,
+            ),
+        ).map { it.trim() }.filter { it.isNotEmpty() }
+
         val chunks = mutableListOf<String>()
-        for (sentence in sentences) {
-            if (sentence.length <= 120) {
-                chunks += sentence
-                continue
+        val buffer = StringBuilder()
+        var words = 0
+        for (part in parts) {
+            if (buffer.isNotEmpty()) buffer.append(' ')
+            buffer.append(part)
+            words += part.split(Regex("\\s+")).count { it.isNotBlank() }
+            if (words >= 6) {
+                chunks += buffer.toString()
+                buffer.setLength(0)
+                words = 0
             }
-            val clauses = sentence.split(Regex("(?<=,)\\s+"))
-            var buffer = StringBuilder()
-            for (clause in clauses) {
-                if (buffer.isNotEmpty()) buffer.append(' ')
-                buffer.append(clause)
-                if (buffer.length >= 90) {
-                    chunks += buffer.toString().trim()
-                    buffer = StringBuilder()
-                }
-            }
-            if (buffer.isNotBlank()) chunks += buffer.toString().trim()
         }
-        return chunks
+        if (buffer.isNotBlank()) chunks += buffer.toString()
+        return chunks.ifEmpty { listOf(text) }
     }
 
     private fun copyAssetTree(assetPath: String, target: File) {
@@ -560,8 +568,13 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         /** Bump whenever the set of copied files changes. */
         const val COPY_VERSION = "2"
 
-        /** Spoken while a slower answer is on its way. */
-        const val FILLER_TEXT = "Let me check."
+        /** Rotated while a slower answer is on its way. */
+        val FILLER_TEXTS = listOf(
+            "Let me check.",
+            "One moment.",
+            "Right, let me see.",
+            "One second.",
+        )
     }
 }
 

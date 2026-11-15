@@ -56,6 +56,7 @@ import uk.co.jwgardenservices.crm.voice.AssistantPreferences
 import uk.co.jwgardenservices.crm.voice.KokoroHqDownloader
 import uk.co.jwgardenservices.crm.voice.KokoroEngine
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
+import uk.co.jwgardenservices.crm.voice.MicSource
 import uk.co.jwgardenservices.crm.voice.PiperVoice
 import uk.co.jwgardenservices.crm.voice.PiperVoiceDownloader
 import uk.co.jwgardenservices.crm.voice.QwenEngine
@@ -93,6 +94,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = false)
     val onlineVoice by AssistantPreferences.onlineVoiceFlow(context)
         .collectAsStateWithLifecycle(initialValue = false)
+    val micSource by AssistantPreferences.micSourceFlow(context)
+        .collectAsStateWithLifecycle(initialValue = MicSource.Communication)
     val qwenState by QwenModelDownloader.state.collectAsStateWithLifecycle()
     var qwenInstalled by remember { mutableStateOf(QwenModelDownloader.isInstalled(context)) }
     var qwenSaved by remember { mutableLongStateOf(QwenModelDownloader.savedBytes(context)) }
@@ -767,6 +770,29 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         }
                     }
                 }
+            }
+        }
+
+        SectionCard(title = "Microphone") {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OptionPicker(
+                    options = MicSource.entries,
+                    selected = micSource,
+                    label = { it?.label ?: "Barge-in (echo cancelling)" },
+                    onSelect = { selected ->
+                        scope.launch { AssistantPreferences.setMicSource(context, selected) }
+                    },
+                )
+                Text(
+                    text = "Barge-in needs VOICE_COMMUNICATION, which applies the phone's echo " +
+                        "canceller. If words are still missed, choose Best recognition; the " +
+                        "assistant then cannot hear you over its own voice. Applies on the next call.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 

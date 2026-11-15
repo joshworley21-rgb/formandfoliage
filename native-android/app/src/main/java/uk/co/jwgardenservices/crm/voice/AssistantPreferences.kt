@@ -1,6 +1,7 @@
 package uk.co.jwgardenservices.crm.voice
 
 import android.content.Context
+import android.media.MediaRecorder
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
@@ -34,6 +35,26 @@ private val HIGH_QUALITY_KEY = booleanPreferencesKey("kokoro_high_quality")
 private val SPEED_KEY = floatPreferencesKey("kokoro_speed")
 private val ONLINE_VOICE_KEY = booleanPreferencesKey("online_voice")
 private val PIPER_KEY = stringPreferencesKey("piper_voice")
+private val MIC_SOURCE_KEY = stringPreferencesKey("mic_source")
+
+/**
+ * Where the microphone audio comes from.
+ *
+ * VOICE_COMMUNICATION gives the platform echo canceller, which is what allows
+ * barge-in but can cost recognition accuracy on some phones. VOICE_RECOGNITION
+ * is the accuracy-first choice and disables barge-in so the assistant cannot
+ * hear itself.
+ */
+enum class MicSource(val androidSource: Int, val label: String) {
+    Communication(
+        MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+        "Barge-in (echo cancelling)",
+    ),
+    Recognition(
+        MediaRecorder.AudioSource.VOICE_RECOGNITION,
+        "Best recognition (no barge-in)",
+    ),
+}
 
 object AssistantPreferences {
 
@@ -70,6 +91,17 @@ object AssistantPreferences {
     suspend fun setSpeed(context: Context, speed: Float) {
         context.assistantDataStore.edit { preferences ->
             preferences[SPEED_KEY] = speed.coerceIn(MIN_SPEED, MAX_SPEED)
+        }
+    }
+
+    fun micSourceFlow(context: Context): Flow<MicSource> = context.assistantDataStore.data.map { preferences ->
+        MicSource.entries.firstOrNull { it.name == preferences[MIC_SOURCE_KEY] }
+            ?: MicSource.Communication
+    }
+
+    suspend fun setMicSource(context: Context, source: MicSource) {
+        context.assistantDataStore.edit { preferences ->
+            preferences[MIC_SOURCE_KEY] = source.name
         }
     }
 

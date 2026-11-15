@@ -18,6 +18,9 @@ import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineStream
+import com.k2fsa.sherpa.onnx.SileroVadModelConfig
+import com.k2fsa.sherpa.onnx.Vad
+import com.k2fsa.sherpa.onnx.VadModelConfig
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -26,6 +29,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
@@ -155,8 +159,11 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             return
         }
 
+        val micSource = AssistantPreferences.micSourceFlow(context).first()
+        bargeEnabled = micSource == MicSource.Communication
+        CrashLog.note(context, TAG, "mic=${micSource.name}")
         val record = try {
-            withContext(Dispatchers.IO) { createAudioRecord() }
+            withContext(Dispatchers.IO) { createAudioRecord(micSource.androidSource) }
         } catch (error: Exception) {
             Log.e(TAG, "Could not open the microphone", error)
             fail("The microphone could not be opened.")
@@ -238,6 +245,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @SuppressLint("MissingPermission") // checked by startListening before this point
     private fun process(engine: OnlineRecognizer, record: AudioRecord) {
         val stream = engine.createStream()
+        val vad = createVad()
+        var hasSpeech = false
+        var lastVoiceAt = 0L
+        var pausedClean = false
         CrashLog.note(context, TAG, "recognition loop starting (source=${record.audioSource})")
         Log.i(TAG, "Recognition loop starting (source=${record.audioSource})")
         try {
@@ -256,11 +267,34 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 }
                 if (read == 0) continue
                 if (paused) {
+                    if (!pausedClean) {
+                        // Do not let a stale speech flag end the turn the moment
+                        // playback stops.
+                        hasSpeech = false
+                        vad?.reset()
+                        pausedClean = true
+                    }
                     maybeBargeIn(buffer, read)
                     continue
                 }
+                pausedClean = false
                 frames += 1
-                feed(engine, stream, buffer, read)
+                val samples = FloatArray(read) { buffer[it] / 32768.0f }
+                vad?.acceptWaveform(samples)
+                val voiced = vad?.isSpeechDetected() == true
+                if (voiced) {
+                    hasSpeech = true
+                    lastVoiceAt = SystemClock.elapsedRealtime()
+                }
+                val text = feed(engine, stream, samples)
+                val vadEndpoint = vad != null && hasSpeech && !voiced &&
+                    SystemClock.elapsedRealtime() - lastVoiceAt >= ENDPOINT_SILENCE_MS
+                if (vadEndpoint || engine.isEndpoint(stream)) {
+                    engine.reset(stream)
+                    if (text.isNotEmpty()) publish(text)
+                    hasSpeech = false
+                    vad?.reset()
+                }
                 if (frames % 25 == 0) {
                     Log.d(
                         TAG,
@@ -274,6 +308,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             Log.e(TAG, "Recognition loop failed", error)
             if (!released) fail(error.message ?: "Speech recognition failed.")
         } finally {
+            runCatching { vad?.release() }
             runCatching { echoCanceller?.release() }
             echoCanceller = null
             runCatching { record.release() }
@@ -295,7 +330,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
      * and AcousticEchoCanceler, so the assistant does not trigger itself.
      */
     private fun maybeBargeIn(buffer: ShortArray, length: Int) {
-        if (length <= 0) return
+        if (!bargeEnabled || length <= 0) return
         if (SystemClock.elapsedRealtime() - pausedAt < BARGE_GRACE_MS) return
         var energy = 0.0
         for (index in 0 until length) {
@@ -316,8 +351,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         }
     }
 
-    private fun feed(engine: OnlineRecognizer, stream: OnlineStream, buffer: ShortArray, length: Int) {
-        val samples = FloatArray(length) { buffer[it] / 32768.0f }
+    private fun feed(engine: OnlineRecognizer, stream: OnlineStream, samples: FloatArray): String {
         var energy = 0.0
         for (sample in samples) energy += sample * sample
         val level = (sqrt(energy / samples.size) * 8).toFloat().coerceIn(0f, 1f)
@@ -331,10 +365,52 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         } else {
             _state.update { it.copy(level = level) }
         }
-        if (engine.isEndpoint(stream)) {
-            engine.reset(stream)
-            if (text.isNotEmpty()) publish(text)
+        return text
+    }
+
+    /**
+     * Silero VAD decides when the owner has stopped, instead of relying only
+     * on the recognizer's trailing-silence heuristic. Loaded from assets; if
+     * it cannot be created, the recognizer's endpoint still ends the turn.
+     */
+    private fun createVad(): Vad? {
+        // Real file path, like the ASR model: the AssetManager buffer path is
+        // unreliable and a wrong native path can abort the process.
+        val modelFile = runCatching { copyVadAsset() }.getOrElse { error ->
+            CrashLog.note(context, TAG, "silero VAD asset missing: ${error.message}")
+            return null
         }
+        return runCatching {
+            val config = VadModelConfig(
+                sileroVadModelConfig = SileroVadModelConfig(
+                    model = modelFile.absolutePath,
+                    threshold = 0.5f,
+                    minSilenceDuration = 0.35f,
+                    minSpeechDuration = 0.1f,
+                    windowSize = 512,
+                    maxSpeechDuration = 10f,
+                ),
+                sampleRate = SAMPLE_RATE,
+                numThreads = 1,
+                provider = "cpu",
+                debug = false,
+            )
+            Vad(assetManager = null, config = config)
+        }
+            .onFailure { Log.w(TAG, "Silero VAD unavailable", it) }
+            .getOrNull()
+            ?.also { CrashLog.note(context, TAG, "silero VAD ready") }
+    }
+
+    /** Copy the 640 KB VAD model out of assets once and return its path. */
+    private fun copyVadAsset(): File {
+        val target = File(context.filesDir, VAD_MODEL)
+        if (target.isFile && target.length() > 100_000) return target
+        context.assets.open(VAD_MODEL).use { input ->
+            target.outputStream().use { output -> input.copyTo(output, 64 * 1024) }
+        }
+        CrashLog.note(context, TAG, "copied silero VAD (${target.length()} bytes)")
+        return target
     }
 
     /** Push half a second of silence so the last words come out of the stream. */
@@ -435,7 +511,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     }
 
     @SuppressLint("MissingPermission") // checked by startListening before this point
-    private fun createAudioRecord(): AudioRecord {
+    private fun createAudioRecord(source: Int): AudioRecord {
         echoCanceller?.release()
         echoCanceller = null
         val minBytes = AudioRecord.getMinBufferSize(
@@ -448,7 +524,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         // VOICE_COMMUNICATION enables the platform echo canceller, which is
         // what makes barge-in possible without the phone hearing itself.
         val record = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+            source,
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
@@ -458,7 +534,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             record.release()
             throw IOException("AudioRecord could not be initialised.")
         }
-        if (AcousticEchoCanceler.isAvailable()) {
+        if (source == MediaRecorder.AudioSource.VOICE_COMMUNICATION &&
+            AcousticEchoCanceler.isAvailable()
+        ) {
             echoCanceller = runCatching {
                 AcousticEchoCanceler.create(record.audioSessionId)?.apply { enabled = true }
             }.getOrNull()
@@ -490,6 +568,11 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         /** Sustained speech-level energy for 3 × 100 ms means a real interruption. */
         const val BARGE_RMS = 0.04
         const val BARGE_FRAMES = 3
+
+        /** Silence after the last voiced frame that ends the turn. */
+        const val ENDPOINT_SILENCE_MS = 450L
+
+        const val VAD_MODEL = "silero_vad.onnx"
 
         /**
          * Streaming Zipformer (English, LibriSpeech + GigaSpeech, int8) from
