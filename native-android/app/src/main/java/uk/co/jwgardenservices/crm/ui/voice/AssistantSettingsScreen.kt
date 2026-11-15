@@ -232,7 +232,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
-        SectionCard(title = "Piper voices (faster)") {
+        SectionCard(title = "Local voices (faster)") {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -257,10 +257,10 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 }
 
                 Text(
-                    text = "Piper voices are smaller and faster than Kokoro, so replies start " +
-                        "sooner and the phone has more memory left. Download one, tap Use, then " +
-                        "Preview this voice above to hear it. Selecting a Piper voice replaces " +
-                        "Kokoro until you switch back.",
+                    text = "Piper and Kitten voices are smaller and faster than Kokoro, so replies " +
+                        "start sooner and the phone has more memory left. Download one, tap Use, " +
+                        "then Preview this voice above to hear it. Kitten is the smallest and uses " +
+                        "its first built-in voice. Selecting one replaces Kokoro until you switch back.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

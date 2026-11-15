@@ -8,6 +8,7 @@ import android.util.Log
 import com.k2fsa.sherpa.onnx.GeneratedAudio
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsKittenModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
@@ -44,6 +45,14 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     private var tts: OfflineTts? = null
     private var track: AudioTrack? = null
 
+    /** Pre-synthesised "Let me check." so a slow cloud turn is not silent. */
+    private var filler: GeneratedAudio? = null
+
+    private enum class EngineKind { Kokoro, Piper, Kitten }
+
+    @Volatile
+    private var engineKind = EngineKind.Kokoro
+
     @Volatile
     private var closed = false
 
@@ -66,7 +75,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             val engine = ensureEngine() ?: return@withLock
             // Piper voices are single-speaker; Kokoro has 53. Sending Kokoro's
             // speaker id to a VITS model can index past its table.
-            val sid = if (engine.numSpeakers() <= 1) 0 else speakerId
+            val sid = speakerFor(engine, speakerId)
             val audio = withContext(Dispatchers.Default) {
                 engine.generate(clean, sid, speed.coerceIn(AssistantPreferences.MIN_SPEED, AssistantPreferences.MAX_SPEED))
             }
@@ -78,6 +87,52 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     suspend fun warmUp() {
         if (closed) return
         ensureEngine()
+    }
+
+    /**
+     * Play "Let me check." while a cloud turn is in flight. The clip is
+     * generated once and cached for the current voice; this is the difference
+     * between a call that feels alive and a dead line.
+     */
+    suspend fun speakFiller(
+        speakerId: Int = KokoroVoice.BmFable.speakerId,
+        speed: Float = AssistantPreferences.DEFAULT_SPEED,
+    ) {
+        if (closed) return
+        speakLock.withLock {
+            if (closed) return@withLock
+            val engine = ensureEngine() ?: return@withLock
+            val sid = speakerFor(engine, speakerId)
+            val audio = filler ?: withContext(Dispatchers.Default) {
+                engine.generate(FILLER_TEXT, sid, speed)
+            }.also { filler = it }
+            stopRequested = false
+            play(audio)
+        }
+    }
+
+    /**
+     * Generate the filler ahead of time, once the voice is warm. Called when a
+     * call starts so the first slow cloud turn is covered too.
+     */
+    suspend fun prepareFiller(
+        speakerId: Int = KokoroVoice.BmFable.speakerId,
+        speed: Float = AssistantPreferences.DEFAULT_SPEED,
+    ) {
+        if (closed || filler != null) return
+        speakLock.withLock {
+            if (closed || filler != null) return@withLock
+            val engine = ensureEngine() ?: return@withLock
+            val sid = speakerFor(engine, speakerId)
+            filler = withContext(Dispatchers.Default) {
+                engine.generate(FILLER_TEXT, sid, speed)
+            }
+        }
+    }
+
+    /** Drop the cached filler when the voice or speed changes. */
+    fun clearFiller() {
+        filler = null
     }
 
     /**
@@ -93,7 +148,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     ) {
         val clean = text.trim()
         if (closed || clean.isEmpty()) return
-        val chunks = sentences(clean)
+        val chunks = speechChunks(clean)
         if (chunks.size <= 1) {
             speak(clean, speakerId, speed)
             return
@@ -103,7 +158,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             if (closed) return@withLock
             stopRequested = false
             val engine = ensureEngine() ?: return@withLock
-            val sid = if (engine.numSpeakers() <= 1) 0 else speakerId
+            val sid = speakerFor(engine, speakerId)
             coroutineScope {
                 val audio = Channel<GeneratedAudio>(2)
                 val producer = launch(Dispatchers.Default) {
@@ -145,6 +200,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             loadLock.withLock {
                 runCatching { tts?.release() }
                 tts = null
+                filler = null
             }
         }
         CrashLog.note(context, TAG, "engine reloaded after a voice change")
@@ -164,7 +220,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                 val piper = AssistantPreferences.piperVoiceFlow(context).first()
                     ?.takeIf { PiperVoiceDownloader.isInstalled(context, it) }
                 val created = if (piper != null) {
-                    buildVits(PiperVoiceDownloader.dir(context, piper), piper)
+                    buildLocalVoice(PiperVoiceDownloader.dir(context, piper), piper)
                         ?: buildKokoroVoice(dir)
                 } else {
                     buildKokoroVoice(dir)
@@ -180,7 +236,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     private suspend fun buildKokoroVoice(dir: File): OfflineTts? {
         val highQuality = AssistantPreferences.highQualityFlow(context).first() &&
             KokoroHqDownloader.isInstalled(context)
-        return if (highQuality) {
+        val created = if (highQuality) {
             buildEngine(dir, KokoroHqDownloader.modelFile(context), "fp32")
                 ?: run {
                     CrashLog.note(context, TAG, "fp32 model failed to load; using int8")
@@ -189,7 +245,47 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         } else {
             buildEngine(dir, File(dir, "model.int8.onnx"), "int8")
         }
+        if (created != null) engineKind = EngineKind.Kokoro
+        return created
     }
+
+    private fun buildLocalVoice(dir: File, voice: PiperVoice): OfflineTts? = when (voice.engine) {
+        LocalVoiceEngine.Kitten -> buildKitten(dir, voice)
+        LocalVoiceEngine.Vits -> buildVits(dir, voice)
+    }
+
+    /** A Kitten v0.8 model: small, quick, several built-in voices. */
+    private fun buildKitten(dir: File, voice: PiperVoice): OfflineTts? {
+        CrashLog.note(context, TAG, "model=kitten:${voice.id}")
+        val config = OfflineTtsConfig(
+            model = OfflineTtsModelConfig(
+                kitten = OfflineTtsKittenModelConfig(
+                    model = File(dir, "model.onnx").absolutePath,
+                    voices = File(dir, "voices.bin").absolutePath,
+                    tokens = File(dir, "tokens.txt").absolutePath,
+                    dataDir = File(dir, "espeak-ng-data").absolutePath,
+                    lengthScale = 1.0f,
+                ),
+                numThreads = 4,
+                provider = "cpu",
+            ),
+            maxNumSentences = 1,
+        )
+        return try {
+            val created = OfflineTts(assetManager = null, config = config)
+            engineKind = EngineKind.Kitten
+            CrashLog.note(context, TAG, "OfflineTts ready (kitten ${voice.id}, ${created.numSpeakers()} voices)")
+            created
+        } catch (error: Exception) {
+            CrashLog.note(context, TAG, "Kitten engine failed: ${error.message}")
+            Log.e(TAG, "Kitten engine creation failed", error)
+            null
+        }
+    }
+
+    /** Kokoro has 53 speakers; VITS and Kitten are addressed separately. */
+    private fun speakerFor(engine: OfflineTts, speakerId: Int): Int =
+        if (engineKind == EngineKind.Kokoro) speakerId else 0
 
     /** A downloaded Piper (VITS) voice. */
     private fun buildVits(dir: File, voice: PiperVoice): OfflineTts? {
@@ -209,6 +305,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         )
         return try {
             val created = OfflineTts(assetManager = null, config = config)
+            engineKind = EngineKind.Piper
             CrashLog.note(context, TAG, "OfflineTts ready (piper ${voice.id})")
             created
         } catch (error: Exception) {
@@ -314,11 +411,35 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         return samples.copyOfRange(from, to + 1)
     }
 
-    /** Split on sentence punctuation; Kokoro handles a short sentence best. */
-    private fun sentences(text: String): List<String> =
-        text.split(Regex("(?<=[.!?])\\s+"))
+    /**
+     * Split for speech. Sentence boundaries first; a sentence over ~120
+     * characters is broken at commas so the first audio starts sooner. Short
+     * replies stay a single clip, which keeps the prosody natural.
+     */
+    private fun speechChunks(text: String): List<String> {
+        val sentences = text.split(Regex("(?<=[.!?])\\s+"))
             .map { it.trim() }
             .filter { it.isNotEmpty() }
+        val chunks = mutableListOf<String>()
+        for (sentence in sentences) {
+            if (sentence.length <= 120) {
+                chunks += sentence
+                continue
+            }
+            val clauses = sentence.split(Regex("(?<=,)\\s+"))
+            var buffer = StringBuilder()
+            for (clause in clauses) {
+                if (buffer.isNotEmpty()) buffer.append(' ')
+                buffer.append(clause)
+                if (buffer.length >= 90) {
+                    chunks += buffer.toString().trim()
+                    buffer = StringBuilder()
+                }
+            }
+            if (buffer.isNotBlank()) chunks += buffer.toString().trim()
+        }
+        return chunks
+    }
 
     private fun copyAssetTree(assetPath: String, target: File) {
         val children = context.assets.list(assetPath).orEmpty()
@@ -405,6 +526,9 @@ class KokoroTts(private val context: Context) : AutoCloseable {
 
         /** Bump whenever the set of copied files changes. */
         const val COPY_VERSION = "2"
+
+        /** Spoken while a slower answer is on its way. */
+        const val FILLER_TEXT = "Let me check."
     }
 }
 

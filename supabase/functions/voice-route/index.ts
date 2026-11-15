@@ -54,8 +54,11 @@ Never invent a price that a tool did not return. If a tool marks its answer as
 an estimate, say so plainly ("that's an estimate"). Ask one short clarifying
 question if the request lacks the material or the scope.
 
-The owner may talk to you casually. Answer briefly and naturally, like a
-competent assistant, but stay on the business.`;
+Speak like a sharp, friendly office manager on a phone call: short, natural
+British English sentences, never a list, never an ID, JSON, file name or
+invoice number unless the owner asked for it. Before logging hours or marking
+a job done, confirm the client and the amount if either is unclear. The owner
+may talk casually; answer naturally but stay on the business.`;
 
 /** Illustrative rate card; swap for a live supplier API later. */
 const RATE_CARD: Record<string, { price: number; unit: string }> = {

@@ -313,14 +313,21 @@ deliberately left on the web for now. The smaller known gaps:
   hands-free. Kokoro is process-scoped and warmed when a call starts, and a
   multi-sentence reply is synthesised sentence by sentence so the first words
   play while the rest is still generating.
-- **Piper voices** (optional, free, Settings → Assistant settings → Piper
-  voices): British VITS voices from the official sherpa-onnx releases — alan,
-  jenny, northern English male, cori-high, dii-high and miro-high, 67–110 MB
-  each. They load
+- **Local voices** (optional, free, Settings → Assistant settings → Local
+  voices): British Piper VITS voices from the official sherpa-onnx releases —
+  alan, jenny, northern English male, cori-high, dii-high and miro-high,
+  67–110 MB each — plus Kitten TTS v0.8 mini/nano (67/31 MB), a newer small
+  English model with several built-in voices (the first is used). They load
   faster than fp32 Kokoro, use less memory and often sound less synthetic;
   selecting one replaces Kokoro until "Use Kokoro instead". Downloads resume
   like the other models, and the same "Preview this voice" button auditions
   them.
+- **Call feel**: the microphone runs on `VOICE_COMMUNICATION` with
+  `AcousticEchoCanceler`, so the assistant can hear an interruption over its
+  own speech. Talking over it for about 300 ms cuts playback and hands the
+  floor back immediately. Long replies split at sentence and comma boundaries
+  so audio starts sooner, and a cached "Let me check." covers a cloud turn
+  that takes more than a beat.
 - **Natural online voice** (optional, Settings → Kokoro voice): reply text is
   posted to the `voice-speak` Edge Function, which returns OpenAI
   `gpt-4o-mini-tts` audio. It falls back to Kokoro when offline or when the

@@ -17,6 +17,8 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import uk.co.jwgardenservices.crm.MainActivity
 import uk.co.jwgardenservices.crm.R
 import uk.co.jwgardenservices.crm.core.CrashLog
@@ -102,10 +105,15 @@ class AssistantService : Service() {
     override fun onCreate() {
         super.onCreate()
         speech = SpeechEngine.get(this)
+        speech.onBargeIn = {
+            CrashLog.note(this, TAG, "barge-in; stopping playback")
+            speaker.stopPlayback()
+            cloudVoice?.stop()
+        }
         speaker = KokoroEngine.get(this)
         CrashLog.note(this, TAG, "service created")
-        scope.launch { AssistantPreferences.voiceFlow(this@AssistantService).collect { voice = it } }
-        scope.launch { AssistantPreferences.speedFlow(this@AssistantService).collect { speed = it } }
+        scope.launch { AssistantPreferences.voiceFlow(this@AssistantService).collect { voice = it; speaker.clearFiller() } }
+        scope.launch { AssistantPreferences.speedFlow(this@AssistantService).collect { speed = it; speaker.clearFiller() } }
         // Selecting a downloaded Piper voice rebuilds the engine on the next reply.
         scope.launch {
             AssistantPreferences.piperVoiceFlow(this@AssistantService).drop(1).collect {
@@ -163,6 +171,9 @@ class AssistantService : Service() {
             if (!speech.isListening() && speech.state.value.phase != SherpaSpeechService.Phase.Loading) {
                 speech.startListening()
             }
+            // Prepare the cached filler while the owner is still drawing
+            // breath; it is what covers the first slow cloud turn.
+            runCatching { speaker.prepareFiller(voice.speakerId, speed) }
         }
     }
 
@@ -292,7 +303,22 @@ class AssistantService : Service() {
         //    so a sentence never costs two requests and never waits for the
         //    slow on-device model.
         if (cloudConversation) {
-            val reply = runCatching { cloud.ask(text, context, _turns.value.takeLast(6)) }
+            val reply = runCatching {
+                coroutineScope {
+                    val pending = async { cloud.ask(text, context, _turns.value.takeLast(6)) }
+                    // Let a quick turn answer on its own; if it is slower than
+                    // a beat, cover the wait with a cached "Let me check."
+                    val quick = withTimeoutOrNull(300) { pending.await() }
+                    if (quick != null) {
+                        quick
+                    } else {
+                        if (!onlineVoice) {
+                            runCatching { speaker.speakFiller(voice.speakerId, speed) }
+                        }
+                        pending.await()
+                    }
+                }
+            }
                 .onFailure { CrashLog.note(this, TAG, "cloud failed: ${it.message}") }
                 .getOrNull()
 

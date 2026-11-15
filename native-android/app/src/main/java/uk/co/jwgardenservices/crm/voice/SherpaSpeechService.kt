@@ -7,6 +7,8 @@ import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.k2fsa.sherpa.onnx.EndpointConfig
@@ -103,6 +105,17 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @Volatile
     private var lastResult = ""
 
+    /** Called when the owner talks over the assistant, so playback can stop. */
+    @Volatile
+    var onBargeIn: (() -> Unit)? = null
+
+    private var echoCanceller: AcousticEchoCanceler? = null
+
+    @Volatile
+    private var pausedAt = 0L
+
+    private var bargeFrames = 0
+
     /**
      * Open the mic, loading the model from assets the first time. Returns
      * immediately if already listening; never leaves a half-started loop.
@@ -170,6 +183,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         if (!listening) return
         paused = true
         resumeAfterPause = true
+        pausedAt = SystemClock.elapsedRealtime()
+        bargeFrames = 0
     }
 
     /**
@@ -193,6 +208,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     override fun close() {
         released = true
+        runCatching { echoCanceller?.release() }
+        echoCanceller = null
         listening = false
         resumeAfterPause = false
         runCatching { audioRecord?.stop() }
@@ -226,7 +243,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     continue
                 }
                 if (read == 0) continue
-                if (paused) continue
+                if (paused) {
+                    maybeBargeIn(buffer, read)
+                    continue
+                }
                 frames += 1
                 feed(engine, stream, buffer, read)
                 if (frames % 25 == 0) {
@@ -242,6 +262,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             Log.e(TAG, "Recognition loop failed", error)
             if (!released) fail(error.message ?: "Speech recognition failed.")
         } finally {
+            runCatching { echoCanceller?.release() }
+            echoCanceller = null
             runCatching { record.release() }
             if (audioRecord === record) audioRecord = null
             runCatching { stream.release() }
@@ -251,6 +273,34 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     it.copy(phase = Phase.Ready, partial = "")
                 }
             }
+        }
+    }
+
+    /**
+     * While the assistant speaks, the recognizer is not fed, but the mic is
+     * still read: if the owner talks over it for ~300 ms, playback is cut and
+     * the normal loop resumes. Echo cancellation comes from VOICE_COMMUNICATION
+     * and AcousticEchoCanceler, so the assistant does not trigger itself.
+     */
+    private fun maybeBargeIn(buffer: ShortArray, length: Int) {
+        if (length <= 0) return
+        if (SystemClock.elapsedRealtime() - pausedAt < BARGE_GRACE_MS) return
+        var energy = 0.0
+        for (index in 0 until length) {
+            val sample = buffer[index] / 32768.0
+            energy += sample * sample
+        }
+        val rms = sqrt(energy / length)
+        if (rms >= BARGE_RMS) {
+            if (++bargeFrames >= BARGE_FRAMES) {
+                bargeFrames = 0
+                paused = false
+                resumeAfterPause = false
+                CrashLog.note(context, TAG, "barge-in (rms=$rms)")
+                onBargeIn?.invoke()
+            }
+        } else {
+            bargeFrames = 0
         }
     }
 
@@ -374,6 +424,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     @SuppressLint("MissingPermission") // checked by startListening before this point
     private fun createAudioRecord(): AudioRecord {
+        echoCanceller?.release()
+        echoCanceller = null
         val minBytes = AudioRecord.getMinBufferSize(
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
@@ -381,8 +433,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         )
         // Four frames of slack keeps a slow decode from overrunning the buffer.
         val bytes = maxOf(minBytes, FRAME_SAMPLES * 2 * 4)
+        // VOICE_COMMUNICATION enables the platform echo canceller, which is
+        // what makes barge-in possible without the phone hearing itself.
         val record = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
@@ -391,6 +445,12 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         if (record.state != AudioRecord.STATE_INITIALIZED) {
             record.release()
             throw IOException("AudioRecord could not be initialised.")
+        }
+        if (AcousticEchoCanceler.isAvailable()) {
+            echoCanceller = runCatching {
+                AcousticEchoCanceler.create(record.audioSessionId)?.apply { enabled = true }
+            }.getOrNull()
+            CrashLog.note(context, TAG, "echo canceller=${echoCanceller != null}")
         }
         return record
     }
@@ -411,6 +471,13 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
         /** 100 ms of 16 kHz mono audio. */
         const val FRAME_SAMPLES = SAMPLE_RATE / 10
+
+        /** Ignore the first moments after playback starts, while AEC settles. */
+        const val BARGE_GRACE_MS = 350L
+
+        /** Sustained speech-level energy for 3 × 100 ms means a real interruption. */
+        const val BARGE_RMS = 0.04
+        const val BARGE_FRAMES = 3
 
         /**
          * Streaming Zipformer (English, LibriSpeech + GigaSpeech, int8) from
