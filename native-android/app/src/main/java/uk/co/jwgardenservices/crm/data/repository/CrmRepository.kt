@@ -585,7 +585,7 @@ class CrmRepository(
         }
     }
 
-    suspend fun saveVisit(draft: VisitDraft) {
+    suspend fun saveVisit(draft: VisitDraft): String {
         val uid = userId()
         val id = draft.id ?: UUID.randomUUID().toString()
         val existing = draft.id?.let { visits.findById(it) }
@@ -669,6 +669,7 @@ class CrmRepository(
             )
         }
         onQueued()
+        return id
     }
 
     suspend fun deleteVisit(id: String) {

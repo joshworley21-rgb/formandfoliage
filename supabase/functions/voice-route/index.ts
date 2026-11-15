@@ -113,14 +113,21 @@ const TOOLS = [
 const INTENT_PROMPT = `Convert one spoken command from a UK gardener into a single JSON object.
 Choose intent from: log_hours, check_schedule, next_job, next_job_address, mark_job_done,
 who_owes_me, weekly_earnings, month_earnings, hours_this_week, client_info, last_visit,
-best_client, quote, other.
+best_client, add_note, unbilled, client_list, invoice_status, next_job_for_client,
+today_earnings, quote, other.
 Use requires_cloud true only when the answer needs live or external data (material
 prices, supplier rates, a dynamic quote, weather, traffic) or when the sentence is
 conversation the app cannot answer from its own records. Local commands — hours,
-diary, next job, finishing a job, money owed, week's earnings — are false. A
-question about a day other than today (tomorrow, next week, next month) is not a
-local diary lookup: use other with requires_cloud true so it can be answered from
-the context.
+diary, next job, finishing a job, money owed, a client note, unbilled
+work, the client list, an invoice status, a client's next booking, today's
+takings, week's earnings — are false. A question about a day other than today
+(tomorrow, next week, next month) is not a local diary lookup: use other with
+requires_cloud true so it can be answered from the context.
+
+add_note is "note for the Smiths that the gate sticks"; unbilled is "what is
+ready to invoice"; invoice_status is "has the Smiths' invoice been paid";
+next_job_for_client is "when is the Smiths next in"; today_earnings is "what
+have I taken today".
 client_or_topic is the client or subject mentioned, copied from the business
 context when it names one, otherwise the subject, otherwise an empty string.`;
 
@@ -143,6 +150,12 @@ const INTENT_SCHEMA = {
         "client_info",
         "last_visit",
         "best_client",
+        "add_note",
+        "unbilled",
+        "client_list",
+        "invoice_status",
+        "next_job_for_client",
+        "today_earnings",
         "quote",
         "other",
       ],

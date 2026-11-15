@@ -254,6 +254,21 @@ class AssistantService : Service() {
             if (wasListening) speech.pauseForSpeech()
             _speaking.value = true
             try {
+                // A yes/no finishes an "are you sure?" from the last turn
+                // before "undo that" reverses the last logged visit or client
+                // note. Both run before memory and classification so a stray
+                // word cannot lose the pending action.
+                val confirmed = runCatching { actions.answerConfirmation(text) }
+                    .onFailure { CrashLog.note(this, TAG, "confirmation failed: ${it.message}") }
+                    .getOrNull()
+                if (confirmed != null) {
+                    say(confirmed)
+                    return@collect
+                }
+                if (undoRequested(text)) {
+                    say(actions.undoLast())
+                    return@collect
+                }
                 val remembered = runCatching { memoryCommand(text) }
                     .onFailure { CrashLog.note(this, TAG, "memory command failed: ${it.message}") }
                     .getOrNull()
@@ -310,13 +325,21 @@ class AssistantService : Service() {
 
         // 1. Rules: the common commands are instant and free. A date word
         //    ("next week", "tomorrow") means the today-only actions are not
-        //    enough, so those are allowed to go to the cloud.
+        //    enough, so those are allowed to go to the cloud. The commands
+        //    that do not depend on the date stay local regardless.
         val lower = text.lowercase()
         val temporal = TEMPORAL_WORDS.any { lower.contains(it) }
         val quick = IntentRules.classify(text)
-        // "What have I got on next week" is a local diary lookup, not a reason
-        // to spend a cloud call: CheckSchedule handles the date range.
-        val localTemporal = quick.intent == SpokenIntent.CheckSchedule && temporal
+        val dateIndependent = quick.intent in setOf(
+            SpokenIntent.CheckSchedule,
+            SpokenIntent.AddNote,
+            SpokenIntent.ClientList,
+            SpokenIntent.Unbilled,
+            SpokenIntent.InvoiceStatus,
+            SpokenIntent.NextJobForClient,
+            SpokenIntent.TodayEarnings,
+        )
+        val localTemporal = dateIndependent && temporal
         if ((!temporal || localTemporal) && IntentRules.isConfident(quick.intent) && !quick.requiresCloud) {
             CrashLog.note(
                 this,
@@ -439,6 +462,11 @@ class AssistantService : Service() {
         val intent = IntentRules.classify(part)
         return intent.intent != SpokenIntent.Other && !intent.requiresCloud
     }
+
+    /** "Undo", "undo that", "scratch that": reverse the last change. */
+    private fun undoRequested(text: String): Boolean =
+        Regex("^(undo|undo that|undo the last one|scratch that|revert that)[.!]?$")
+            .matches(text.lowercase().trim())
 
     /** A few free replies so greetings are not answered with a help list. */
     private fun smallTalk(text: String): String? {
@@ -625,7 +653,8 @@ class AssistantService : Service() {
         const val CHECKING_ONLINE = "Checking online rates."
         const val LISTENING_TEXT = "Assistant is listening for your next command"
         const val CLOUD_TAG = "CloudRouter"
-        const val HELP_TEXT = "I can log hours, check your diary, mark a job done or tell you who owes you."
+        const val HELP_TEXT = "I can log hours, check your diary, mark a job done, add a client " +
+            "note, read out invoices and takings, or say undo to reverse the last change."
         val TEMPORAL_WORDS = listOf("week", "tomorrow", "month", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
         const val MAX_TURNS = 40
 
@@ -653,12 +682,21 @@ private fun confirmationFor(intent: IntentResult): String {
         SpokenIntent.ClientInfo -> "Looking up that client."
         SpokenIntent.LastVisit -> "Checking that client's last visit."
         SpokenIntent.BestClient -> "Checking your best client."
+        SpokenIntent.AddNote ->
+            if (topic.isEmpty()) "Adding that note." else "Adding a note for $topic."
+        SpokenIntent.Unbilled -> "Checking what is waiting to be invoiced."
+        SpokenIntent.ClientList -> "Reading out your clients."
+        SpokenIntent.InvoiceStatus -> "Checking that invoice."
+        SpokenIntent.NextJobForClient ->
+            if (topic.isEmpty()) "Checking that booking." else "Checking when $topic is next in."
+        SpokenIntent.TodayEarnings -> "Checking today's takings."
         SpokenIntent.MarkJobDone ->
             if (topic.isEmpty()) "Marking that job done." else "Marking the job for $topic done."
         SpokenIntent.WhoOwesMe -> "Checking who owes you."
         SpokenIntent.WeeklyEarnings -> "Checking this week's earnings."
         SpokenIntent.Quote ->
             if (topic.isEmpty()) "Preparing your quote." else "Preparing a quote for $topic."
-        SpokenIntent.Other -> "I can log hours, check your diary or tell you who owes you."
+        SpokenIntent.Other ->
+            "I can log hours, check your diary, add a note, or tell you who owes you."
     }
 }

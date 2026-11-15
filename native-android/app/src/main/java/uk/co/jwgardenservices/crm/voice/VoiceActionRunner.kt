@@ -2,6 +2,7 @@ package uk.co.jwgardenservices.crm.voice
 
 import kotlinx.coroutines.flow.first
 import uk.co.jwgardenservices.crm.data.model.Client
+import uk.co.jwgardenservices.crm.data.model.ClientDraft
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
 import uk.co.jwgardenservices.crm.data.model.VisitDraft
 import uk.co.jwgardenservices.crm.data.repository.CrmRepository
@@ -47,6 +48,24 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
 
     private var pending: PendingLog? = null
 
+    /** A destructive action waiting for a yes/no. */
+    private data class ConfirmDone(
+        val jobId: String,
+        val clientName: String,
+        val hours: Double,
+        val description: String,
+    )
+
+    private var confirmDone: ConfirmDone? = null
+
+    /** The last change that can be reversed with "undo". */
+    private sealed interface Undo {
+        data class Visit(val id: String, val clientName: String) : Undo
+        data class Note(val clientId: String, val previous: String?, val clientName: String) : Undo
+    }
+
+    private var lastUndo: Undo? = null
+
     fun hasPending(): Boolean = pending != null
 
     fun clearPending() {
@@ -73,6 +92,12 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
             SpokenIntent.ClientInfo -> clientInfo(text)
             SpokenIntent.LastVisit -> lastVisit(text)
             SpokenIntent.BestClient -> bestClient()
+            SpokenIntent.AddNote -> addNote(transcript)
+            SpokenIntent.Unbilled -> unbilled()
+            SpokenIntent.ClientList -> clientList()
+            SpokenIntent.InvoiceStatus -> invoiceStatus(text)
+            SpokenIntent.NextJobForClient -> nextJobForClient(text)
+            SpokenIntent.TodayEarnings -> todayEarnings()
             else -> null
         }
     }
@@ -142,7 +167,8 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
                 ),
             ),
         )
-        repository.saveVisit(draft)
+        val visitId = repository.saveVisit(draft)
+        lastUndo = Undo.Visit(visitId, client.name)
         val whenText = if (date == LocalDate.now()) "" else " for ${date.dayOfMonth}/${date.monthValue}"
         return "Logged ${hoursLabel(hours)} for ${client.name}$whenText, ${money(draft.amount)}."
     }
@@ -237,9 +263,173 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
         val job = target.first
         val client = clients.firstOrNull { it.id == job.clientId }
         val hours = round2((job.durationMinutes / 60.0).coerceAtLeast(0.5))
-        repository.staffCompleteJob(job.id, hours, "Completed by voice")
         val name = client?.name ?: "the client"
-        return "Marked $name's job done, ${hoursLabel(hours)}."
+        confirmDone = ConfirmDone(job.id, name, hours, "Completed by voice")
+        return "Mark the job for $name done, ${hoursLabel(hours)}? Say yes to confirm."
+    }
+
+    /**
+     * Answer a pending "are you sure?". Returns null when the sentence is not
+     * a yes/no, in which case it has been cleared and the service treats the
+     * sentence as a new command.
+     */
+    suspend fun answerConfirmation(transcript: String): String? {
+        val waiting = confirmDone ?: return null
+        confirmDone = null
+        val lower = transcript.lowercase().trim()
+        return when {
+            Regex("^(yes|yeah|yep|confirm|do it|go ahead|ok|okay)[.!]?$").matches(lower) -> {
+                repository.staffCompleteJob(waiting.jobId, waiting.hours, waiting.description)
+                "Marked the job for ${waiting.clientName} done, ${hoursLabel(waiting.hours)}."
+            }
+
+            Regex("^(no|nope|cancel|don't|do not|stop)[.!]?$").matches(lower) ->
+                "Cancelled."
+
+            else -> null
+        }
+    }
+
+    /** Reverse the last reversible action: a logged visit or a client note. */
+    suspend fun undoLast(): String {
+        val action = lastUndo ?: return "Nothing to undo."
+        lastUndo = null
+        return when (action) {
+            is Undo.Visit -> {
+                runCatching { repository.deleteVisit(action.id) }
+                    .getOrElse { return "I couldn't remove that visit." }
+                "Removed the visit for ${action.clientName}."
+            }
+
+            is Undo.Note -> {
+                val client = repository.client(action.clientId)
+                    ?: return "That client is gone."
+                repository.updateClient(client, clientDraft(client, action.previous))
+                "Removed that note for ${action.clientName}."
+            }
+        }
+    }
+
+    /** Add a dated note to a client's existing notes. */
+    private suspend fun addNote(transcript: String): String {
+        val clients = repository.observeClients().first()
+        val match = Regex(
+            "\\bnote\\s+(?:for|to|about|that)\\s+(.+)",
+            RegexOption.IGNORE_CASE,
+        ).find(transcript) ?: return "What should I note?"
+        val body = match.groupValues[1]
+        val client = clients.firstOrNull { matches(it.name, body.lowercase()) }
+            ?: return "Which client is that note for?"
+        // "note for the Smiths: gate sticks" keeps the colon body; otherwise
+        // strip the client's own name so it is not read back as the note.
+        val withoutName = body.replaceFirst(
+            Regex(Regex.escape(client.name), RegexOption.IGNORE_CASE),
+            " ",
+        )
+        val note = (if (body.contains(':')) body.substringAfter(':') else withoutName)
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .trimStart(':','-','–','—',',')
+            .trim()
+            .replaceFirst(Regex("^(?:that|about|to|the)\\s+", RegexOption.IGNORE_CASE), "")
+            .trim()
+        if (note.isBlank() || note.equals(client.name, ignoreCase = true)) {
+            return "What should I note for ${client.name}?"
+        }
+        val previous = client.notes
+        val combined = buildString {
+            previous?.trim()?.takeIf { it.isNotEmpty() }?.let { append(it).append('\n') }
+            append(LocalDate.now()).append(": ").append(note)
+        }
+        repository.updateClient(client, clientDraft(client, combined))
+        lastUndo = Undo.Note(client.id, previous, client.name)
+        return "Noted for ${client.name}."
+    }
+
+    private fun clientDraft(client: Client, notes: String?) = ClientDraft(
+        name = client.name,
+        address = client.address,
+        phone = client.phone,
+        email = client.email,
+        notes = notes,
+        billingMode = client.billingMode,
+        hourlyRate = client.hourlyRate,
+        fixedPrice = client.fixedPrice,
+        paymentReminders = client.paymentReminders,
+    )
+
+    private suspend fun unbilled(): String {
+        val clients = repository.observeClients().first()
+        val groups = repository.observeVisits().first()
+            .filter { !it.billed && !it.missed }
+            .groupBy { it.clientId }
+            .map { (id, rows) -> Triple(id, rows.size, rows.sumOf { it.amount }) }
+            .sortedByDescending { it.third }
+        if (groups.isEmpty()) return "Nothing is waiting to be invoiced."
+        val names = groups.take(3).joinToString { (id, count, total) ->
+            val name = clients.firstOrNull { it.id == id }?.name ?: "a client"
+            "$name ${money(total)} ($count ${if (count == 1) "visit" else "visits"})"
+        }
+        val more = if (groups.size > 3) ", and ${groups.size - 3} more" else ""
+        return "${groups.size} clients with unbilled work: $names$more."
+    }
+
+    private suspend fun clientList(): String {
+        val clients = repository.observeClients().first()
+            .filter { it.active }
+            .sortedBy { it.name }
+        if (clients.isEmpty()) return "No clients yet."
+        val names = clients.take(12).joinToString { it.name }
+        val more = if (clients.size > 12) ", and ${clients.size - 12} more" else ""
+        return "${clients.size} clients: $names$more."
+    }
+
+    private suspend fun invoiceStatus(text: String): String {
+        val client = repository.observeClients().first()
+            .firstOrNull { matches(it.name, text) }
+            ?: return "Which client's invoice?"
+        val latest = repository.observeInvoices().first()
+            .filter { it.clientId == client.id }
+            .maxByOrNull { parseDate(it.issueDate) ?: LocalDate.MIN }
+            ?: return "I have no invoices for ${client.name}."
+        val status = when (latest.status) {
+            "paid" -> "is paid"
+            "draft" -> "is still a draft"
+            "sent" -> "has been sent"
+            else -> "is ${latest.status}"
+        }
+        val due = latest.dueDate
+            ?.let { parseDate(it)?.formatDayMonth() }
+            ?.let { " It was due $it." }
+            .orEmpty()
+        return "${client.name}'s latest invoice ${latest.number} for " +
+            "${money(latest.total)} $status.$due"
+    }
+
+    private suspend fun nextJobForClient(text: String): String {
+        val client = repository.observeClients().first()
+            .firstOrNull { matches(it.name, text) }
+            ?: return "Which client?"
+        val now = Instant.now()
+        val next = scheduledJobs()
+            .firstOrNull { (job, starts) -> job.clientId == client.id && !starts.isBefore(now) }
+            ?: return "Nothing else is booked for ${client.name}."
+        val starts = next.second
+        val whenText = if (starts.localDate() == LocalDate.now()) {
+            "today at ${starts.formatTime()}"
+        } else {
+            "${starts.formatWeekday()} at ${starts.formatTime()}"
+        }
+        return "${client.name} is next booked $whenText."
+    }
+
+    private suspend fun todayEarnings(): String {
+        val today = LocalDate.now()
+        val visits = repository.observeVisits().first().filter { visit ->
+            !visit.missed && parseDate(visit.visitDate) == today
+        }
+        if (visits.isEmpty()) return "Nothing logged today."
+        return "Today: ${money(visits.sumOf { it.amount })} from ${visits.size} visits."
     }
 
     private suspend fun whoOwesMe(text: String): String {

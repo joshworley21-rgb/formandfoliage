@@ -212,20 +212,29 @@ deliberately left on the web for now. The smaller known gaps:
   llama.cpp AAR were removed in the audit: the model was never on the runtime
   path and cost a 469 MB download, and the rules plus cloud cover every
   command.
-- **Local actions**: `VoiceActionRunner` answers "what's next" (next booked
-  job), "where's my next job" (its address), "what have I got on" for today,
-  tomorrow, a weekday, this week or next week (booked jobs in that range,
-  straight from the Room cache), "mark Smiths done" (completes that client's
-  next scheduled job at its booked duration), "who owes me" (unpaid invoice
-  totals by client, or one client when named), "what have I earned this week"
-  / "last month", "how many hours this week", "when did I last visit Smiths",
-  "Smiths' phone number/address", "who's my best client", then speaks the
-  result. Two commands joined by "then", "and then" or "and" (when both sides
-  are commands) run in order and produce one combined reply. A command missing a slot — "log two hours"
-  with no client, or "log Smiths" with no hours — is remembered and completed
-  by the next sentence ("two and a half"), so the conversation takes two
-  turns instead of failing. Client names are matched with a one-letter
-  tolerance for names of five letters or more.
+- **Local actions**: `VoiceActionRunner` answers the diary and money
+  questions straight from the Room cache — "what's next" (next booked job),
+  "where's my next job" (its address), "what have I got on" for today,
+  tomorrow, a weekday, this week or next week, "when is Smiths next in" (that
+  client's next booking), "mark Smiths done", "who owes me" (unpaid invoice
+  totals by client, or one client when named), "has Smiths' invoice been
+  paid", "what's ready to invoice" (unbilled work by client), "what have I
+  earned this week" / "last month" / "today", "how many hours this week",
+  "when did I last visit Smiths", "Smiths' phone number/address", "who's my
+  best client", "who are my clients", and "note for Smiths that the gate
+  sticks" (a dated line appended to their notes). Two commands joined by
+  "then", "and then" or "and" (when both sides are commands) run in order and
+  produce one combined reply. A command missing a slot — "log two hours" with
+  no client, or "log Smiths" with no hours — is remembered and completed by
+  the next sentence ("two and a half"), so the conversation takes two turns
+  instead of failing. Client names are matched with a one-letter tolerance
+  for names of five letters or more.
+- **Confirmation and undo**: "mark Smiths done" changes money, so the
+  assistant asks "Mark Smiths's job done, three hours? Say yes to confirm."
+  Only yes/no completes it; anything else cancels and is handled as a new
+  command. After a logged visit or client note, "undo" / "undo that" /
+  "scratch that" reverses it (the visit is deleted, the note restored). Both
+  run before the classifier, so the pending action cannot be lost.
 - **Memory and business context**: before each sentence the assistant is given
   a compact snapshot — business name and VAT, today's date, up to 30 client
   names, the next five jobs, what is owed, this week's takings and anything

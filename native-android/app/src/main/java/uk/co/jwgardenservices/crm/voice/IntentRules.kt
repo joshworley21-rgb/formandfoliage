@@ -1,8 +1,8 @@
 package uk.co.jwgardenservices.crm.voice
 
 /**
- * The deterministic fallback used when no GGUF model is installed, or when it
- * returns something that does not fit the schema.
+ * The deterministic fallback used when a sentence is not sent to the cloud,
+ * or when the cloud returns something that does not fit the schema.
  *
  * It is deliberately rule-based and boring: it must never invent a client or
  * an amount. It lives in its own file so the evaluation set can score it on a
@@ -15,6 +15,38 @@ object IntentRules {
     fun classify(transcript: String): IntentResult {
         val text = transcript.lowercase()
         val kind = when {
+            text.containsAny("note for", "add a note", "note that", "make a note") ->
+                SpokenIntent.AddNote
+
+            text.containsAny(
+                "ready to invoice",
+                "what's unbilled",
+                "whats unbilled",
+                "anything to invoice",
+                "who can i invoice",
+                "unbilled visits",
+            ) -> SpokenIntent.Unbilled
+
+            text.containsAny("who are my clients", "list my clients", "client list") ||
+                text.trim() == "my clients" -> SpokenIntent.ClientList
+
+            text.containsAny("next job for", "next booking for") ||
+                ((text.contains("when is") || text.contains("when's")) &&
+                    text.contains("next") &&
+                    !text.containsAny("my next", "next job", "next appointment", "next visit")) ->
+                SpokenIntent.NextJobForClient
+
+            text.containsAny(
+                "earn today",
+                "earned today",
+                "made today",
+                "takings today",
+                "today's takings",
+                "today's earnings",
+                "taken today",
+                "took today",
+            ) -> SpokenIntent.TodayEarnings
+
             text.containsAny("best client", "top client", "biggest client") ->
                 SpokenIntent.BestClient
 
@@ -49,7 +81,14 @@ object IntentRules {
                 text.containsAny("earn", "made", "make", "taken", "income") ->
                 SpokenIntent.MonthEarnings
 
-            text.containsAny("owe me", "owes", "owed", "unpaid", "outstanding", "invoice", "been paid") ->
+            text.containsAny("invoice status", "invoice been paid", "invoice paid", "been paid") ||
+                Regex(
+                    "\\b(?:has|have|did)\\s+(?:the\\s+|my\\s+)?[a-z0-9'& ]+\\s+(?:paid|pay)\\b",
+                    RegexOption.IGNORE_CASE,
+                ).containsMatchIn(text) ->
+                SpokenIntent.InvoiceStatus
+
+            text.containsAny("owe me", "owes", "owed", "unpaid", "outstanding", "invoice") ->
                 SpokenIntent.WhoOwesMe
             text.containsAny("earn", "earned", "earnings", "takings", "taken this week", "made this week", "make this week", "income") ->
                 SpokenIntent.WeeklyEarnings
@@ -127,7 +166,13 @@ object IntentRules {
         SpokenIntent.CheckSchedule,
         SpokenIntent.NextJob,
         SpokenIntent.WhoOwesMe,
-        SpokenIntent.WeeklyEarnings -> true
+        SpokenIntent.WeeklyEarnings,
+        SpokenIntent.AddNote,
+        SpokenIntent.Unbilled,
+        SpokenIntent.ClientList,
+        SpokenIntent.InvoiceStatus,
+        SpokenIntent.NextJobForClient,
+        SpokenIntent.TodayEarnings -> true
 
         else -> false
     }

@@ -54,6 +54,14 @@ class IntentRulesTest {
         Case("when did I last visit the Smiths", SpokenIntent.LastVisit),
         Case("who's my best client", SpokenIntent.BestClient),
 
+        Case("note for the Smiths that the gate sticks", SpokenIntent.AddNote),
+        Case("make a note about the Browns' dog", SpokenIntent.AddNote),
+        Case("what's ready to invoice", SpokenIntent.Unbilled),
+        Case("who are my clients", SpokenIntent.ClientList),
+        Case("has the Smiths' invoice been paid", SpokenIntent.InvoiceStatus),
+        Case("when is the Smiths next in", SpokenIntent.NextJobForClient),
+        Case("what have I taken today", SpokenIntent.TodayEarnings),
+
         Case("how much for forty square metres of turf", SpokenIntent.Quote, cloud = true),
         Case("price up a hedge trim for Mrs Jones", SpokenIntent.Quote, cloud = true),
         Case("what's the weather tomorrow", SpokenIntent.Other, cloud = true),
