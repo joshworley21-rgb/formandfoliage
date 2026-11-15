@@ -107,6 +107,7 @@ class RemindersTest {
         )
         assertFalse(summary.isEmpty)
         assertEquals(1, summary.overdue.size)
-        assertTrue(summary.unbilledVisits.isNotEmpty())
+        // One unbilled visit is not enough to nudge for an invoice.
+        assertTrue(summary.unbilledVisits.isEmpty())
     }
 }
