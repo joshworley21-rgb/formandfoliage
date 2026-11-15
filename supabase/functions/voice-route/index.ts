@@ -111,8 +111,9 @@ const TOOLS = [
 ];
 
 const INTENT_PROMPT = `Convert one spoken command from a UK gardener into a single JSON object.
-Choose intent from: log_hours, check_schedule, next_job, mark_job_done, who_owes_me,
-weekly_earnings, quote, other.
+Choose intent from: log_hours, check_schedule, next_job, next_job_address, mark_job_done,
+who_owes_me, weekly_earnings, month_earnings, hours_this_week, client_info, last_visit,
+best_client, quote, other.
 Use requires_cloud true only when the answer needs live or external data (material
 prices, supplier rates, a dynamic quote, weather, traffic) or when the sentence is
 conversation the app cannot answer from its own records. Local commands — hours,
@@ -133,9 +134,15 @@ const INTENT_SCHEMA = {
         "log_hours",
         "check_schedule",
         "next_job",
+        "next_job_address",
         "mark_job_done",
         "who_owes_me",
         "weekly_earnings",
+        "month_earnings",
+        "hours_this_week",
+        "client_info",
+        "last_visit",
+        "best_client",
         "quote",
         "other",
       ],

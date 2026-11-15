@@ -15,6 +15,40 @@ object IntentRules {
     fun classify(transcript: String): QwenIntentEngine.Intent {
         val text = transcript.lowercase()
         val kind = when {
+            text.containsAny("best client", "top client", "biggest client") ->
+                QwenIntentEngine.Kind.BestClient
+
+            text.containsAny("last visit", "last saw", "when did i last", "last time i saw", "when was i last") ->
+                QwenIntentEngine.Kind.LastVisit
+
+            text.containsAny(
+                "where's my next",
+                "where is my next",
+                "next job address",
+                "address for my next",
+                "address of my next",
+                "address for the next",
+            ) -> QwenIntentEngine.Kind.NextJobAddress
+
+            text.containsAny(
+                "phone number",
+                "what's their number",
+                "contact details",
+                "email address",
+                "what's the address",
+                "address for",
+                "email for",
+                "phone for",
+            ) -> QwenIntentEngine.Kind.ClientInfo
+
+            text.containsAny("hours this week", "hours today", "hours have i worked") ||
+                (text.containsAny("how many hours") && text.containsAny("this week", "today")) ->
+                QwenIntentEngine.Kind.HoursThisWeek
+
+            text.containsAny("last month", "this month") &&
+                text.containsAny("earn", "made", "make", "taken", "income") ->
+                QwenIntentEngine.Kind.MonthEarnings
+
             text.containsAny("owe me", "owes", "owed", "unpaid", "outstanding", "invoice", "been paid") ->
                 QwenIntentEngine.Kind.WhoOwesMe
             text.containsAny("earn", "earned", "earnings", "takings", "taken this week", "made this week", "make this week", "income") ->

@@ -8,6 +8,7 @@ import uk.co.jwgardenservices.crm.data.repository.CrmRepository
 import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
 import uk.co.jwgardenservices.crm.domain.BillingSource
 import uk.co.jwgardenservices.crm.domain.formatDayMonth
+import uk.co.jwgardenservices.crm.domain.formatDayMonthYear
 import uk.co.jwgardenservices.crm.domain.formatShortWeekday
 import uk.co.jwgardenservices.crm.domain.formatTime
 import uk.co.jwgardenservices.crm.domain.formatWeekday
@@ -18,10 +19,12 @@ import uk.co.jwgardenservices.crm.domain.parseDate
 import uk.co.jwgardenservices.crm.domain.parseSpokenNumber
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
 import uk.co.jwgardenservices.crm.domain.priceVisit
+import uk.co.jwgardenservices.crm.domain.topClients
 import uk.co.jwgardenservices.crm.domain.round2
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.temporal.TemporalAdjusters
 import kotlin.math.abs
 
@@ -61,9 +64,15 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
             QwenIntentEngine.Kind.LogHours -> logHours(text)
             QwenIntentEngine.Kind.CheckSchedule -> scheduleFor(text)
             QwenIntentEngine.Kind.NextJob -> nextJob()
+            QwenIntentEngine.Kind.NextJobAddress -> nextJobAddress()
             QwenIntentEngine.Kind.MarkJobDone -> markJobDone(text)
-            QwenIntentEngine.Kind.WhoOwesMe -> whoOwesMe()
+            QwenIntentEngine.Kind.WhoOwesMe -> whoOwesMe(text)
             QwenIntentEngine.Kind.WeeklyEarnings -> weeklyEarnings()
+            QwenIntentEngine.Kind.MonthEarnings -> monthEarnings(text)
+            QwenIntentEngine.Kind.HoursThisWeek -> hoursThisWeek(text)
+            QwenIntentEngine.Kind.ClientInfo -> clientInfo(text)
+            QwenIntentEngine.Kind.LastVisit -> lastVisit(text)
+            QwenIntentEngine.Kind.BestClient -> bestClient()
             else -> null
         }
     }
@@ -233,12 +242,26 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
         return "Marked $name's job done, ${hoursLabel(hours)}."
     }
 
-    private suspend fun whoOwesMe(): String {
+    private suspend fun whoOwesMe(text: String): String {
+        val clients = repository.observeClients().first()
+        val named = clients.firstOrNull { matches(it.name, text) }
         val outstanding = repository.observeInvoices().first()
             .filter { it.status != "paid" && it.status != "draft" && it.total > 0 }
-        if (outstanding.isEmpty()) return "Nobody owes you anything. Every invoice is paid."
+            .filter { named == null || it.clientId == named.id }
 
-        val clients = repository.observeClients().first()
+        if (outstanding.isEmpty()) {
+            return if (named != null) {
+                "${named.name} doesn't owe you anything."
+            } else {
+                "Nobody owes you anything. Every invoice is paid."
+            }
+        }
+        if (named != null) {
+            val count = outstanding.size
+            return "${named.name} owes ${money(outstanding.sumOf { it.total })} across " +
+                "$count ${if (count == 1) "invoice" else "invoices"}."
+        }
+
         val byClient = outstanding
             .groupBy { it.clientId }
             .mapValues { (_, invoices) -> invoices.sumOf { it.total } }
@@ -252,6 +275,94 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
         val more = if (byClient.size > 3) ", and ${byClient.size - 3} more" else ""
         val invoices = if (outstanding.size == 1) "invoice" else "invoices"
         return "${money(total)} outstanding across ${outstanding.size} $invoices: $names$more."
+    }
+
+    private suspend fun nextJobAddress(): String {
+        val clients = repository.observeClients().first()
+        val now = Instant.now()
+        val next = scheduledJobs().firstOrNull { (_, starts) -> !starts.isBefore(now) }
+            ?: return "Nothing else is booked."
+        val client = clients.firstOrNull { it.id == next.first.clientId }
+        val name = client?.name ?: "a client"
+        val address = client?.address?.trim().orEmpty()
+        val starts = next.second
+        val whenText = if (starts.localDate() == LocalDate.now()) {
+            "today at ${starts.formatTime()}"
+        } else {
+            "${starts.formatWeekday()} at ${starts.formatTime()}"
+        }
+        return if (address.isBlank()) {
+            "Next is $name, $whenText. I have no address for them."
+        } else {
+            "Next is $name at $address, $whenText."
+        }
+    }
+
+    private suspend fun hoursThisWeek(text: String): String {
+        val today = LocalDate.now()
+        val todayOnly = text.contains("today")
+        val monday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        val from = if (todayOnly) today else monday
+        val visits = repository.observeVisits().first().filter { visit ->
+            if (visit.missed) return@filter false
+            val date = parseDate(visit.visitDate) ?: return@filter false
+            !date.isBefore(from) && !date.isAfter(today)
+        }
+        if (visits.isEmpty()) return "Nothing logged ${if (todayOnly) "today" else "this week"} yet."
+        val label = if (todayOnly) "today" else "this week"
+        return "${hoursLabel(visits.sumOf { it.hours })} $label across ${visits.size} visits."
+    }
+
+    private suspend fun monthEarnings(text: String): String {
+        val thisMonth = text.contains("this month")
+        val target = YearMonth.from(LocalDate.now()).let { if (thisMonth) it else it.minusMonths(1) }
+        val visits = repository.observeVisits().first().filter { visit ->
+            if (visit.missed) return@filter false
+            val date = parseDate(visit.visitDate) ?: return@filter false
+            YearMonth.from(date) == target
+        }
+        val label = if (thisMonth) "This month" else "Last month"
+        if (visits.isEmpty()) return "$label you haven't logged any work yet."
+        return "$label you earned ${money(visits.sumOf { it.amount })} from ${visits.size} visits."
+    }
+
+    private suspend fun clientInfo(text: String): String {
+        val client = repository.observeClients().first()
+            .firstOrNull { matches(it.name, text) }
+            ?: return "I couldn't match a client in that."
+        val details = listOfNotNull(
+            client.phone?.takeIf { it.isNotBlank() }?.let { "phone $it" },
+            client.email?.takeIf { it.isNotBlank() }?.let { "email $it" },
+            client.address?.takeIf { it.isNotBlank() }?.let { "address $it" },
+        )
+        return if (details.isEmpty()) {
+            "I have no contact details for ${client.name}."
+        } else {
+            "${client.name}: ${details.joinToString(", ")}."
+        }
+    }
+
+    private suspend fun lastVisit(text: String): String {
+        val client = repository.observeClients().first()
+            .firstOrNull { matches(it.name, text) }
+            ?: return "I couldn't match a client in that."
+        val last = repository.observeVisits().first()
+            .filter { it.clientId == client.id && !it.missed }
+            .mapNotNull { visit -> parseDate(visit.visitDate)?.let { it to visit } }
+            .maxByOrNull { it.first }
+            ?: return "I have no visits logged for ${client.name}."
+        return "Last visit to ${client.name} was ${last.first.formatDayMonthYear()}, " +
+            "${hoursLabel(last.second.hours)}."
+    }
+
+    private suspend fun bestClient(): String {
+        val invoices = repository.observeInvoices().first()
+        val since = LocalDate.now().minusYears(1)
+        val top = topClients(invoices, since, limit = 1).firstOrNull()
+            ?: return "No invoiced work yet."
+        val name = repository.observeClients().first()
+            .firstOrNull { it.id == top.clientId }?.name ?: "A client"
+        return "$name is your best client, ${money(top.total)} in the last year."
     }
 
     private suspend fun weeklyEarnings(): String {

@@ -43,9 +43,15 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
         LogHours("log_hours"),
         CheckSchedule("check_schedule"),
         NextJob("next_job"),
+        NextJobAddress("next_job_address"),
         MarkJobDone("mark_job_done"),
         WhoOwesMe("who_owes_me"),
         WeeklyEarnings("weekly_earnings"),
+        MonthEarnings("month_earnings"),
+        HoursThisWeek("hours_this_week"),
+        ClientInfo("client_info"),
+        LastVisit("last_visit"),
+        BestClient("best_client"),
         Quote("quote"),
         Other("other"),
     }
@@ -160,9 +166,11 @@ class QwenIntentEngine(private val context: Context) : AutoCloseable {
         return buildString {
             appendLine("You convert a gardener's spoken command into one JSON object and nothing else.")
             appendLine("Intents: log_hours (time worked), check_schedule (today, diary),")
-            appendLine("next_job (next appointment or who is next), mark_job_done (finish a job),")
-            appendLine("who_owes_me (unpaid or outstanding invoices),")
-            appendLine("weekly_earnings (what this week has earned),")
+            appendLine("next_job (next appointment or who is next), next_job_address (where it is),")
+            appendLine("mark_job_done (finish a job), who_owes_me (unpaid invoices, optionally for one client),")
+            appendLine("weekly_earnings (what this week has earned), month_earnings (this or last month),")
+            appendLine("hours_this_week (time worked today or this week), client_info (phone, address, email),")
+            appendLine("last_visit (when a client was last seen), best_client (top client),")
             appendLine("quote (price or quote), other (anything else).")
             appendLine("requires_cloud is true when the answer needs live or external data:")
             appendLine("current material prices, supplier rates, a dynamic quote or estimate,")

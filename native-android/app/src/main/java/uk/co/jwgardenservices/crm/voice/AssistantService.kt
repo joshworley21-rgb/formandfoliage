@@ -280,6 +280,27 @@ class AssistantService : Service() {
     /** Classify one finished sentence and either act locally or ask the cloud. */
     private suspend fun answerTurn(text: String) {
         val started = System.currentTimeMillis()
+
+        // "log four hours for Smiths, then mark Smiths done" is two actions.
+        // Run the recognised parts in order and speak one combined reply. This
+        // is free and local by design; nothing multi-step goes to the cloud.
+        val parts = splitMultiCommand(text)
+        if (parts.size > 1) {
+            val replies = mutableListOf<String>()
+            for (part in parts) {
+                val intent = IntentRules.classify(part)
+                if (intent.intent == QwenIntentEngine.Kind.Other || intent.requiresCloud) continue
+                val reply = runCatching { actions.run(part, intent) }.getOrNull() ?: continue
+                replies += reply
+                if (reply.endsWith("?")) break
+            }
+            if (replies.isNotEmpty()) {
+                CrashLog.note(this, TAG, "multi-step: ${replies.size} in ${System.currentTimeMillis() - started}ms")
+                say(replies.joinToString(" "))
+                return
+            }
+        }
+
         val context = businessContext()
 
         // 1. Rules: the common commands are instant and free. A date word
@@ -388,6 +409,30 @@ class AssistantService : Service() {
             .getOrNull()
         CrashLog.note(this, TAG, "action reply: ${executed ?: "none"}")
         say(executed ?: confirmationFor(intent))
+    }
+
+    /**
+     * Split a sentence into independent commands. "and then", "then" and ";"
+     * are explicit. A plain "and" only splits when both sides look like a
+     * command, so "Louisa and George" stays one client name.
+     */
+    private fun splitMultiCommand(text: String): List<String> {
+        val strong = text.split(Regex("\\b(?:and then|then)\\b|;", RegexOption.IGNORE_CASE))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        if (strong.size > 1) return strong
+
+        val and = text.split(Regex("\\s+and\\s+", RegexOption.IGNORE_CASE))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        if (and.size in 2..3 && and.all { looksLikeCommand(it) }) return and
+        return listOf(text)
+    }
+
+    private fun looksLikeCommand(part: String): Boolean {
+        if (part.split(Regex("\\s+")).size < 2) return false
+        val intent = IntentRules.classify(part)
+        return intent.intent != QwenIntentEngine.Kind.Other && !intent.requiresCloud
     }
 
     /** A few free replies so greetings are not answered with a help list. */
@@ -597,6 +642,12 @@ private fun confirmationFor(intent: QwenIntentEngine.Intent): String {
             if (topic.isEmpty()) "Hours logged." else "Logged your hours for $topic."
         QwenIntentEngine.Kind.CheckSchedule -> "Checking your schedule."
         QwenIntentEngine.Kind.NextJob -> "Checking your next job."
+        QwenIntentEngine.Kind.NextJobAddress -> "Checking where your next job is."
+        QwenIntentEngine.Kind.MonthEarnings -> "Checking this month's earnings."
+        QwenIntentEngine.Kind.HoursThisWeek -> "Checking your hours."
+        QwenIntentEngine.Kind.ClientInfo -> "Looking up that client."
+        QwenIntentEngine.Kind.LastVisit -> "Checking that client's last visit."
+        QwenIntentEngine.Kind.BestClient -> "Checking your best client."
         QwenIntentEngine.Kind.MarkJobDone ->
             if (topic.isEmpty()) "Marking that job done." else "Marking the job for $topic done."
         QwenIntentEngine.Kind.WhoOwesMe -> "Checking who owes you."

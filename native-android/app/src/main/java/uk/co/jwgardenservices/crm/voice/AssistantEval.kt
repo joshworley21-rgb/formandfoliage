@@ -108,6 +108,14 @@ object AssistantEval {
         Case("price up a hedge trim for Mrs Jones", QwenIntentEngine.Kind.Quote, cloud = true),
         Case("what's the going rate for bark", QwenIntentEngine.Kind.Quote, cloud = true),
 
+        // New read-only business questions.
+        Case("what's the Smiths' phone number", QwenIntentEngine.Kind.ClientInfo),
+        Case("when did I last visit the Smiths", QwenIntentEngine.Kind.LastVisit),
+        Case("how many hours have I worked this week", QwenIntentEngine.Kind.HoursThisWeek),
+        Case("how much did I earn last month", QwenIntentEngine.Kind.MonthEarnings),
+        Case("who's my best client", QwenIntentEngine.Kind.BestClient),
+        Case("where's my next job", QwenIntentEngine.Kind.NextJobAddress),
+
         // Small talk and live data.
         Case("what's the weather tomorrow", QwenIntentEngine.Kind.Other, cloud = true),
         Case("tell me a joke", QwenIntentEngine.Kind.Other),
