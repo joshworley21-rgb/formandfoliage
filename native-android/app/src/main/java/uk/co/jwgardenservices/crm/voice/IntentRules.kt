@@ -12,14 +12,14 @@ object IntentRules {
 
     private const val MAX_TOPIC = 120
 
-    fun classify(transcript: String): QwenIntentEngine.Intent {
+    fun classify(transcript: String): IntentResult {
         val text = transcript.lowercase()
         val kind = when {
             text.containsAny("best client", "top client", "biggest client") ->
-                QwenIntentEngine.Kind.BestClient
+                SpokenIntent.BestClient
 
             text.containsAny("last visit", "last saw", "when did i last", "last time i saw", "when was i last") ->
-                QwenIntentEngine.Kind.LastVisit
+                SpokenIntent.LastVisit
 
             text.containsAny(
                 "where's my next",
@@ -28,7 +28,7 @@ object IntentRules {
                 "address for my next",
                 "address of my next",
                 "address for the next",
-            ) -> QwenIntentEngine.Kind.NextJobAddress
+            ) -> SpokenIntent.NextJobAddress
 
             text.containsAny(
                 "phone number",
@@ -39,20 +39,20 @@ object IntentRules {
                 "address for",
                 "email for",
                 "phone for",
-            ) -> QwenIntentEngine.Kind.ClientInfo
+            ) -> SpokenIntent.ClientInfo
 
             text.containsAny("hours this week", "hours today", "hours have i worked") ||
                 (text.containsAny("how many hours") && text.containsAny("this week", "today")) ->
-                QwenIntentEngine.Kind.HoursThisWeek
+                SpokenIntent.HoursThisWeek
 
             text.containsAny("last month", "this month") &&
                 text.containsAny("earn", "made", "make", "taken", "income") ->
-                QwenIntentEngine.Kind.MonthEarnings
+                SpokenIntent.MonthEarnings
 
             text.containsAny("owe me", "owes", "owed", "unpaid", "outstanding", "invoice", "been paid") ->
-                QwenIntentEngine.Kind.WhoOwesMe
+                SpokenIntent.WhoOwesMe
             text.containsAny("earn", "earned", "earnings", "takings", "taken this week", "made this week", "make this week", "income") ->
-                QwenIntentEngine.Kind.WeeklyEarnings
+                SpokenIntent.WeeklyEarnings
             text.containsAny(
                 "next job",
                 "next appointment",
@@ -60,13 +60,13 @@ object IntentRules {
                 "who's next",
                 "what's next",
                 "whats next",
-            ) -> QwenIntentEngine.Kind.NextJob
+            ) -> SpokenIntent.NextJob
             text.containsAny("mark", "finished", "complete", "completed", "done with") &&
-                !text.containsAny("how many", "hours", "hrs") -> QwenIntentEngine.Kind.MarkJobDone
+                !text.containsAny("how many", "hours", "hrs") -> SpokenIntent.MarkJobDone
             text.containsAny("hour", "hours", "hrs", "log", "worked", "work for") ->
-                QwenIntentEngine.Kind.LogHours
+                SpokenIntent.LogHours
             // Live data is never a diary lookup, even when it mentions a day.
-            text.containsAny("weather", "forecast", "traffic") -> QwenIntentEngine.Kind.Other
+            text.containsAny("weather", "forecast", "traffic") -> SpokenIntent.Other
             text.containsAny(
                 "schedule",
                 "diary",
@@ -93,16 +93,16 @@ object IntentRules {
                 "friday",
                 "saturday",
                 "sunday",
-            ) -> QwenIntentEngine.Kind.CheckSchedule
+            ) -> SpokenIntent.CheckSchedule
             text.containsAny("quote", "price", "cost", "charge", "rate", "how much") ->
-                QwenIntentEngine.Kind.Quote
-            else -> QwenIntentEngine.Kind.Other
+                SpokenIntent.Quote
+            else -> SpokenIntent.Other
         }
 
         // Only a live quote/pricing question leaves the phone. Everything the
         // CRM already knows is answered locally, even when the same words
         // ("how much do they owe") sound like a price question.
-        val needsCloud = kind == QwenIntentEngine.Kind.Quote || text.containsAny(
+        val needsCloud = kind == SpokenIntent.Quote || text.containsAny(
             "weather",
             "forecast",
             "traffic",
@@ -113,7 +113,7 @@ object IntentRules {
             "website",
             "online",
         )
-        return QwenIntentEngine.Intent(kind, transcript.take(MAX_TOPIC), needsCloud)
+        return IntentResult(kind, transcript.take(MAX_TOPIC), needsCloud)
     }
 
     private fun String.containsAny(vararg needles: String): Boolean = needles.any { contains(it) }
@@ -122,12 +122,12 @@ object IntentRules {
      * commands do not wait for the language model. Mark-done and quote are
      * excluded: "did you finish the quote?" is too easy to misread.
      */
-    fun isConfident(kind: QwenIntentEngine.Kind): Boolean = when (kind) {
-        QwenIntentEngine.Kind.LogHours,
-        QwenIntentEngine.Kind.CheckSchedule,
-        QwenIntentEngine.Kind.NextJob,
-        QwenIntentEngine.Kind.WhoOwesMe,
-        QwenIntentEngine.Kind.WeeklyEarnings -> true
+    fun isConfident(kind: SpokenIntent): Boolean = when (kind) {
+        SpokenIntent.LogHours,
+        SpokenIntent.CheckSchedule,
+        SpokenIntent.NextJob,
+        SpokenIntent.WhoOwesMe,
+        SpokenIntent.WeeklyEarnings -> true
 
         else -> false
     }

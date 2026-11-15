@@ -157,11 +157,6 @@ dependencies {
     // built by the APK workflow (Rust + NDK) into src/main/jniLibs.
     implementation("net.java.dev.jna:jna:5.17.0@aar")
 
-    // On-device intent interpretation (llama.cpp JNI, arm64-v8a). A prebuilt
-    // AAR keeps the NDK out of the build; grammar support is documented in
-    // QwenIntentEngine.kt.
-    implementation("dev.ffmpegkit-maintained:llama-android:0.1.1")
-
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
     implementation(libs.androidx.exifinterface)

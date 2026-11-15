@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
  * Hybrid fallback for the few questions an offline assistant cannot answer:
  * live material prices, supplier data and dynamic quote calculations.
  *
- * Qwen flags those turns with `requires_cloud: true`; the Assistant service
+ * The rules or the cloud classifier flag those turns with `requires_cloud`;
  * then speaks "Checking online rates…" and calls [route], which posts the
  * transcript to the `voice-route` Edge Function. The OpenAI key lives in that
  * function's secrets, never in the APK, and the function executes the two
@@ -64,7 +64,7 @@ class OpenAiCloudRouter(
     /**
      * Ask the cloud model to handle [query]. Returns a short spoken answer.
      *
-     * [context] is the same business snapshot the local model sees, so the
+     * [context] is the same business snapshot the rules see, so the
      * cloud answer can talk about the owner's clients, diary and memories
      * rather than generic advice. Throws [IOException] on network/API failure
      * so the caller can apologise out loud.
@@ -122,13 +122,13 @@ class OpenAiCloudRouter(
      *
      * This exists because the on-device 0.5B model can take tens of seconds on
      * a phone CPU. A cloud round trip is ~0.5-1 s and much more accurate, so
-     * it is used whenever online answers are allowed; the local model stays
+     * it is used whenever online answers are allowed;
      * as the offline fallback.
      *
      * Returns null on any failure so the caller can fall back.
      */
     data class CloudReply(
-        val intent: QwenIntentEngine.Intent?,
+        val intent: IntentResult?,
         val answer: String,
     )
 
@@ -175,9 +175,9 @@ class OpenAiCloudRouter(
                 onEvent("intent: unreadable JSON")
                 return@withContext null
             }
-            val kind = QwenIntentEngine.Kind.entries.firstOrNull { it.wire == parsed.intent }
+            val kind = SpokenIntent.entries.firstOrNull { it.wire == parsed.intent }
             val intent = kind?.let {
-                QwenIntentEngine.Intent(
+                IntentResult(
                     intent = it,
                     clientOrTopic = parsed.clientOrTopic.take(120),
                     requiresCloud = parsed.requiresCloud,

@@ -35,7 +35,7 @@ import uk.co.jwgardenservices.crm.core.CrashLog
 /**
  * Keeps the Assistant microphone alive as a foreground service.
  *
- * The speech loop, the Qwen intent model and the Kokoro voice all live here,
+ * The speech loop, the rule/cloud classifier and the voice all live here,
  * so recogniser state survives config changes and the mic keeps working while
  * the screen is off. The UI only observes and never owns the audio.
  *
@@ -294,7 +294,7 @@ class AssistantService : Service() {
             val replies = mutableListOf<String>()
             for (part in parts) {
                 val intent = IntentRules.classify(part)
-                if (intent.intent == QwenIntentEngine.Kind.Other || intent.requiresCloud) continue
+                if (intent.intent == SpokenIntent.Other || intent.requiresCloud) continue
                 val reply = runCatching { actions.run(part, intent) }.getOrNull() ?: continue
                 replies += reply
                 if (reply.endsWith("?")) break
@@ -316,7 +316,7 @@ class AssistantService : Service() {
         val quick = IntentRules.classify(text)
         // "What have I got on next week" is a local diary lookup, not a reason
         // to spend a cloud call: CheckSchedule handles the date range.
-        val localTemporal = quick.intent == QwenIntentEngine.Kind.CheckSchedule && temporal
+        val localTemporal = quick.intent == SpokenIntent.CheckSchedule && temporal
         if ((!temporal || localTemporal) && IntentRules.isConfident(quick.intent) && !quick.requiresCloud) {
             CrashLog.note(
                 this,
@@ -330,7 +330,7 @@ class AssistantService : Service() {
         // 2. Exactly one optional cloud call. The function classifies and, for
         //    conversational turns, produces the answer in the same response —
         //    so a sentence never costs two requests and never waits for the
-        //    slow on-device model.
+        //    removed local model.
         if (cloudConversation) {
             val reply = runCatching {
                 coroutineScope {
@@ -391,7 +391,7 @@ class AssistantService : Service() {
                 },
             )
 
-            quick.intent == QwenIntentEngine.Kind.Other -> {
+            quick.intent == SpokenIntent.Other -> {
                 val chatter = smallTalk(text)
                 say(
                     when {
@@ -408,7 +408,7 @@ class AssistantService : Service() {
     }
 
     /** Carry out a local intent and speak its result. */
-    private suspend fun runIntent(text: String, intent: QwenIntentEngine.Intent) {
+    private suspend fun runIntent(text: String, intent: IntentResult) {
         val executed = runCatching { actions.run(text, intent) }
             .onFailure { CrashLog.note(this, TAG, "action failed: ${it.message}") }
             .getOrNull()
@@ -437,7 +437,7 @@ class AssistantService : Service() {
     private fun looksLikeCommand(part: String): Boolean {
         if (part.split(Regex("\\s+")).size < 2) return false
         val intent = IntentRules.classify(part)
-        return intent.intent != QwenIntentEngine.Kind.Other && !intent.requiresCloud
+        return intent.intent != SpokenIntent.Other && !intent.requiresCloud
     }
 
     /** A few free replies so greetings are not answered with a help list. */
@@ -640,25 +640,25 @@ class AssistantService : Service() {
 }
 
 /** Short spoken confirmation for a classified command. */
-private fun confirmationFor(intent: QwenIntentEngine.Intent): String {
+private fun confirmationFor(intent: IntentResult): String {
     val topic = intent.clientOrTopic.trim()
     return when (intent.intent) {
-        QwenIntentEngine.Kind.LogHours ->
+        SpokenIntent.LogHours ->
             if (topic.isEmpty()) "Hours logged." else "Logged your hours for $topic."
-        QwenIntentEngine.Kind.CheckSchedule -> "Checking your schedule."
-        QwenIntentEngine.Kind.NextJob -> "Checking your next job."
-        QwenIntentEngine.Kind.NextJobAddress -> "Checking where your next job is."
-        QwenIntentEngine.Kind.MonthEarnings -> "Checking this month's earnings."
-        QwenIntentEngine.Kind.HoursThisWeek -> "Checking your hours."
-        QwenIntentEngine.Kind.ClientInfo -> "Looking up that client."
-        QwenIntentEngine.Kind.LastVisit -> "Checking that client's last visit."
-        QwenIntentEngine.Kind.BestClient -> "Checking your best client."
-        QwenIntentEngine.Kind.MarkJobDone ->
+        SpokenIntent.CheckSchedule -> "Checking your schedule."
+        SpokenIntent.NextJob -> "Checking your next job."
+        SpokenIntent.NextJobAddress -> "Checking where your next job is."
+        SpokenIntent.MonthEarnings -> "Checking this month's earnings."
+        SpokenIntent.HoursThisWeek -> "Checking your hours."
+        SpokenIntent.ClientInfo -> "Looking up that client."
+        SpokenIntent.LastVisit -> "Checking that client's last visit."
+        SpokenIntent.BestClient -> "Checking your best client."
+        SpokenIntent.MarkJobDone ->
             if (topic.isEmpty()) "Marking that job done." else "Marking the job for $topic done."
-        QwenIntentEngine.Kind.WhoOwesMe -> "Checking who owes you."
-        QwenIntentEngine.Kind.WeeklyEarnings -> "Checking this week's earnings."
-        QwenIntentEngine.Kind.Quote ->
+        SpokenIntent.WhoOwesMe -> "Checking who owes you."
+        SpokenIntent.WeeklyEarnings -> "Checking this week's earnings."
+        SpokenIntent.Quote ->
             if (topic.isEmpty()) "Preparing your quote." else "Preparing a quote for $topic."
-        QwenIntentEngine.Kind.Other -> "I can log hours, check your diary or tell you who owes you."
+        SpokenIntent.Other -> "I can log hours, check your diary or tell you who owes you."
     }
 }

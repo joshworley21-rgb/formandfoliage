@@ -70,7 +70,7 @@ import uk.co.jwgardenservices.crm.voice.SherpaSpeechService
  * The Assistant tab, laid out like a phone call.
  *
  * Joining the tab connects (or rejoins) the foreground [AssistantService],
- * which owns the recording loop, endpoint detection, the Qwen intent model and
+ * which owns the recording loop, endpoint detection, the command classifier and
  * Kokoro playback. The service is not stopped when the screen leaves: the call
  * stays connected while the app is open, the microphone pauses while the user
  * is elsewhere, and the red button hangs up. That is what stops the speech

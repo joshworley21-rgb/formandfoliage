@@ -2,15 +2,12 @@ package uk.co.jwgardenservices.crm.ui.voice
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -50,7 +47,6 @@ import uk.co.jwgardenservices.crm.ui.common.PageHeader
 import uk.co.jwgardenservices.crm.ui.common.SectionCard
 import uk.co.jwgardenservices.crm.ui.common.ShareText
 import uk.co.jwgardenservices.crm.voice.AssistantContext
-import uk.co.jwgardenservices.crm.voice.AssistantEval
 import uk.co.jwgardenservices.crm.voice.AssistantMemory
 import uk.co.jwgardenservices.crm.voice.AssistantPreferences
 import uk.co.jwgardenservices.crm.voice.KokoroHqDownloader
@@ -60,16 +56,10 @@ import uk.co.jwgardenservices.crm.voice.MicSource
 import uk.co.jwgardenservices.crm.voice.PhononDownloader
 import uk.co.jwgardenservices.crm.voice.PiperVoice
 import uk.co.jwgardenservices.crm.voice.PiperVoiceDownloader
-import uk.co.jwgardenservices.crm.voice.QwenEngine
-import uk.co.jwgardenservices.crm.voice.QwenModelDownloader
-import java.io.File
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 /**
  * The offline assistant's own settings: Kokoro voice profile and the contents
- * of the app's internal `files/models` folder, where the Qwen GGUF lives.
+ * and the downloaded voice models that live in app storage.
  */
 @Composable
 fun AssistantSettingsScreen(onBack: () -> Unit) {
@@ -116,22 +106,6 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             else -> phononSaved = PhononDownloader.savedBytes(context)
         }
     }
-    val qwenState by QwenModelDownloader.state.collectAsStateWithLifecycle()
-    var qwenInstalled by remember { mutableStateOf(QwenModelDownloader.isInstalled(context)) }
-    var qwenSaved by remember { mutableLongStateOf(QwenModelDownloader.savedBytes(context)) }
-
-    LaunchedEffect(qwenState) {
-        when (qwenState) {
-            is QwenModelDownloader.State.Done -> {
-                qwenInstalled = true
-                QwenModelDownloader.clearResult()
-                qwenSaved = 0
-            }
-            is QwenModelDownloader.State.Working -> Unit
-            else -> qwenSaved = QwenModelDownloader.savedBytes(context)
-        }
-    }
-
     LaunchedEffect(hqState) {
         when (hqState) {
             is KokoroHqDownloader.State.Done -> {
@@ -145,15 +119,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         }
     }
 
-    var models by remember { mutableStateOf<List<File>>(emptyList()) }
-    var refresh by remember { mutableIntStateOf(0) }
     var crashRefresh by remember { mutableIntStateOf(0) }
     val crashReport = remember(crashRefresh) { CrashLog.read(context) }
-
-    LaunchedEffect(refresh) {
-        val dir = File(context.filesDir, "models")
-        models = dir.listFiles()?.sortedBy { it.name.lowercase() } ?: emptyList()
-    }
 
     Column(
         modifier = Modifier
@@ -166,7 +133,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
 
         PageHeader(
             title = "Assistant settings",
-            description = "Voice and local models for the offline assistant.",
+            description = "Voice and local voice models for the offline assistant.",
         )
 
         SectionCard(title = "Kokoro voice") {
@@ -406,10 +373,10 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 }
                 TextButton(
                     onClick = { scope.launch { PiperVoiceDownloader.removeUnused(context) } },
-                ) { Text("Remove old voice downloads") }
+                ) { Text("Remove old model downloads") }
                 Text(
-                    text = "Deletes packs from voices no longer offered (alan, jenny, Kitten, " +
-                        "Coqui, US highs) to free the storage.",
+                    text = "Deletes the voice packs no longer offered, their cached archives, " +
+                        "and the old on-device LLM files to free the storage.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -568,85 +535,6 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
-        SectionCard(title = "Conversation model") {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = if (qwenInstalled) {
-                        "Qwen 2.5 0.5B is installed. Sentences are matched against your clients, " +
-                            "diary and remembered facts on the phone; only open questions go online."
-                    } else {
-                        "Without a model the assistant only understands keyword patterns. Qwen 2.5 " +
-                            "0.5B (469 MB) can be downloaded once over Wi-Fi; it turns a sentence into " +
-                            "an intent and applies the next time you speak."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                val qwenWorking = qwenState as? QwenModelDownloader.State.Working
-                val qwenFailure = qwenState as? QwenModelDownloader.State.Failed
-                if (qwenWorking != null) {
-                    LinearProgressIndicator(
-                        progress = { qwenWorking.progress },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = "Downloading… ${qwenWorking.done / MEGABYTE} of " +
-                            "${qwenWorking.total / MEGABYTE} MB " +
-                            "(${(qwenWorking.progress * 100).toInt()}%)",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                if (qwenInstalled) {
-                    TextButton(
-                        onClick = {
-                            scope.launch {
-                                QwenModelDownloader.remove(context)
-                                qwenInstalled = false
-                                qwenSaved = 0
-                            }
-                        },
-                    ) { Text("Remove conversation model") }
-                } else if (qwenWorking == null) {
-                    OutlinedButton(
-                        onClick = {
-                            if (!unmetered) return@OutlinedButton
-                            QwenModelDownloader.start(context)
-                        },
-                    ) {
-                        Text(
-                            if (qwenSaved > 0) {
-                                "Resume download (${qwenSaved / MEGABYTE} MB saved)"
-                            } else {
-                                "Download conversation model (469 MB)"
-                            },
-                        )
-                    }
-                }
-                if (qwenWorking != null) {
-                    TextButton(onClick = { QwenModelDownloader.cancel() }) {
-                        Text("Cancel download")
-                    }
-                }
-                if (!unmetered && qwenWorking == null && !qwenInstalled) {
-                    Text(
-                        text = "Connect to Wi-Fi to download the model.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                qwenFailure?.let { error ->
-                    Text(
-                        text = error.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
-        }
-
         SectionCard(title = "Voice quality") {
             Column(
                 modifier = Modifier.padding(20.dp),
@@ -760,136 +648,6 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
-        SectionCard(title = "Understanding check") {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                val evalState by AssistantEval.state.collectAsStateWithLifecycle()
-                val running = evalState as? AssistantEval.State.Running
-                val finished = evalState as? AssistantEval.State.Done
-
-                Text(
-                    text = "Runs real commands — logging hours, the diary, money owed, " +
-                        "quotes — through the same classifier a call uses. Use it to see what " +
-                        "the assistant actually understands, and which phrases it misses, " +
-                        "before deciding whether a bigger model is worth it.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (!qwenInstalled) {
-                    Text(
-                        text = "No conversation model is installed, so this scores the keyword " +
-                            "rules only. Download the model above for the real number.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-                if (running == null) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { AssistantEval.start(context, full = false) }) {
-                            Text("Quick check (12)")
-                        }
-                        OutlinedButton(onClick = { AssistantEval.start(context, full = true) }) {
-                            Text("Full check (35)")
-                        }
-                    }
-                } else {
-                    LinearProgressIndicator(
-                        progress = {
-                            if (running.total > 0) running.done.toFloat() / running.total else 0f
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = "${running.done} of ${running.total} · ${running.label}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    TextButton(onClick = { AssistantEval.cancel() }) { Text("Stop") }
-                }
-                (evalState as? AssistantEval.State.Failed)?.let { failure ->
-                    Text(
-                        text = failure.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-                if (finished != null) {
-                    val passed = finished.results.count { it.passed }
-                    val average = finished.results.map { it.millis }.average().toInt()
-                    Text(
-                        text = "$passed of ${finished.results.size} understood · about $average ms each",
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(320.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        items(finished.results) { result ->
-                            Column {
-                                Text(
-                                    text = result.case.phrase,
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                                Text(
-                                    text = if (result.passed) {
-                                        "✓ ${result.actual.wire}"
-                                    } else {
-                                        "✗ heard ${result.actual.wire}, wanted ${result.case.expected.wire}"
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (result.passed) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.error
-                                    },
-                                )
-                            }
-                        }
-                    }
-                    TextButton(onClick = { AssistantEval.clear() }) { Text("Clear results") }
-                }
-            }
-        }
-
-        SectionCard(
-            title = "Local models",
-            actionLabel = "Refresh",
-            onAction = { refresh += 1 },
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "Internal storage: ${File(context.filesDir, "models").absolutePath}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (models.isEmpty()) {
-                    Text(
-                        text = "No files yet. Push a quantised Qwen GGUF with adb run-as; see the README for the exact commands.",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(220.dp),
-                        contentPadding = PaddingValues(vertical = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        items(models) { file ->
-                            ModelRow(file)
-                            HorizontalDivider()
-                        }
-                    }
-                }
-            }
-        }
-
         SectionCard(title = "Microphone") {
             Column(
                 modifier = Modifier.padding(20.dp),
@@ -951,49 +709,13 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     }
 }
 
-@Composable
-private fun ModelRow(file: File) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = file.name,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-            )
-            Text(
-                text = "${formatSize(file.length())} · ${formatDate(file.lastModified())}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
 private const val MEGABYTE = 1024L * 1024L
 
 /** Spoken by "Preview this voice". */
 private const val PREVIEW_TEXT = "Hello, this is how I sound when I read your diary."
-
-private fun formatSize(bytes: Long): String = when {
-    bytes >= 1_073_741_824 -> "%.1f GB".format(bytes / 1_073_741_824.0)
-    bytes >= 1_048_576 -> "%.1f MB".format(bytes / 1_048_576.0)
-    bytes >= 1_024 -> "%.0f KB".format(bytes / 1_024.0)
-    else -> "$bytes B"
-}
 
 private fun isUnmetered(context: Context): Boolean {
     val manager = context.getSystemService(ConnectivityManager::class.java) ?: return false
     val caps = manager.getNetworkCapabilities(manager.activeNetwork ?: return false) ?: return false
     return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
 }
-
-private fun formatDate(epochMillis: Long): String = DATE.format(
-    Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()),
-)
-
-private val DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy")

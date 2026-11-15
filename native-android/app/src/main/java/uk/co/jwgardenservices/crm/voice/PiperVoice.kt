@@ -126,6 +126,8 @@ object PiperVoiceDownloader {
             val id = file.name.removeSuffix(".tar.bz2.part").removeSuffix(".tar.bz2")
             if (id !in keep) file.delete()
         }
+        // The removed local LLM left a ~500 MB GGUF behind here.
+        File(context.filesDir, "models").deleteRecursively()
     }
 
     /** How much of an interrupted download is already on disk. */

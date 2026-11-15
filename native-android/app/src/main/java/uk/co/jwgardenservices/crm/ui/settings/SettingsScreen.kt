@@ -261,7 +261,7 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
-                        text = "Choose the Kokoro voice and check which local models are installed.",
+                        text = "Choose the voice and check which local voice models are installed.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     OutlinedButton(onClick = onOpenAssistantSettings) {

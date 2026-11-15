@@ -4,30 +4,78 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The deterministic rules are the floor: they answer every command when no
- * GGUF is installed, and they catch malformed model output. This scores them
- * against the same corpus the Settings screen uses, so a keyword change is a
- * visible improvement or regression rather than a hunch.
+ * The rules are the local floor: they answer the common commands instantly
+ * and catch malformed or missing cloud classification. This corpus is the
+ * guardrail for keyword changes, so a regression is visible rather than a
+ * hunch.
  *
- * The four paraphrases at the end of [AssistantEval.CASES] are expected to
- * miss here; the threshold leaves room for them while still failing if the
- * rules get worse.
+ * The last three are deliberate paraphrases the rules miss; the threshold
+ * leaves room for them while still failing if the rules get worse.
  */
 class IntentRulesTest {
 
+    private data class Case(
+        val phrase: String,
+        val expected: SpokenIntent,
+        val cloud: Boolean? = null,
+    )
+
+    private val cases = listOf(
+        Case("logged three hours at the Smiths yesterday", SpokenIntent.LogHours),
+        Case("four hours for Mrs Jones", SpokenIntent.LogHours),
+        Case("put two and a half hours on the Johnsons", SpokenIntent.LogHours),
+        Case("I worked six hours at the Browns", SpokenIntent.LogHours),
+        Case("how many hours did I do at the Smiths", SpokenIntent.LogHours),
+
+        Case("what's on today", SpokenIntent.CheckSchedule),
+        Case("read me my diary", SpokenIntent.CheckSchedule),
+        Case("have I got anything booked this afternoon", SpokenIntent.CheckSchedule),
+        Case("what have I got on next week", SpokenIntent.CheckSchedule),
+
+        Case("what's next", SpokenIntent.NextJob),
+        Case("who's my next job", SpokenIntent.NextJob),
+        Case("where's my next job", SpokenIntent.NextJobAddress),
+
+        Case("finished the Jones job", SpokenIntent.MarkJobDone),
+        Case("mark the Smiths job done", SpokenIntent.MarkJobDone),
+        Case("I've completed the Browns", SpokenIntent.MarkJobDone),
+
+        Case("who owes me money", SpokenIntent.WhoOwesMe),
+        Case("how much is outstanding", SpokenIntent.WhoOwesMe),
+        Case("any unpaid invoices", SpokenIntent.WhoOwesMe),
+        Case("how much does the Smiths owe me", SpokenIntent.WhoOwesMe),
+
+        Case("what have I earned this week", SpokenIntent.WeeklyEarnings),
+        Case("how much have I taken this week", SpokenIntent.WeeklyEarnings),
+        Case("how much did I earn last month", SpokenIntent.MonthEarnings),
+        Case("how many hours have I worked this week", SpokenIntent.HoursThisWeek),
+
+        Case("what's the Smiths' phone number", SpokenIntent.ClientInfo),
+        Case("when did I last visit the Smiths", SpokenIntent.LastVisit),
+        Case("who's my best client", SpokenIntent.BestClient),
+
+        Case("how much for forty square metres of turf", SpokenIntent.Quote, cloud = true),
+        Case("price up a hedge trim for Mrs Jones", SpokenIntent.Quote, cloud = true),
+        Case("what's the weather tomorrow", SpokenIntent.Other, cloud = true),
+        Case("tell me a joke", SpokenIntent.Other),
+
+        // Deliberate misses.
+        Case("clock me off at the Browns", SpokenIntent.MarkJobDone),
+        Case("what's the damage on the Smith account", SpokenIntent.WhoOwesMe),
+        Case("how are we doing this week", SpokenIntent.WeeklyEarnings),
+    )
+
     @Test
     fun `rules understand the common commands`() {
-        val results = AssistantEval.CASES.map { case ->
-            case to IntentRules.classify(case.phrase)
+        val results = cases.map { case -> case to IntentRules.classify(case.phrase) }
+        val failures = results.filter { (case, result) ->
+            result.intent != case.expected ||
+                (case.cloud != null && result.requiresCloud != case.cloud)
         }
-        val failures = results.filter { (case, intent) ->
-            intent.intent != case.expected ||
-                (case.cloud != null && intent.requiresCloud != case.cloud)
-        }
-        failures.forEach { (case, intent) ->
+        failures.forEach { (case, result) ->
             println(
                 "MISS \"${case.phrase}\" wanted ${case.expected.wire} " +
-                    "got ${intent.intent.wire} cloud=${intent.requiresCloud}",
+                    "got ${result.intent.wire} cloud=${result.requiresCloud}",
             )
         }
         val passed = results.size - failures.size

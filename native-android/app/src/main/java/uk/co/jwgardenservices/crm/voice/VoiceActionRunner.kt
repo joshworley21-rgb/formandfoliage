@@ -58,21 +58,21 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
      * when this runner cannot handle it (the caller falls back to the
      * generic confirmation).
      */
-    suspend fun run(transcript: String, intent: QwenIntentEngine.Intent): String? {
+    suspend fun run(transcript: String, intent: IntentResult): String? {
         val text = transcript.lowercase()
         return when (intent.intent) {
-            QwenIntentEngine.Kind.LogHours -> logHours(text)
-            QwenIntentEngine.Kind.CheckSchedule -> scheduleFor(text)
-            QwenIntentEngine.Kind.NextJob -> nextJob()
-            QwenIntentEngine.Kind.NextJobAddress -> nextJobAddress()
-            QwenIntentEngine.Kind.MarkJobDone -> markJobDone(text)
-            QwenIntentEngine.Kind.WhoOwesMe -> whoOwesMe(text)
-            QwenIntentEngine.Kind.WeeklyEarnings -> weeklyEarnings()
-            QwenIntentEngine.Kind.MonthEarnings -> monthEarnings(text)
-            QwenIntentEngine.Kind.HoursThisWeek -> hoursThisWeek(text)
-            QwenIntentEngine.Kind.ClientInfo -> clientInfo(text)
-            QwenIntentEngine.Kind.LastVisit -> lastVisit(text)
-            QwenIntentEngine.Kind.BestClient -> bestClient()
+            SpokenIntent.LogHours -> logHours(text)
+            SpokenIntent.CheckSchedule -> scheduleFor(text)
+            SpokenIntent.NextJob -> nextJob()
+            SpokenIntent.NextJobAddress -> nextJobAddress()
+            SpokenIntent.MarkJobDone -> markJobDone(text)
+            SpokenIntent.WhoOwesMe -> whoOwesMe(text)
+            SpokenIntent.WeeklyEarnings -> weeklyEarnings()
+            SpokenIntent.MonthEarnings -> monthEarnings(text)
+            SpokenIntent.HoursThisWeek -> hoursThisWeek(text)
+            SpokenIntent.ClientInfo -> clientInfo(text)
+            SpokenIntent.LastVisit -> lastVisit(text)
+            SpokenIntent.BestClient -> bestClient()
             else -> null
         }
     }

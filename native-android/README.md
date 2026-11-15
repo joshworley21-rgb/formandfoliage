@@ -206,22 +206,12 @@ deliberately left on the web for now. The smaller known gaps:
   `:app:downloadKokoro` downloads and extracts the Kokoro archive (SHA-256
   checked); `preBuild` depends on both, so a fresh clone needs a connection
   for its first build only.
-- **Local intent model**: each finished sentence is also classified on-device
-  by a quantised Qwen 1.5B GGUF model through the llama.android AAR
-  (`dev.ffmpegkit-maintained:llama-android:0.1.1`, llama.cpp JNI,
-  arm64-v8a). Put the model in internal storage at
-  `/data/data/uk.co.jwgardenservices.crm/files/models/` (preferred name
-  `qwen2.5-1.5b-instruct-q4_k_m.gguf`; any `.gguf` works). The result is
-  logged as JSON under the `QwenIntent` tag.
-- The JSON contract lives in `app/src/main/assets/intent.gbnf`:
-  `{ "intent": "log_hours" | "check_schedule" | "next_job" | "mark_job_done"
-  | "who_owes_me" | "weekly_earnings" | "quote" | "other",
-  "client_or_topic": "string", "requires_cloud": boolean }`.
-  The current AAR does not expose llama.cpp's grammar sampler, so the
-  grammar is enforced by prompt plus strict validation, with a deterministic
-  rule classifier as the fallback; the logged line always matches the
-  schema. Swap in a grammar-aware binding (or add the official JNI) to make
-  the constraint sampler-level.
+- **Command classifier**: the deterministic rules answer the common commands
+  instantly on the phone. Anything they cannot place goes to the optional
+  cloud classifier, or gets a short help line. The local Qwen GGUF and the
+  llama.cpp AAR were removed in the audit: the model was never on the runtime
+  path and cost a 469 MB download, and the rules plus cloud cover every
+  command.
 - **Local actions**: `VoiceActionRunner` answers "what's next" (next booked
   job), "where's my next job" (its address), "what have I got on" for today,
   tomorrow, a weekday, this week or next week (booked jobs in that range,
@@ -244,27 +234,13 @@ deliberately left on the web for now. The smaller known gaps:
   "forget everything" removes them. Facts and the last 24 turns live in a
   DataStore file (`assistant_memory`), so they survive restarts. Nothing is
   sent anywhere unless a turn goes to the cloud.
-- **Conversation model**: Settings → Conversation model downloads Qwen 2.5
-  0.5B Instruct q4_k_m (469 MB, Wi-Fi only) into `files/models/`, resumable
-  like the Kokoro voice. It is now a measurement tool rather than the runtime
-  classifier: the Understanding check runs sentences through it, and the
-  timings show why it is not used to answer live commands on this hardware.
-  Commands use the rules and the cloud classifier instead.
-- **Understanding check**: Settings → Assistant settings → Understanding check
-  runs real commands through the same classifier a call uses and lists what
-  it heard against what it should have heard, with an average latency. There
-  is a 12-phrase quick run and a 35-phrase full run; the work is
-  application-scoped, so leaving Settings does not throw it away. It scores
-  the keyword rules when no model is installed and the model once it is,
-  which is the honest way to decide whether a bigger model or fine-tuning is
-  worth the effort. `IntentRulesTest` runs the same corpus against the
-  deterministic rules on a plain JVM (32/35 today, the misses being slang).
 - **Fast path**: the deterministic rules answer the common, unambiguous
   commands (hours, diary, next job, money owed, week's takings) immediately.
   Anything else is classified by the cloud function in about a second. If the
   cloud is unavailable the rules answer, and an unrecognised sentence gets a
-  short apology — the on-device 0.5B is not on the runtime path at all: on
-  this phone it took 19 s to classify "hello", which no one will wait for.
+  short apology. There is no on-device language model: a 0.5B took 19 s to
+  classify "hello" on this phone, so it was removed rather than left as a
+  trap.
 - **Open conversation** (off by default): when the rules cannot place a
   sentence, the assistant can send it to `voice-route` with the business
   snapshot and the last six turns. The function classifies and, if the turn
@@ -288,23 +264,13 @@ deliberately left on the web for now. The smaller known gaps:
   and is only reachable by a signed-in user's token through `voice-route`.
   Without the secret, cloud-routed turns speak "I couldn't reach the online
   rates" and the local path keeps working.
-- To install the GGUF on a connected phone and watch the result:
-
-  ```
-  adb push qwen2.5-1.5b-instruct-q4_k_m.gguf /data/local/tmp/
-  adb shell run-as uk.co.jwgardenservices.crm mkdir -p files/models
-  adb shell run-as uk.co.jwgardenservices.crm \
-    cp /data/local/tmp/qwen2.5-1.5b-instruct-q4_k_m.gguf files/models/
-  adb logcat -s QwenIntent
-  ```
 - The recognizer is read from assets via `OnlineRecognizer(assetManager,
   config)`. Its endpoint detector (roughly 1.2 s of trailing silence) is what
   decides the speaker has stopped and commits the line.
-- **Settings → Voice & models** opens the assistant settings: pick one of the
-  eight British Kokoro profiles (`bf_alice` through `bm_lewis`), set the
-  speaking rate (0.80×–1.30×), preview it, and inspect everything under
-  `filesDir/models`, with size and date. Voice, rate and quality apply from
-  the next reply.
+- **Settings → Assistant settings** opens the voice controls: the Kokoro
+  profiles (`bf_alice` through `bm_lewis`), the speaking rate (0.80×–1.30×),
+  the local voices (cori, Supertonic and Phonon) and the memory/cloud
+  switches. A preview button auditions the selection.
 - **Conversation flow**: there is no extra "Got it." before local answers —
   the reply itself is spoken as soon as the action finishes. Only a
   cloud-routed turn says "Checking online rates…" first.
@@ -312,7 +278,7 @@ deliberately left on the web for now. The smaller known gaps:
   released as soon as it finishes, so a call or the van's media takes priority
   without being paused for the whole time the call is connected; losing focus
   stops Kokoro mid-sentence.
-- **Spoken confirmation with Kokoro**: once Qwen has classified the line,
+- **Spoken confirmation**: once the classifier has understood the line,
   `KokoroTts` synthesises a short reply on-device with Kokoro-82M and plays
   it at 24 kHz. The voice is `bm_fable` (speaker 25 of
   `kokoro-multi-lang-v1_0`). British voices use `lexicon-gb-en.txt` with
@@ -375,8 +341,8 @@ deliberately left on the web for now. The smaller known gaps:
   bucket when it has been published, and from the same release otherwise.
 - LiveKit, Vosk, the VPS call path, the Pipecat WebSocket session and the
   JitPack repository they needed have all been removed. Speech runs on the
-  vendored official `sherpa-onnx-1.13.8.aar` and llama.cpp comes from the
-  llama.android AAR; neither model weights nor the sherpa AAR are committed.
+  vendored official `sherpa-onnx-1.13.8.aar`; neither model weights nor the
+  AAR are committed.
 - Known limits: the recognizer is English-only, punctuation and casing are
   not restored, the first utterance waits for the Kokoro model to load
   (a few seconds), and the screen needs to stay on while listening. A
