@@ -288,7 +288,10 @@ class AssistantService : Service() {
         val lower = text.lowercase()
         val temporal = TEMPORAL_WORDS.any { lower.contains(it) }
         val quick = IntentRules.classify(text)
-        if (!temporal && IntentRules.isConfident(quick.intent) && !quick.requiresCloud) {
+        // "What have I got on next week" is a local diary lookup, not a reason
+        // to spend a cloud call: CheckSchedule handles the date range.
+        val localTemporal = quick.intent == QwenIntentEngine.Kind.CheckSchedule && temporal
+        if ((!temporal || localTemporal) && IntentRules.isConfident(quick.intent) && !quick.requiresCloud) {
             CrashLog.note(
                 this,
                 TAG,
@@ -362,13 +365,17 @@ class AssistantService : Service() {
                 },
             )
 
-            quick.intent == QwenIntentEngine.Kind.Other -> say(
-                if (cloudConversation) {
-                    "I couldn't reach the online assistant. Try again when you have signal."
-                } else {
-                    HELP_TEXT
-                },
-            )
+            quick.intent == QwenIntentEngine.Kind.Other -> {
+                val chatter = smallTalk(text)
+                say(
+                    when {
+                        chatter != null -> chatter
+                        cloudConversation ->
+                            "I couldn't reach the online assistant. Try again when you have signal."
+                        else -> HELP_TEXT
+                    },
+                )
+            }
 
             else -> runIntent(text, quick)
         }
@@ -381,6 +388,19 @@ class AssistantService : Service() {
             .getOrNull()
         CrashLog.note(this, TAG, "action reply: ${executed ?: "none"}")
         say(executed ?: confirmationFor(intent))
+    }
+
+    /** A few free replies so greetings are not answered with a help list. */
+    private fun smallTalk(text: String): String? {
+        val lower = text.lowercase().trim()
+        return when {
+            Regex("^(hi|hello|hey|good morning|good afternoon|good evening)\b")
+                .containsMatchIn(lower) -> "Hello. What can I do?"
+            lower.contains("thank") -> "Any time."
+            lower.contains("how are you") -> "All good, thanks. What do you need?"
+            lower.contains("what can you do") || lower == "help" -> HELP_TEXT
+            else -> null
+        }
     }
 
     /** The business snapshot handed to the local and cloud models. */

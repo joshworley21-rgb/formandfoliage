@@ -207,10 +207,11 @@ deliberately left on the web for now. The smaller known gaps:
   schema. Swap in a grammar-aware binding (or add the official JNI) to make
   the constraint sampler-level.
 - **Local actions**: `VoiceActionRunner` answers "what's next" (next booked
-  job), "mark Smiths done" (completes that client's next scheduled job at its
-  booked duration), "who owes me" (unpaid invoice totals by client) and
-  "what have I earned this week" (visits since Monday) straight from the Room
-  cache, then speaks the result. A command missing a slot — "log two hours"
+  job), "what have I got on" for today, tomorrow, a weekday, this week or
+  next week (booked jobs in that range, straight from the Room cache), "mark
+  Smiths done" (completes that client's next scheduled job at its booked
+  duration), "who owes me" (unpaid invoice totals by client) and "what have I
+  earned this week" (visits since Monday), then speaks the result. A command missing a slot — "log two hours"
   with no client, or "log Smiths" with no hours — is remembered and completed
   by the next sentence ("two and a half"), so the conversation takes two
   turns instead of failing. Client names are matched with a one-letter

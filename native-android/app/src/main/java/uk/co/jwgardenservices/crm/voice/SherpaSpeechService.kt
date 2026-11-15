@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -76,6 +77,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         val level: Float = 0f,
     )
 
+    /** Serialises starts: three ensureListening calls must not open three mics. */
+    private val startLock = Mutex()
+
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
@@ -121,6 +125,11 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
      * immediately if already listening; never leaves a half-started loop.
      */
     suspend fun startListening() {
+        // Several callers (onStartCommand, the bound screen, resume) can race.
+        // Without this, each opens its own AudioRecord and they steal the mic
+        // from each other; the log showed three recognition loops at once.
+        if (!startLock.tryLock()) return
+        try {
         if (released || listening) return
 
         if (recognizer == null) {
@@ -161,6 +170,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         _state.update { it.copy(phase = Phase.Listening, message = null, partial = "") }
 
         thread = Thread({ process(engine, record) }, "sherpa-asr").apply { start() }
+        } finally {
+            startLock.unlock()
+        }
     }
 
     /** Close the mic; the last words are flushed before the thread ends. */

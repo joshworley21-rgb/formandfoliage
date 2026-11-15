@@ -31,6 +31,8 @@ object IntentRules {
                 !text.containsAny("how many", "hours", "hrs") -> QwenIntentEngine.Kind.MarkJobDone
             text.containsAny("hour", "hours", "hrs", "log", "worked", "work for") ->
                 QwenIntentEngine.Kind.LogHours
+            // Live data is never a diary lookup, even when it mentions a day.
+            text.containsAny("weather", "forecast", "traffic") -> QwenIntentEngine.Kind.Other
             text.containsAny(
                 "schedule",
                 "diary",
@@ -39,6 +41,24 @@ object IntentRules {
                 "what's on",
                 "whats on",
                 "calendar",
+                "going on",
+                "have on",
+                "got on",
+                "have i got",
+                "what have i",
+                "what do i have",
+                "tomorrow",
+                "next week",
+                "this week",
+                "next month",
+                "week after",
+                "monday",
+                "tuesday",
+                "wednesday",
+                "thursday",
+                "friday",
+                "saturday",
+                "sunday",
             ) -> QwenIntentEngine.Kind.CheckSchedule
             text.containsAny("quote", "price", "cost", "charge", "rate", "how much") ->
                 QwenIntentEngine.Kind.Quote

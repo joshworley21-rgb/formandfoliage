@@ -7,6 +7,8 @@ import uk.co.jwgardenservices.crm.data.model.VisitDraft
 import uk.co.jwgardenservices.crm.data.repository.CrmRepository
 import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
 import uk.co.jwgardenservices.crm.domain.BillingSource
+import uk.co.jwgardenservices.crm.domain.formatDayMonth
+import uk.co.jwgardenservices.crm.domain.formatShortWeekday
 import uk.co.jwgardenservices.crm.domain.formatTime
 import uk.co.jwgardenservices.crm.domain.formatWeekday
 import uk.co.jwgardenservices.crm.domain.hoursLabel
@@ -57,7 +59,7 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
         val text = transcript.lowercase()
         return when (intent.intent) {
             QwenIntentEngine.Kind.LogHours -> logHours(text)
-            QwenIntentEngine.Kind.CheckSchedule -> today()
+            QwenIntentEngine.Kind.CheckSchedule -> scheduleFor(text)
             QwenIntentEngine.Kind.NextJob -> nextJob()
             QwenIntentEngine.Kind.MarkJobDone -> markJobDone(text)
             QwenIntentEngine.Kind.WhoOwesMe -> whoOwesMe()
@@ -136,19 +138,64 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
         return "Logged ${hoursLabel(hours)} for ${client.name}$whenText, ${money(draft.amount)}."
     }
 
-    private suspend fun today(): String {
-        val today = LocalDate.now()
-        val jobs = scheduledJobs()
-            .filter { (_, starts) -> starts.localDate() == today }
-        if (jobs.isEmpty()) return "Nothing booked today."
-        val clients = repository.observeClients().first()
-        val names = jobs.take(4).joinToString {
-            val time = it.second.formatTime()
-            val name = clients.firstOrNull { client -> client.id == it.first.clientId }?.name ?: "a client"
-            "$time $name"
+    /** Answer "what have I got on" for today, tomorrow, a weekday or next week. */
+    private suspend fun scheduleFor(text: String): String {
+        val range = rangeFor(text)
+        val jobs = scheduledJobs().filter { (_, starts) ->
+            val day = starts.localDate()
+            !day.isBefore(range.from) && !day.isAfter(range.to)
         }
-        val more = if (jobs.size > 4) ", and ${jobs.size - 4} more" else ""
-        return "You have ${jobs.size} ${if (jobs.size == 1) "job" else "jobs"} today: $names$more."
+        if (jobs.isEmpty()) return "Nothing booked ${range.label}."
+
+        val clients = repository.observeClients().first()
+        val names = jobs.take(6).joinToString("; ") { (job, starts) ->
+            val name = clients.firstOrNull { it.id == job.clientId }?.name ?: "a client"
+            when {
+                range.from == range.to -> "${starts.formatTime()} $name"
+                else -> "${starts.formatShortWeekday()} ${starts.formatDayMonth()} " +
+                    "at ${starts.formatTime()} $name"
+            }
+        }
+        val more = if (jobs.size > 6) ", and ${jobs.size - 6} more" else ""
+        val count = if (jobs.size == 1) "job" else "jobs"
+        return "You have ${jobs.size} $count ${range.label}: $names$more."
+    }
+
+    private data class DateRange(val from: LocalDate, val to: LocalDate, val label: String)
+
+    private fun rangeFor(text: String): DateRange {
+        val today = LocalDate.now()
+        val monday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        val nextMonday = monday.plusWeeks(1)
+        val weekday = DayOfWeek.entries.firstOrNull {
+            Regex("\\b${it.name.lowercase()}\\b").containsMatchIn(text)
+        }
+        return when {
+            "day after tomorrow" in text ->
+                DateRange(today.plusDays(2), today.plusDays(2), "the day after tomorrow")
+
+            "tomorrow" in text ->
+                DateRange(today.plusDays(1), today.plusDays(1), "tomorrow")
+
+            "next week" in text || "week after" in text ->
+                DateRange(nextMonday, nextMonday.plusDays(6), "next week")
+
+            "this week" in text ->
+                DateRange(monday, monday.plusDays(6), "this week")
+
+            "next month" in text -> {
+                val first = today.plusMonths(1).withDayOfMonth(1)
+                DateRange(first, first.withDayOfMonth(first.lengthOfMonth()), "next month")
+            }
+
+            weekday != null -> {
+                val date = today.with(TemporalAdjusters.nextOrSame(weekday))
+                val label = weekday.name.lowercase().replaceFirstChar { it.uppercase() }
+                DateRange(date, date, "on $label")
+            }
+
+            else -> DateRange(today, today, "today")
+        }
     }
 
     private suspend fun nextJob(): String {
