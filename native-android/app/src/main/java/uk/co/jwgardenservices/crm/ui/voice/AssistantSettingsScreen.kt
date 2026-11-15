@@ -57,6 +57,7 @@ import uk.co.jwgardenservices.crm.voice.KokoroHqDownloader
 import uk.co.jwgardenservices.crm.voice.KokoroEngine
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
 import uk.co.jwgardenservices.crm.voice.MicSource
+import uk.co.jwgardenservices.crm.voice.PhononDownloader
 import uk.co.jwgardenservices.crm.voice.PiperVoice
 import uk.co.jwgardenservices.crm.voice.PiperVoiceDownloader
 import uk.co.jwgardenservices.crm.voice.QwenEngine
@@ -96,6 +97,25 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = false)
     val micSource by AssistantPreferences.micSourceFlow(context)
         .collectAsStateWithLifecycle(initialValue = MicSource.Communication)
+    val phononEnabled by AssistantPreferences.phononFlow(context)
+        .collectAsStateWithLifecycle(initialValue = false)
+    val phononState by PhononDownloader.state.collectAsStateWithLifecycle()
+    var phononInstalled by remember { mutableStateOf(PhononDownloader.isInstalled(context)) }
+    var phononSaved by remember { mutableLongStateOf(PhononDownloader.savedBytes(context)) }
+
+    LaunchedEffect(phononState) {
+        when (val snapshot = phononState) {
+            is PhononDownloader.State.Done -> {
+                phononInstalled = true
+                AssistantPreferences.setPhonon(context, true)
+                KokoroEngine.get(context).reload()
+                PhononDownloader.clearResult()
+                phononSaved = 0
+            }
+            is PhononDownloader.State.Working -> Unit
+            else -> phononSaved = PhononDownloader.savedBytes(context)
+        }
+    }
     val qwenState by QwenModelDownloader.state.collectAsStateWithLifecycle()
     var qwenInstalled by remember { mutableStateOf(QwenModelDownloader.isInstalled(context)) }
     var qwenSaved by remember { mutableLongStateOf(QwenModelDownloader.savedBytes(context)) }
@@ -384,6 +404,95 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                             }
                         },
                     ) { Text("Use Kokoro instead") }
+                }
+            }
+        }
+
+        SectionCard(title = "Phonon 31m (fast)") {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "Phonon 31m is Apache 2.0, about 62 MB, and streams audio while it " +
+                        "speaks on the CPU. It replaces the other local voices while it is on; " +
+                        "Kokoro stays as the fallback.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                val working = phononState as? PhononDownloader.State.Working
+                val failure = phononState as? PhononDownloader.State.Failed
+                if (working != null) {
+                    LinearProgressIndicator(
+                        progress = { working.progress },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "Downloading… ${working.done / MEGABYTE} of " +
+                            "${working.total / MEGABYTE} MB",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = { PhononDownloader.cancel() }) { Text("Cancel") }
+                }
+
+                if (phononInstalled) {
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Switch(
+                            checked = phononEnabled,
+                            onCheckedChange = { enabled ->
+                                scope.launch {
+                                    AssistantPreferences.setPhonon(context, enabled)
+                                    KokoroEngine.get(context).reload()
+                                }
+                            },
+                        )
+                        Text(
+                            text = "Use Phonon 31m",
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                PhononDownloader.remove(context)
+                                AssistantPreferences.setPhonon(context, false)
+                                phononInstalled = false
+                                phononSaved = 0
+                                KokoroEngine.get(context).reload()
+                            }
+                        },
+                    ) { Text("Remove Phonon model") }
+                } else if (working == null) {
+                    OutlinedButton(
+                        onClick = {
+                            if (!unmetered) return@OutlinedButton
+                            PhononDownloader.start(context)
+                        },
+                    ) {
+                        Text(
+                            if (phononSaved > 0) {
+                                "Resume Phonon download (${phononSaved / MEGABYTE} MB saved)"
+                            } else {
+                                "Download Phonon 31m (62 MB)"
+                            },
+                        )
+                    }
+                }
+
+                if (!unmetered && working == null && !phononInstalled) {
+                    Text(
+                        text = "Connect to Wi-Fi to download the model.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                failure?.let { error ->
+                    Text(
+                        text = error.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
         }

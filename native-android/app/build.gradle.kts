@@ -153,6 +153,10 @@ dependencies {
     // Maven Central: the official AAR is fetched by :app:downloadSherpa.
     implementation(files("libs/sherpa-onnx-1.13.8.aar"))
 
+    // Phonon 31m TTS calls libptts_ffi.so through JNA. The library itself is
+    // built by the APK workflow (Rust + NDK) into src/main/jniLibs.
+    implementation("net.java.dev.jna:jna:5.17.0@aar")
+
     // On-device intent interpretation (llama.cpp JNI, arm64-v8a). A prebuilt
     // AAR keeps the NDK out of the build; grammar support is documented in
     // QwenIntentEngine.kt.

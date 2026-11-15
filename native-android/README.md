@@ -201,7 +201,8 @@ deliberately left on the web for now. The smaller known gaps:
   tab works offline.
 - **Not in git**: the AAR, the Zipformer model and the Kokoro voice model are
   ~390 MB of binaries; the 640 KB Silero VAD model is checked in so no build
-  depends on fetching it. `:app:downloadSherpa` fetches the ASR pieces and
+  depends on fetching it. The Phonon runtime is compiled by the APK workflow
+  from the pinned xn-ptts tag. `:app:downloadSherpa` fetches the ASR pieces and
   `:app:downloadKokoro` downloads and extracts the Kokoro archive (SHA-256
   checked); `preBuild` depends on both, so a fresh clone needs a connection
   for its first build only.
@@ -343,6 +344,13 @@ deliberately left on the web for now. The smaller known gaps:
   selecting one replaces Kokoro until "Use Kokoro instead". Downloads resume
   like the other models, and the same "Preview this voice" button auditions
   them.
+- **Phonon 31m** (optional, Apache 2.0, Settings → Assistant settings →
+  Phonon 31m): about 62 MB and streamed as 24 kHz float PCM while it speaks.
+  The Rust runtime (`libptts_ffi.so`) is built for arm64-v8a by the APK
+  workflow — no native binary is committed — and called through JNA. While
+  it is on it replaces the other local voices; Kokoro remains the fallback.
+  The 40m models are CC BY-NC and deliberately not offered. Custom voices
+  from Gradium Studio can be added as `voices/<name>.safetensors` later.
 - **Call feel**: the microphone runs on `VOICE_COMMUNICATION` with
   `AcousticEchoCanceler`, so the assistant can hear an interruption over its
   own speech. Talking over it for about 300 ms cuts playback and hands the

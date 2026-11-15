@@ -120,6 +120,11 @@ class AssistantService : Service() {
                 speaker.reload()
             }
         }
+        scope.launch {
+            AssistantPreferences.phononFlow(this@AssistantService).drop(1).collect {
+                speaker.reload()
+            }
+        }
         // Swapping between int8 and the downloaded fp32 model should take
         // effect on the next reply, without restarting the Assistant.
         scope.launch {

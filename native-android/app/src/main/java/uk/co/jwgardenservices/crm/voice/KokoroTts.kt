@@ -50,6 +50,9 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     private val fillers = java.util.concurrent.ConcurrentHashMap<Int, GeneratedAudio>()
     private var fillerIndex = 0
 
+    /** Phonon 31m, when downloaded and selected; otherwise this class's own engines. */
+    private var phonon: PhononSpeech? = null
+
     private enum class EngineKind { Kokoro, Piper, Kitten, Supertonic }
 
     @Volatile
@@ -70,6 +73,11 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     ) {
         val clean = text.trim()
         if (closed || clean.isEmpty()) return
+        if (phononActive()) {
+            val spoken = runCatching { phononSpeech().speak(clean) }.isSuccess
+            if (spoken) return
+            CrashLog.note(context, TAG, "Phonon failed; falling back to the local voice")
+        }
         CrashLog.note(context, TAG, "speak: ${clean.take(80)} (sid=$speakerId, speed=$speed)")
         speakLock.withLock {
             if (closed) return@withLock
@@ -88,8 +96,18 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     /** Load the model in the background so the first reply is not delayed by it. */
     suspend fun warmUp() {
         if (closed) return
+        if (phononActive()) {
+            runCatching { phononSpeech().warmUp() }
+            return
+        }
         ensureEngine()
     }
+
+    private suspend fun phononActive(): Boolean =
+        AssistantPreferences.phononFlow(context).first() && PhononDownloader.isInstalled(context)
+
+    private fun phononSpeech(): PhononSpeech =
+        phonon ?: PhononSpeech(context).also { phonon = it }
 
     /**
      * Play "Let me check." while a cloud turn is in flight. The clip is
@@ -101,6 +119,10 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
     ) {
         if (closed) return
+        if (phononActive()) {
+            runCatching { phononSpeech().speak(FILLER_TEXTS[0]) }
+            return
+        }
         speakLock.withLock {
             if (closed) return@withLock
             val engine = ensureEngine() ?: return@withLock
@@ -124,6 +146,10 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
     ) {
         if (closed) return
+        if (phononActive()) {
+            runCatching { phononSpeech().warmUp() }
+            return
+        }
         speakLock.withLock {
             if (closed) return@withLock
             val engine = ensureEngine() ?: return@withLock
@@ -156,6 +182,10 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     ) {
         val clean = text.trim()
         if (closed || clean.isEmpty()) return
+        if (phononActive()) {
+            speak(clean, speakerId, speed)
+            return
+        }
         val chunks = speechChunks(clean)
         if (chunks.size <= 1) {
             speak(clean, speakerId, speed)
@@ -196,6 +226,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     fun stopPlayback() {
         stopRequested = true
         runCatching { track?.pause() }
+        phonon?.stop()
     }
 
     /**
@@ -204,6 +235,8 @@ class KokoroTts(private val context: Context) : AutoCloseable {
      */
     suspend fun reload() {
         if (closed) return
+        runCatching { phonon?.close() }
+        phonon = null
         speakLock.withLock {
             loadLock.withLock {
                 runCatching { tts?.release() }
@@ -546,6 +579,9 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     }
 
     override fun close() {
+        if (closed) return
+        phonon?.close()
+        phonon = null
         closed = true
         runCatching { track?.stop() }
         if (speakLock.tryLock()) {

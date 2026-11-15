@@ -36,6 +36,7 @@ private val SPEED_KEY = floatPreferencesKey("kokoro_speed")
 private val ONLINE_VOICE_KEY = booleanPreferencesKey("online_voice")
 private val PIPER_KEY = stringPreferencesKey("piper_voice")
 private val MIC_SOURCE_KEY = stringPreferencesKey("mic_source")
+private val PHONON_KEY = booleanPreferencesKey("phonon_enabled")
 
 /**
  * Where the microphone audio comes from.
@@ -102,6 +103,21 @@ object AssistantPreferences {
     suspend fun setMicSource(context: Context, source: MicSource) {
         context.assistantDataStore.edit { preferences ->
             preferences[MIC_SOURCE_KEY] = source.name
+        }
+    }
+
+    /**
+     * Whether the downloaded Phonon 31m model should speak instead of
+     * Kokoro/Piper. Off by default; enabling it is a deliberate quality and
+     * speed choice because the model is downloaded separately.
+     */
+    fun phononFlow(context: Context): Flow<Boolean> = context.assistantDataStore.data.map { preferences ->
+        preferences[PHONON_KEY] ?: false
+    }
+
+    suspend fun setPhonon(context: Context, enabled: Boolean) {
+        context.assistantDataStore.edit { preferences ->
+            preferences[PHONON_KEY] = enabled
         }
     }
 
