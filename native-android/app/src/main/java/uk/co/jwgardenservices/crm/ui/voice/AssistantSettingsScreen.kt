@@ -280,11 +280,10 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 }
 
                 Text(
-                    text = "Piper, Kitten, Supertonic and Coqui voices are smaller and faster than " +
-                        "Kokoro, so replies start sooner and the phone has more memory left. " +
-                        "Download one, tap Use, then Preview this voice above to hear it. Kitten " +
-                        "is the smallest; Supertonic has ten styles but currently uses its first. " +
-                        "Selecting one replaces Kokoro until you switch back.",
+                    text = "Only the highest-quality local voices are kept: cori (the best " +
+                        "British Piper), Supertonic 3 and Phonon. Download one, tap Use, then " +
+                        "Preview this voice above to hear it. Supertonic has ten styles but uses " +
+                        "its first; selecting a local voice replaces Kokoro until you switch back.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -405,6 +404,15 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         },
                     ) { Text("Use Kokoro instead") }
                 }
+                TextButton(
+                    onClick = { scope.launch { PiperVoiceDownloader.removeUnused(context) } },
+                ) { Text("Remove old voice downloads") }
+                Text(
+                    text = "Deletes packs from voices no longer offered (alan, jenny, Kitten, " +
+                        "Coqui, US highs) to free the storage.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 

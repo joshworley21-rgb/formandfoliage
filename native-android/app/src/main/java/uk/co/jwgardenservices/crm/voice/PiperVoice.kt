@@ -37,7 +37,7 @@ import java.util.concurrent.TimeUnit
  * over Wi-Fi, resumably, then unpacked into filesDir/piper/<id>.
  */
 /** Which sherpa-onnx TTS config a downloaded pack needs. */
-enum class LocalVoiceEngine { Vits, Kitten, Supertonic }
+enum class LocalVoiceEngine { Vits, Supertonic }
 
 enum class PiperVoice(
     val id: String,
@@ -45,24 +45,14 @@ enum class PiperVoice(
     val bytes: Long,
     val engine: LocalVoiceEngine = LocalVoiceEngine.Vits,
 ) {
-    Alan("vits-piper-en_GB-alan-medium", "alan — British male", 67_220_121),
-    Jenny("vits-piper-en_GB-jenny_dioco-medium", "jenny — British female", 67_225_842),
-    Northern("vits-piper-en_GB-northern_english_male-medium", "northern — British male", 67_210_490),
+    /** The best British Piper voice; the other packs were removed in the audit. */
     Cori("vits-piper-en_GB-cori-high", "cori — British female (high)", 115_574_061),
-    Dii("vits-piper-en_GB-dii-high", "dii — British (high)", 67_229_442),
-    Miro("vits-piper-en_GB-miro-high", "miro — British (high)", 67_194_499),
-    KittenMini("kitten-mini-en-v0_8", "kitten mini — English (small)", 67_547_594, LocalVoiceEngine.Kitten),
-    KittenNano("kitten-nano-en-v0_8-int8", "kitten nano — English (tiny)", 31_220_690, LocalVoiceEngine.Kitten),
     Supertonic3(
         "sherpa-onnx-supertonic-3-tts-int8-2026-05-11",
         "supertonic 3 — English (10 voices)",
         128_774_318,
         LocalVoiceEngine.Supertonic,
     ),
-    LjSpeech("vits-coqui-en-ljspeech", "ljspeech — US English (Coqui)", 115_418_583),
-    Lessac("vits-piper-en_US-lessac-high", "lessac — US (high)", 115_545_841),
-    Ryan("vits-piper-en_US-ryan-high", "ryan — US (high)", 115_630_708),
-    LjSpeechHigh("vits-piper-en_US-ljspeech-high", "ljspeech — US (high)", 115_817_679),
     ;
 
     val url: String
@@ -121,11 +111,21 @@ object PiperVoiceDownloader {
         if (voice.engine == LocalVoiceEngine.Supertonic) {
             return SUPERTONIC_FILES.all { File(dir, it).isFile }
         }
-        val base = File(dir, "model.onnx").isFile &&
+        return File(dir, "model.onnx").isFile &&
             File(dir, "tokens.txt").isFile &&
             File(dir, "espeak-ng-data/phontab").isFile
-        if (!base) return false
-        return voice.engine != LocalVoiceEngine.Kitten || File(dir, "voices.bin").isFile
+    }
+
+    /** Delete packs from voices that are no longer offered. */
+    suspend fun removeUnused(context: Context) = withContext(Dispatchers.IO) {
+        val keep = PiperVoice.entries.map { it.id }.toSet()
+        File(context.filesDir, "piper").listFiles()?.forEach { dir ->
+            if (dir.name !in keep) dir.deleteRecursively()
+        }
+        File(context.cacheDir, "piper").listFiles()?.forEach { file ->
+            val id = file.name.removeSuffix(".tar.bz2.part").removeSuffix(".tar.bz2")
+            if (id !in keep) file.delete()
+        }
     }
 
     /** How much of an interrupted download is already on disk. */
@@ -318,10 +318,6 @@ object PiperVoiceDownloader {
 
                                     name.endsWith("/tokens.txt") -> {
                                         writeEntry(tar, File(temp, "tokens.txt"))
-                                    }
-
-                                    name.endsWith("/voices.bin") -> {
-                                        writeEntry(tar, File(temp, "voices.bin"))
                                     }
 
                                     name.contains("/espeak-ng-data/") -> {

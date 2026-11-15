@@ -5,6 +5,13 @@ import uk.co.jwgardenservices.crm.data.model.Invoice
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
 import uk.co.jwgardenservices.crm.data.model.Visit
 
+/**
+ * A client is worth chasing for an invoice after four unbilled visits. That is
+ * the same default the web dashboard uses when it has no recurring rhythm to
+ * infer a different threshold from.
+ */
+const val INVOICE_VISIT_THRESHOLD = 4
+
 data class ReminderSummary(
     val tomorrowJobs: List<ScheduledJob>,
     val overdue: List<Invoice>,
@@ -26,6 +33,11 @@ fun buildReminderSummary(
             .filter { parseTimestamp(it.startsAt)?.localDate() == tomorrow }
             .sortedBy { it.startsAt },
         overdue = overdueInvoices(invoices, today),
-        unbilledVisits = visits.filter { !it.billed && !it.missed },
+        unbilledVisits = visits
+            .filter { !it.billed && !it.missed }
+            .groupBy { it.clientId }
+            .filterValues { it.size >= INVOICE_VISIT_THRESHOLD }
+            .values
+            .flatten(),
     )
 }

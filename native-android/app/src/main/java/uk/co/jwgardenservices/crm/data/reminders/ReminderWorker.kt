@@ -67,11 +67,16 @@ class ReminderWorker(
                 )
             }
             if (summary.unbilledVisits.isNotEmpty()) {
-                val total = summary.unbilledVisits.sumOf { it.amount }
-                val size = summary.unbilledVisits.size
-                add(
-                    "$size ${if (size == 1) "visit" else "visits"} to bill (${money(total)})",
-                )
+                // Grouped per client: four visits from one client is the nudge,
+                // not four visits spread across four people.
+                val byClient = summary.unbilledVisits.groupBy { it.clientId }
+                byClient.entries.take(3).forEach { (clientId, rows) ->
+                    add(
+                        "${clients[clientId] ?: "Client"}: ${rows.size} visits to bill " +
+                            "(${money(rows.sumOf { it.amount })})",
+                    )
+                }
+                if (byClient.size > 3) add("…and ${byClient.size - 3} more to bill")
             }
         }
 

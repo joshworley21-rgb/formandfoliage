@@ -8,7 +8,6 @@ import android.util.Log
 import com.k2fsa.sherpa.onnx.GeneratedAudio
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
-import com.k2fsa.sherpa.onnx.OfflineTtsKittenModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsSupertonicModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
@@ -53,7 +52,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     /** Phonon 31m, when downloaded and selected; otherwise this class's own engines. */
     private var phonon: PhononSpeech? = null
 
-    private enum class EngineKind { Kokoro, Piper, Kitten, Supertonic }
+    private enum class EngineKind { Kokoro, Piper, Supertonic }
 
     @Volatile
     private var engineKind = EngineKind.Kokoro
@@ -291,7 +290,6 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     }
 
     private fun buildLocalVoice(dir: File, voice: PiperVoice): OfflineTts? = when (voice.engine) {
-        LocalVoiceEngine.Kitten -> buildKitten(dir, voice)
         LocalVoiceEngine.Supertonic -> buildSupertonic(dir, voice)
         LocalVoiceEngine.Vits -> buildVits(dir, voice)
     }
@@ -327,36 +325,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         }
     }
 
-    /** A Kitten v0.8 model: small, quick, several built-in voices. */
-    private fun buildKitten(dir: File, voice: PiperVoice): OfflineTts? {
-        CrashLog.note(context, TAG, "model=kitten:${voice.id}")
-        val config = OfflineTtsConfig(
-            model = OfflineTtsModelConfig(
-                kitten = OfflineTtsKittenModelConfig(
-                    model = File(dir, "model.onnx").absolutePath,
-                    voices = File(dir, "voices.bin").absolutePath,
-                    tokens = File(dir, "tokens.txt").absolutePath,
-                    dataDir = File(dir, "espeak-ng-data").absolutePath,
-                    lengthScale = 1.0f,
-                ),
-                numThreads = 4,
-                provider = "cpu",
-            ),
-            maxNumSentences = 1,
-        )
-        return try {
-            val created = OfflineTts(assetManager = null, config = config)
-            engineKind = EngineKind.Kitten
-            CrashLog.note(context, TAG, "OfflineTts ready (kitten ${voice.id}, ${created.numSpeakers()} voices)")
-            created
-        } catch (error: Exception) {
-            CrashLog.note(context, TAG, "Kitten engine failed: ${error.message}")
-            Log.e(TAG, "Kitten engine creation failed", error)
-            null
-        }
-    }
-
-    /** Kokoro has 53 speakers; VITS and Kitten are addressed separately. */
+    /** Kokoro has 53 speakers; the local voices use speaker 0. */
     private fun speakerFor(engine: OfflineTts, speakerId: Int): Int =
         if (engineKind == EngineKind.Kokoro) speakerId else 0
 

@@ -66,11 +66,24 @@ class RemindersTest {
                 visit(20.0, billed = true),
                 visit(30.0, missed = true),
                 visit(40.0),
+                visit(60.0),
+                visit(70.0),
             ),
             today = today,
         )
-        assertEquals(listOf(50.0, 40.0), summary.unbilledVisits.map { it.amount })
-        assertEquals(90.0, summary.unbilledVisits.sumOf { it.amount }, 0.01)
+        assertEquals(listOf(50.0, 40.0, 60.0, 70.0), summary.unbilledVisits.map { it.amount })
+        assertEquals(220.0, summary.unbilledVisits.sumOf { it.amount }, 0.01)
+    }
+
+    @Test
+    fun threeUnbilledVisitsAreNotEnoughToNudge() {
+        val summary = buildReminderSummary(
+            jobs = emptyList(),
+            invoices = emptyList(),
+            visits = listOf(visit(50.0), visit(40.0), visit(30.0)),
+            today = today,
+        )
+        assertTrue(summary.unbilledVisits.isEmpty())
     }
 
     @Test
