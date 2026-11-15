@@ -10,6 +10,7 @@ import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKittenModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsSupertonicModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import uk.co.jwgardenservices.crm.core.CrashLog
@@ -48,7 +49,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     /** Pre-synthesised "Let me check." so a slow cloud turn is not silent. */
     private var filler: GeneratedAudio? = null
 
-    private enum class EngineKind { Kokoro, Piper, Kitten }
+    private enum class EngineKind { Kokoro, Piper, Kitten, Supertonic }
 
     @Volatile
     private var engineKind = EngineKind.Kokoro
@@ -251,7 +252,39 @@ class KokoroTts(private val context: Context) : AutoCloseable {
 
     private fun buildLocalVoice(dir: File, voice: PiperVoice): OfflineTts? = when (voice.engine) {
         LocalVoiceEngine.Kitten -> buildKitten(dir, voice)
+        LocalVoiceEngine.Supertonic -> buildSupertonic(dir, voice)
         LocalVoiceEngine.Vits -> buildVits(dir, voice)
+    }
+
+    /** Supertonic 3: a fast multi-file ONNX pipeline with ten voice styles. */
+    private fun buildSupertonic(dir: File, voice: PiperVoice): OfflineTts? {
+        CrashLog.note(context, TAG, "model=supertonic:${voice.id}")
+        val config = OfflineTtsConfig(
+            model = OfflineTtsModelConfig(
+                supertonic = OfflineTtsSupertonicModelConfig(
+                    durationPredictor = File(dir, "duration_predictor.int8.onnx").absolutePath,
+                    textEncoder = File(dir, "text_encoder.int8.onnx").absolutePath,
+                    vectorEstimator = File(dir, "vector_estimator.int8.onnx").absolutePath,
+                    vocoder = File(dir, "vocoder.int8.onnx").absolutePath,
+                    ttsJson = File(dir, "tts.json").absolutePath,
+                    unicodeIndexer = File(dir, "unicode_indexer.bin").absolutePath,
+                    voiceStyle = File(dir, "voice.bin").absolutePath,
+                ),
+                numThreads = 4,
+                provider = "cpu",
+            ),
+            maxNumSentences = 1,
+        )
+        return try {
+            val created = OfflineTts(assetManager = null, config = config)
+            engineKind = EngineKind.Supertonic
+            CrashLog.note(context, TAG, "OfflineTts ready (supertonic ${voice.id}, ${created.numSpeakers()} voices)")
+            created
+        } catch (error: Exception) {
+            CrashLog.note(context, TAG, "Supertonic engine failed: ${error.message}")
+            Log.e(TAG, "Supertonic engine creation failed", error)
+            null
+        }
     }
 
     /** A Kitten v0.8 model: small, quick, several built-in voices. */

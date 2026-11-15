@@ -37,7 +37,7 @@ import java.util.concurrent.TimeUnit
  * over Wi-Fi, resumably, then unpacked into filesDir/piper/<id>.
  */
 /** Which sherpa-onnx TTS config a downloaded pack needs. */
-enum class LocalVoiceEngine { Vits, Kitten }
+enum class LocalVoiceEngine { Vits, Kitten, Supertonic }
 
 enum class PiperVoice(
     val id: String,
@@ -53,6 +53,12 @@ enum class PiperVoice(
     Miro("vits-piper-en_GB-miro-high", "miro — British (high)", 67_194_499),
     KittenMini("kitten-mini-en-v0_8", "kitten mini — English (small)", 67_547_594, LocalVoiceEngine.Kitten),
     KittenNano("kitten-nano-en-v0_8-int8", "kitten nano — English (tiny)", 31_220_690, LocalVoiceEngine.Kitten),
+    Supertonic3(
+        "sherpa-onnx-supertonic-3-tts-int8-2026-05-11",
+        "supertonic 3 — English (10 voices)",
+        128_774_318,
+        LocalVoiceEngine.Supertonic,
+    ),
     ;
 
     val url: String
@@ -61,6 +67,16 @@ enum class PiperVoice(
 
 object PiperVoiceDownloader {
     private const val TAG = "PiperDownload"
+
+    private val SUPERTONIC_FILES = setOf(
+        "text_encoder.int8.onnx",
+        "duration_predictor.int8.onnx",
+        "vector_estimator.int8.onnx",
+        "vocoder.int8.onnx",
+        "tts.json",
+        "unicode_indexer.bin",
+        "voice.bin",
+    )
     private const val STALL_TIMEOUT_MS = 60_000L
     private const val FREE_SPACE_MARGIN = 60L * 1024 * 1024
 
@@ -98,6 +114,9 @@ object PiperVoiceDownloader {
 
     fun isInstalled(context: Context, voice: PiperVoice): Boolean {
         val dir = dir(context, voice)
+        if (voice.engine == LocalVoiceEngine.Supertonic) {
+            return SUPERTONIC_FILES.all { File(dir, it).isFile }
+        }
         val base = File(dir, "model.onnx").isFile &&
             File(dir, "tokens.txt").isFile &&
             File(dir, "espeak-ng-data/phontab").isFile
@@ -259,6 +278,10 @@ object PiperVoiceDownloader {
     /** Unpack model.onnx, tokens.txt and espeak-ng-data into a temp folder. */
     private suspend fun extract(context: Context, voice: PiperVoice, archive: File) =
         withContext(Dispatchers.IO) {
+            if (voice.engine == LocalVoiceEngine.Supertonic) {
+                extractSupertonic(context, voice, archive)
+                return@withContext
+            }
             val target = dir(context, voice)
             val temp = File(target.parentFile, "${voice.id}.tmp")
             temp.deleteRecursively()
@@ -330,6 +353,59 @@ object PiperVoiceDownloader {
                 throw error
             }
         }
+
+    /**
+     * Supertonic is a multi-file ONNX pipeline (text encoder, duration
+     * predictor, vector estimator, vocoder, lexicons and voice styles), not a
+     * single VITS model. Keep those files under their own names.
+     */
+    private suspend fun extractSupertonic(context: Context, voice: PiperVoice, archive: File) {
+        val target = dir(context, voice)
+        val temp = File(target.parentFile, "${voice.id}.tmp")
+        temp.deleteRecursively()
+        temp.mkdirs()
+        val total = archive.length()
+        val jobContext = currentCoroutineContext()
+        var lastReportAt = 0L
+
+        try {
+            archive.inputStream().use { raw ->
+                val counting = CountingStream(raw, total) { read ->
+                    val now = System.currentTimeMillis()
+                    if (now - lastReportAt > 500) {
+                        lastReportAt = now
+                        _state.value = State.Working(voice, Phase.Extracting, read, total)
+                    }
+                }
+                BZip2CompressorInputStream(counting, true).use { bzip ->
+                    TarArchiveInputStream(bzip).use { tar ->
+                        var entry = tar.nextEntry
+                        while (entry != null) {
+                            jobContext.ensureActive()
+                            val base = entry.name.substringAfterLast('/')
+                            if (!entry.isDirectory && base in SUPERTONIC_FILES) {
+                                writeEntry(tar, File(temp, base))
+                            }
+                            entry = tar.nextEntry
+                        }
+                    }
+                }
+            }
+            val missing = SUPERTONIC_FILES.filterNot { File(temp, it).isFile }
+            if (missing.isNotEmpty()) {
+                throw IOException("The Supertonic archive was missing: ${missing.joinToString()}")
+            }
+            target.deleteRecursively()
+            if (!temp.renameTo(target)) {
+                temp.copyRecursively(target, overwrite = true)
+                temp.deleteRecursively()
+            }
+            _state.value = State.Working(voice, Phase.Extracting, total, total)
+        } catch (error: Exception) {
+            temp.deleteRecursively()
+            throw error
+        }
+    }
 
     private fun writeEntry(tar: TarArchiveInputStream, output: File) {
         output.parentFile?.mkdirs()

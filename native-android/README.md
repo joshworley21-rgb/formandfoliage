@@ -317,8 +317,8 @@ deliberately left on the web for now. The smaller known gaps:
 - **Local voices** (optional, free, Settings → Assistant settings → Local
   voices): British Piper VITS voices from the official sherpa-onnx releases —
   alan, jenny, northern English male, cori-high, dii-high and miro-high,
-  67–110 MB each — plus Kitten TTS v0.8 mini/nano (67/31 MB), a newer small
-  English model with several built-in voices (the first is used). They load
+  67–110 MB each — plus Kitten TTS v0.8 mini/nano (67/31 MB) and Supertonic 3
+  int8 (129 MB, ten styles, the first is used). They load
   faster than fp32 Kokoro, use less memory and often sound less synthetic;
   selecting one replaces Kokoro until "Use Kokoro instead". Downloads resume
   like the other models, and the same "Preview this voice" button auditions
