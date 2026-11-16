@@ -142,6 +142,8 @@ dependencies {
 
     implementation(libs.work.runtime.ktx)
     implementation(libs.androidx.biometric)
+    // MediaSessionCompat: the head-unit and headset call button during a call.
+    implementation(libs.androidx.media)
     // The NDK module is excluded: 7.14.0's startup (native signal handling and
     // auto-init providers) killed the app before our code ran on the owner's
     // phone. Java crash reporting needs none of it.

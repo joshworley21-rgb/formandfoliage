@@ -109,6 +109,20 @@ object IntentRules {
                 ).containsMatchIn(text) ->
                 SpokenIntent.InvoiceStatus
 
+            // Drafting money: explicit verbs only, and before the catch-all
+            // "invoice" rule below. The draft is always read back for review;
+            // nothing is emailed by voice.
+            text.containsAny(
+                "raise an invoice",
+                "raise a invoice",
+                "raise invoice",
+                "create an invoice",
+                "create invoice",
+                "make an invoice",
+                "draft invoice",
+                "start an invoice",
+            ) -> SpokenIntent.RaiseInvoice
+
             text.containsAny("owe me", "owes", "owed", "unpaid", "outstanding", "invoice") ->
                 SpokenIntent.WhoOwesMe
             text.containsAny("earn", "earned", "earnings", "takings", "taken this week", "made this week", "make this week", "income") ->
@@ -194,7 +208,8 @@ object IntentRules {
         SpokenIntent.InvoiceStatus,
         SpokenIntent.NextJobForClient,
         SpokenIntent.TodayEarnings,
-        SpokenIntent.DayWrapUp -> true
+        SpokenIntent.DayWrapUp,
+        SpokenIntent.RaiseInvoice -> true
 
         else -> false
     }

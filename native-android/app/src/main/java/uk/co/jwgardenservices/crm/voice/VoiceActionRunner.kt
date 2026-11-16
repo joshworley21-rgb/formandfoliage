@@ -106,6 +106,7 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
             SpokenIntent.NextJobForClient -> nextJobForClient(text)
             SpokenIntent.TodayEarnings -> todayEarnings()
             SpokenIntent.DayWrapUp -> startWrapUp()
+            SpokenIntent.RaiseInvoice -> raiseInvoice(text)
             else -> null
         }
     }
@@ -715,6 +716,47 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
         fixedPrice = client.fixedPrice,
         paymentReminders = client.paymentReminders,
     )
+
+    /**
+     * "Raise an invoice for Simon" always creates a DRAFT and reads it back.
+     * Sending stays a deliberate screen action: money only moves when the
+     * owner has seen the line items, and a misheard sentence cannot email a
+     * client.
+     */
+    private suspend fun raiseInvoice(text: String): String {
+        val clients = repository.observeClients().first()
+        val client = clients.firstOrNull { matches(it.name, text) } ?: inferredClient(clients)
+            ?: return "Which client is the invoice for?"
+
+        val visits = repository.observeVisits().first()
+            .filter {
+                it.clientId == client.id &&
+                    !it.missed &&
+                    !it.billed &&
+                    it.invoiceId == null &&
+                    it.hours > 0.0
+            }
+        if (visits.isEmpty()) {
+            return "There's nothing unbilled for ${client.name}."
+        }
+        val expected = round2(visits.sumOf { it.amount })
+        val made = runCatching {
+            repository.createInvoice(
+                NewInvoiceInput(clientId = client.id, visitIds = visits.map { it.id }),
+            )
+        }.getOrNull()
+            ?: return "I couldn't raise that without a signal. The ${visits.size} " +
+                "${if (visits.size == 1) "visit will be" else "visits will be"} waiting in " +
+                "ready to bill."
+
+        val visitsText = if (visits.size == 1) "one visit" else "${visits.size} visits"
+        val total = money(if (made.total > 0.0) made.total else expected)
+        return VoiceLines.pick(
+            "Draft invoice for ${client.name} — $visitsText, $total. It's in drafts to review.",
+            "That's a draft for ${client.name}, $visitsText, $total. Have a look before it goes out.",
+            "In drafts: ${client.name}, $visitsText, $total. Nothing sent yet.",
+        )
+    }
 
     private suspend fun unbilled(): String {
         val clients = repository.observeClients().first()

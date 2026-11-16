@@ -5,6 +5,7 @@ import uk.co.jwgardenservices.crm.data.local.CrmDatabase
 import uk.co.jwgardenservices.crm.data.local.DatabaseProvider
 import uk.co.jwgardenservices.crm.data.offline.SyncEngine
 import uk.co.jwgardenservices.crm.data.offline.SyncScheduler
+import uk.co.jwgardenservices.crm.data.offline.VoiceQueueScheduler
 import uk.co.jwgardenservices.crm.data.reminders.ReminderWorker
 
 /**
@@ -27,6 +28,8 @@ object ServiceLocator {
     @Volatile
     var workspaceRole: String = "owner"
 
+    fun isInitialised(): Boolean = initialised
+
     fun init(context: Context) {
         if (initialised) return
         appContext = context.applicationContext
@@ -34,6 +37,7 @@ object ServiceLocator {
         initialised = true
         SyncScheduler.ensurePeriodic(appContext)
         SyncScheduler.enqueue(appContext)
+        VoiceQueueScheduler.ensurePeriodic(appContext)
         ReminderWorker.schedule(appContext)
     }
 

@@ -14,6 +14,8 @@ import android.media.AudioManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
+import android.support.v4.media.session.MediaSessionCompat
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -130,6 +132,10 @@ class AssistantService : Service() {
     /** Re-routes the call when earphones or the van's head unit connect mid-call. */
     private var deviceCallback: AudioManager.AudioDeviceCallback? = null
 
+    /** Owns the head-unit call button while a call is up; idle starts use the receiver. */
+    private var mediaSession: MediaSessionCompat? = null
+    private var lastCallButtonAt = 0L
+
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
         // A call or another assistant taking over must win: stop whichever
         // voice has the floor.
@@ -155,6 +161,19 @@ class AssistantService : Service() {
             cloudVoice?.stop()
         }
         speaker = KokoroEngine.get(this)
+        // A call is "media" to the platform's button router. Activated only
+        // while a call is up, so it never steals play/pause from music; the
+        // idle start is handled by CallButtonReceiver instead.
+        mediaSession = MediaSessionCompat(this, "AssistantCall").apply {
+            setFlags(
+                MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
+                    MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS,
+            )
+            setCallback(object : MediaSessionCompat.Callback() {
+                override fun onPlay() = noteCallButton()
+                override fun onPause() = noteCallButton()
+            })
+        }
         CrashLog.note(this, TAG, "service created")
         scope.launch { AssistantPreferences.voiceFlow(this@AssistantService).collect { voice = it; speaker.clearFiller() } }
         scope.launch { AssistantPreferences.speedFlow(this@AssistantService).collect { speed = it; speaker.clearFiller() } }
@@ -227,6 +246,7 @@ class AssistantService : Service() {
         }
         _callActive.value = true
         callActiveNow = true
+        mediaSession?.isActive = true
         // Pick the hands-free microphone now: in the Vivaro this is the head
         // unit's HFP mic, on site it is the earphones, and only when neither
         // exists does the phone's own bottom mic stay in play.
@@ -452,10 +472,27 @@ class AssistantService : Service() {
      * started service. The screen may still be bound, so the model stays warm
      * until the user leaves the tab.
      */
+    /**
+     * The head-unit and headset buttons arrive as play/pause to the active
+     * session. A single press is ignored (it may be music elsewhere), a
+     * double press within the window ends the call.
+     */
+    private fun noteCallButton() {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastCallButtonAt <= CALL_BUTTON_DOUBLE_MS) {
+            lastCallButtonAt = 0
+            CrashLog.note(this, TAG, "call button double-press")
+            if (_callActive.value) endCall()
+        } else {
+            lastCallButtonAt = now
+        }
+    }
+
     fun endCall() {
         CrashLog.note(this, TAG, "call ended")
         _callActive.value = false
         callActiveNow = false
+        mediaSession?.isActive = false
         _dialling.value = false
         _connectedAt.value = 0
         _muted.value = false
@@ -761,6 +798,9 @@ class AssistantService : Service() {
             // "run through today's jobs" contains a date word but is always
             // about today, so it must not be pushed to the cloud for it.
             SpokenIntent.DayWrapUp,
+            // Unbilled visits are read locally; the draft call itself is
+            // server-side and safe to attempt from the rule path.
+            SpokenIntent.RaiseInvoice,
         )
         val dateIndependent = quick.intent in dateIndependentIntents
         val localTemporal = dateIndependent && temporal
@@ -853,20 +893,41 @@ class AssistantService : Service() {
         }
 
         // 3. Free fallback: the rules, then a short help line.
+        //
+        // If the cloud was asked and could not be reached, the words are
+        // still worth keeping: a dictated quote in a dead zone is exactly
+        // what the queue exists for. Small talk is excluded, and anything
+        // this short cannot be a job description.
+        val chatter = if (quick.intent == SpokenIntent.Other) smallTalk(text) else null
+        val wordCount = text.split(Regex("\\s+")).count { it.isNotBlank() }
+        val memo = if (
+            cloudConversation &&
+            chatter == null &&
+            wordCount >= 4 &&
+            (quick.requiresCloud || quick.intent == SpokenIntent.Other)
+        ) {
+            runCatching { PendingVoiceStore.enqueue(this@AssistantService, text) }
+                .onFailure { CrashLog.note(this@AssistantService, TAG, "voice queue failed: ${it.message}") }
+                .getOrNull()
+        } else {
+            null
+        }
+
         when {
             quick.requiresCloud -> say(
-                if (cloudConversation) {
-                    "I couldn't reach the online assistant. Try again when you have signal."
-                } else {
-                    "Online answers are switched off in settings."
+                when {
+                    memo != null -> savedMemoLine(memo.clientName)
+                    cloudConversation ->
+                        "I couldn't reach the online assistant. Try again when you have signal."
+                    else -> "Online answers are switched off in settings."
                 },
             )
 
             quick.intent == SpokenIntent.Other -> {
-                val chatter = smallTalk(text)
                 say(
                     when {
                         chatter != null -> chatter
+                        memo != null -> savedMemoLine(memo.clientName)
                         cloudConversation ->
                             "I couldn't reach the online assistant. Try again when you have signal."
                         else -> HELP_TEXT
@@ -877,6 +938,15 @@ class AssistantService : Service() {
             else -> runIntent(text, quick)
         }
     }
+
+    /** Spoken confirmation for a memo kept for the reconnect worker. */
+    private fun savedMemoLine(clientName: String?): String =
+        if (clientName != null) {
+            "No signal, so I've saved that note for $clientName — I'll process it as soon as " +
+                "we're back on data."
+        } else {
+            "No signal, so I've saved that — I'll process it as soon as we're back on data."
+        }
 
     /** Carry out a local intent and speak its result. */
     private suspend fun runIntent(text: String, intent: IntentResult) {
@@ -997,6 +1067,8 @@ class AssistantService : Service() {
         ringback.stop()
         abandonAudioFocus()
         releaseCallAudio()
+        runCatching { mediaSession?.release() }
+        mediaSession = null
         scope.cancel()
         speaker.stopPlayback()
         cloudVoice?.close()
@@ -1110,6 +1182,7 @@ class AssistantService : Service() {
         const val TAG = "AssistantService"
         const val CHANNEL_ID = "assistant_mic"
         const val NOTIFICATION_ID = 41
+        const val CALL_BUTTON_DOUBLE_MS = 900L
         const val CHECKING_ONLINE = "Checking online rates."
         const val CALLING_TEXT = "Assistant is dialling…"
         const val LISTENING_TEXT = "Assistant is listening for your next command"
@@ -1150,6 +1223,7 @@ private fun confirmationFor(intent: IntentResult): String {
             if (topic.isEmpty()) "Checking that booking." else "Checking when $topic is next in."
         SpokenIntent.TodayEarnings -> "Checking today's takings."
         SpokenIntent.DayWrapUp -> "Running through today's jobs."
+        SpokenIntent.RaiseInvoice -> "Drafting that invoice."
         SpokenIntent.MarkJobDone ->
             if (topic.isEmpty()) "Marking that job done." else "Marking the job for $topic done."
         SpokenIntent.WhoOwesMe -> "Checking who owes you."

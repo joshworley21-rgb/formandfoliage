@@ -82,6 +82,17 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
+        <!-- Double-press the headset stem or the van's hands-free button to
+             start a call. Stands down while a call is up, where the
+             AssistantService MediaSession owns the button. -->
+        <receiver
+            android:name=".voice.CallButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+
         <!-- "Call office" quick-settings tile: one swipe and tap from the lock
              screen starts or resumes an assistant call. -->
         <service

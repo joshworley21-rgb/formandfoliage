@@ -59,6 +59,8 @@ class IntentRulesTest {
         Case("what's ready to invoice", SpokenIntent.Unbilled),
         Case("who are my clients", SpokenIntent.ClientList),
         Case("has the Smiths' invoice been paid", SpokenIntent.InvoiceStatus),
+        Case("raise an invoice for the Smiths", SpokenIntent.RaiseInvoice),
+        Case("draft invoice for Simon", SpokenIntent.RaiseInvoice),
         Case("when is the Smiths next in", SpokenIntent.NextJobForClient),
         Case("what have I taken today", SpokenIntent.TodayEarnings),
 

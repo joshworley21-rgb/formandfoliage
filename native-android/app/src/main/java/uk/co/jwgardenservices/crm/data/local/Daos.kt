@@ -9,6 +9,7 @@ import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.Enquiry
 import uk.co.jwgardenservices.crm.data.model.Invoice
 import uk.co.jwgardenservices.crm.data.model.InvoiceEmailEvent
+import uk.co.jwgardenservices.crm.data.model.PendingVoiceCommand
 import uk.co.jwgardenservices.crm.data.model.JobTask
 import uk.co.jwgardenservices.crm.data.model.InvoiceItem
 import uk.co.jwgardenservices.crm.data.model.Quote
@@ -294,5 +295,23 @@ interface JobTaskDao {
     suspend fun deleteById(id: String)
 
     @Query("DELETE FROM job_tasks")
+    suspend fun clear()
+}
+
+@Dao
+interface PendingVoiceDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(command: PendingVoiceCommand)
+
+    @Query("SELECT * FROM pending_voice WHERE processed = 0 ORDER BY createdAt ASC")
+    suspend fun pending(): List<PendingVoiceCommand>
+
+    @Query("SELECT COUNT(*) FROM pending_voice WHERE processed = 0")
+    fun observePendingCount(): Flow<Int>
+
+    @Query("UPDATE pending_voice SET processed = 1, outcome = :outcome WHERE id = :id")
+    suspend fun markProcessed(id: String, outcome: String?)
+
+    @Query("DELETE FROM pending_voice")
     suspend fun clear()
 }
