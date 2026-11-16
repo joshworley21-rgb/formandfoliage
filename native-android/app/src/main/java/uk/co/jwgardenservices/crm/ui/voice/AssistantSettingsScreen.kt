@@ -54,6 +54,7 @@ import uk.co.jwgardenservices.crm.voice.KokoroEngine
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
 import uk.co.jwgardenservices.crm.voice.MicSource
 import uk.co.jwgardenservices.crm.voice.PhononDownloader
+import uk.co.jwgardenservices.crm.voice.PhononVoice
 import uk.co.jwgardenservices.crm.voice.PiperVoice
 import uk.co.jwgardenservices.crm.voice.PiperVoiceDownloader
 
@@ -94,6 +95,10 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     val phononState by PhononDownloader.state.collectAsStateWithLifecycle()
     var phononInstalled by remember { mutableStateOf(PhononDownloader.isInstalled(context)) }
     var phononSaved by remember { mutableLongStateOf(PhononDownloader.savedBytes(context)) }
+    val phononVoice by AssistantPreferences.phononVoiceFlow(context)
+        .collectAsStateWithLifecycle(initialValue = PhononVoice.Default)
+    var voiceDownloading by remember { mutableStateOf(false) }
+    var voiceError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(phononState) {
         when (val snapshot = phononState) {
@@ -429,6 +434,73 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                             modifier = Modifier.padding(start = 8.dp),
                         )
                     }
+                    Text(
+                        text = "Voice",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    OptionPicker(
+                        options = PhononVoice.entries,
+                        selected = phononVoice,
+                        label = { it?.label ?: PhononVoice.Default.label },
+                        enabled = !voiceDownloading,
+                        onSelect = { selected ->
+                            scope.launch {
+                                voiceDownloading = true
+                                voiceError = null
+                                val ok = PhononDownloader.installVoice(context, selected)
+                                if (ok) {
+                                    AssistantPreferences.setPhononVoice(context, selected)
+                                    KokoroEngine.get(context).reload()
+                                } else {
+                                    voiceError = "Could not download that voice. Check your connection."
+                                }
+                                voiceDownloading = false
+                            }
+                        },
+                    )
+                    if (voiceDownloading) {
+                        Text(
+                            text = "Downloading voice…",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    voiceError?.let { message ->
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    TextButton(
+                        enabled = phononEnabled && !voiceDownloading,
+                        onClick = {
+                            previewingVoice = true
+                            scope.launch {
+                                try {
+                                    KokoroEngine.get(context).speak(
+                                        PREVIEW_TEXT,
+                                        voice.speakerId,
+                                        draftSpeed,
+                                    )
+                                } catch (_: Exception) {
+                                    // The reply path reports its own errors.
+                                } finally {
+                                    previewingVoice = false
+                                }
+                            }
+                        },
+                    ) {
+                        Text(if (previewingVoice) "Playing sample…" else "Preview Phonon voice")
+                    }
+                    Text(
+                        text = "Gradium's website demos use catalog voices; the checkpoint also " +
+                            "ships its own default. The 40m models on the site are non-commercial, " +
+                            "so the app uses 31m. Pick a voice and preview it here.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     TextButton(
                         onClick = {
                             scope.launch {

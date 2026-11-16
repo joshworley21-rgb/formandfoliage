@@ -32,8 +32,23 @@ import java.util.concurrent.TimeUnit
  * 24 kHz float PCM while it speaks, so playback starts long before the sentence
  * is finished.
  */
+/**
+ * A voice from Gradium's Phonon catalog. The default voice ships with the
+ * checkpoint; the others are ~256 KB files downloaded on demand into the
+ * model's `voices/` folder, where the runtime registers them by file name.
+ */
+enum class PhononVoice(val label: String, val voiceId: String?) {
+    Default("Phonon default voice", null),
+    Maeve("Maeve — British female", "6PWnV0Nq4wu7RVBT"),
+    Freya("Freya — young British female (Gradium demo)", "GgfEkEJtxZR7gnpy"),
+    Toby("Toby — British male", "dME3IWyZBvmh1n1q"),
+    Hugh("Hugh — British male", "YyKcxPG7iIgS3jsK"),
+    Easton("Easton — American male", "LMDIYE0Oa377Qh6Z"),
+}
+
 object PhononDownloader {
     private const val TAG = "PhononDownload"
+    private const val VOICE_BASE = "https://huggingface.co/gradium/phonon-voices/resolve/main/voices/"
 
     const val MODEL_DIR = "phonon-31m-en"
     private const val BASE = "https://huggingface.co/gradium/phonon-31m-en/resolve/main/"
@@ -85,6 +100,45 @@ object PhononDownloader {
         return FILES.keys.sumOf { name ->
             File(dir, name).length().coerceAtLeast(0) + File(dir, "$name.part").length().coerceAtLeast(0)
         }.coerceAtMost(TOTAL_BYTES)
+    }
+
+    /**
+     * Download one catalog voice into `voices/<name>.safetensors`. The file is
+     * small, so this is a plain download rather than a resumable model fetch.
+     */
+    suspend fun installVoice(context: Context, voice: PhononVoice): Boolean {
+        if (voice == PhononVoice.Default) return true
+        val id = voice.voiceId ?: return true
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                if (!isInstalled(context)) throw IOException("Download the Phonon model first.")
+                val folder = File(dir(context), "voices").apply { mkdirs() }
+                val target = File(folder, "${voice.name}.safetensors")
+                if (target.isFile && target.length() > 0) return@runCatching true
+                val client = OkHttpClient.Builder()
+                    .connectTimeout(30, TimeUnit.SECONDS)
+                    .readTimeout(60, TimeUnit.SECONDS)
+                    .build()
+                val request = Request.Builder().url("$VOICE_BASE$id.safetensors").build()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) error("HTTP ${response.code}")
+                    val body = response.body ?: error("empty response")
+                    val temp = File(folder, "${voice.name}.safetensors.part")
+                    body.byteStream().use { input ->
+                        temp.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    if (!temp.renameTo(target)) {
+                        temp.copyTo(target, overwrite = true)
+                        temp.delete()
+                    }
+                }
+                CrashLog.note(context, TAG, "voice downloaded: ${voice.name}")
+                true
+            }.getOrElse { error ->
+                CrashLog.note(context, TAG, "voice download failed: ${error.message}")
+                false
+            }
+        }
     }
 
     fun start(context: Context) {

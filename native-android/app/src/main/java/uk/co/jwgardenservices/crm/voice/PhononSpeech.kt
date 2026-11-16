@@ -8,6 +8,7 @@ import android.system.Os
 import android.util.Log
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -123,14 +124,34 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
                     Log.e(TAG, "Phonon load failed", error)
                     return@withContext null
                 }
-                created.voices.firstOrNull()?.let { voice ->
-                    runCatching { created.setVoice(voice) }
+                val voices = created.voices
+                val selected = runCatching {
+                    AssistantPreferences.phononVoiceFlow(context).first()
+                }.getOrDefault(PhononVoice.Default)
+                val chosen = selected.takeIf { it != PhononVoice.Default }
+                    ?.name
+                    ?.let { name ->
+                        voices.firstOrNull {
+                            it.equals(name, ignoreCase = true) ||
+                                it.substringBefore('.').equals(name, ignoreCase = true)
+                        }
+                    }
+                if (chosen != null) {
+                    runCatching { created.setVoice(chosen) }
+                        .onFailure { CrashLog.note(context, TAG, "voice $chosen failed: ${it.message}") }
+                } else if (selected != PhononVoice.Default) {
+                    CrashLog.note(
+                        context,
+                        TAG,
+                        "voice ${selected.name} is not downloaded; using the checkpoint default",
+                    )
                 }
                 CrashLog.note(
                     context,
                     TAG,
                     "Phonon ready in ${System.currentTimeMillis() - started} ms " +
-                        "(${created.voices.size} voices)",
+                        "(${voices.size} voices: ${voices.joinToString()})" +
+                        (if (chosen != null) " voice=$chosen" else ""),
                 )
                 engine = created
                 created

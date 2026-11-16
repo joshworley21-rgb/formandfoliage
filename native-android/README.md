@@ -343,8 +343,14 @@ deliberately left on the web for now. The smaller known gaps:
   The Rust runtime (`libptts_ffi.so`) is built for arm64-v8a by the APK
   workflow — no native binary is committed — and called through JNA. While
   it is on it replaces the other local voices; Kokoro remains the fallback.
-  The 40m models are CC BY-NC and deliberately not offered. Custom voices
-  from Gradium Studio can be added as `voices/<name>.safetensors` later.
+  The 40m models are CC BY-NC and deliberately not offered. The checkpoint
+  ships its own default voice, which is not the voice Gradium's browser demo
+  uses; Settings → Phonon 31m has a **Voice** picker for catalog voices
+  (Maeve, Freya, Toby, Hugh and Easton). Selecting one downloads its ~256 KB
+  `voices/<name>.safetensors` file, reloads the engine and the **Preview
+  Phonon voice** button auditions it. Freya is the voice used in Gradium's
+  quickstart prompt. Custom Gradium Studio voices can also be dropped into
+  the same folder.
 - **Call feel**: the microphone runs on `VOICE_COMMUNICATION` with
   `AcousticEchoCanceler`, so the assistant can hear an interruption over its
   own speech. Talking over it for about 300 ms cuts playback and hands the

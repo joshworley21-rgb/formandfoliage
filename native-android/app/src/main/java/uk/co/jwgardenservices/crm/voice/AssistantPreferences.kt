@@ -40,6 +40,7 @@ private val MIC_SOURCE_KEY = stringPreferencesKey("mic_source")
 private val PHONON_KEY = booleanPreferencesKey("phonon_enabled")
 private val PICKUP_KEY = booleanPreferencesKey("pickup_greeting")
 private val USED_KEY = booleanPreferencesKey("assistant_used")
+private val PHONON_VOICE_KEY = stringPreferencesKey("phonon_voice")
 
 /**
  * Where the microphone audio comes from.
@@ -121,6 +122,21 @@ object AssistantPreferences {
     suspend fun setPhonon(context: Context, enabled: Boolean) {
         context.assistantDataStore.edit { preferences ->
             preferences[PHONON_KEY] = enabled
+        }
+    }
+
+    /**
+     * A catalog voice for Phonon, or [PhononVoice.Default] for the voice that
+     * ships with the checkpoint.
+     */
+    fun phononVoiceFlow(context: Context): Flow<PhononVoice> = context.assistantDataStore.data.map { preferences ->
+        PhononVoice.entries.firstOrNull { it.name == preferences[PHONON_VOICE_KEY] }
+            ?: PhononVoice.Default
+    }
+
+    suspend fun setPhononVoice(context: Context, voice: PhononVoice) {
+        context.assistantDataStore.edit { preferences ->
+            preferences[PHONON_VOICE_KEY] = voice.name
         }
     }
 
