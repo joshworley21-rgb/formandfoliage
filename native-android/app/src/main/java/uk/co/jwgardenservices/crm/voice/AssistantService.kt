@@ -428,7 +428,13 @@ class AssistantService : Service() {
         val sent = runCatching { actions.continueSend(heard) }
             .onFailure { CrashLog.note(this, TAG, "send reply failed: ${it.message}") }
             .getOrNull()
-        val reply = sent ?: runCatching { actions.continueWrapUp(heard) }
+        val chased = sent ?: runCatching { actions.continueChase(heard) }
+            .onFailure { CrashLog.note(this, TAG, "chase reply failed: ${it.message}") }
+            .getOrNull()
+        val clarified = chased ?: runCatching { actions.continueClarification(heard) }
+            .onFailure { CrashLog.note(this, TAG, "clarification failed: ${it.message}") }
+            .getOrNull()
+        val reply = clarified ?: runCatching { actions.continueWrapUp(heard) }
             .onFailure { CrashLog.note(this, TAG, "wrap-up failed: ${it.message}") }
             .getOrNull()
         if (reply != null) {
@@ -567,7 +573,8 @@ class AssistantService : Service() {
         // A question with an answer pending (wrap-up, "send it") arms the
         // recogniser to catch a spoken-over answer and skips the thinking
         // pause when it arrives.
-        speech.captureInterjections = actions.wrapUpActive() || actions.sendPending()
+        speech.captureInterjections = actions.wrapUpActive() || actions.sendPending() ||
+            actions.chasePending() || actions.clarificationPending()
         speech.fastPath = speech.captureInterjections
         AssistantMemory.lastSpokenReply = stripped
         _thinking.value = false
@@ -947,7 +954,8 @@ class AssistantService : Service() {
             if (!speech.fastPath) _thinking.value = true
             // Coughs, "um", stray "the": silently dropped, microphone carries
             // on. Never while an answer is pending — "no" is a real answer.
-            val pendingAnswer = actions.wrapUpActive() || actions.sendPending()
+            val pendingAnswer = actions.wrapUpActive() || actions.sendPending() ||
+                actions.chasePending() || actions.clarificationPending()
             if (!pendingAnswer && SpeechNormalizer.isNoise(heard)) {
                 CrashLog.note(this, TAG, "noise rejected: ${text.take(30)}")
                 return@collect
@@ -968,6 +976,23 @@ class AssistantService : Service() {
                     .getOrNull()
                 if (sent != null) {
                     sayAnswer(sent)
+                    return@collect
+                }
+                // "Want me to flag that?" — a chase note on the client.
+                val chased = runCatching { actions.continueChase(heard) }
+                    .onFailure { CrashLog.note(this, TAG, "chase reply failed: ${it.message}") }
+                    .getOrNull()
+                if (chased != null) {
+                    sayAnswer(chased)
+                    return@collect
+                }
+                // "Which one — the rectory or Smiths farm?" — the next
+                // sentence picks the client and the original command runs.
+                val clarified = runCatching { actions.continueClarification(heard) }
+                    .onFailure { CrashLog.note(this, TAG, "clarification failed: ${it.message}") }
+                    .getOrNull()
+                if (clarified != null) {
+                    sayAnswer(clarified)
                     return@collect
                 }
                 if (undoRequested(heard)) {

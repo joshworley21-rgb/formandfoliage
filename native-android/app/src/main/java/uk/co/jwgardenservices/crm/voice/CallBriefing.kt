@@ -42,7 +42,7 @@ class CallBriefing(
         val zone = ZoneId.systemDefault()
         val time = now.atZone(zone).toLocalTime()
         val today = now.localDate(zone)
-        val greeting = greetingFor(time.hour)
+        val greeting = greetingFor(time.hour, today.month)
 
         val clients = repository.observeClients().first().associateBy { it.id }
         val scheduled = repository.observeJobs().first()
@@ -121,11 +121,31 @@ class CallBriefing(
     private fun endsAt(job: ScheduledJob, starts: Instant): Instant =
         starts.plusSeconds(job.durationMinutes.coerceAtLeast(15) * 60L)
 
-    private fun greetingFor(hour: Int): String = when (hour) {
-        in 5..11 -> "Morning"
-        in 12..16 -> "Afternoon"
-        in 17..21 -> "Evening"
-        else -> "Hello"
+    /**
+     * Time of day, plus a line of trade small talk when the season and hour
+     * make one obvious: dark winters, hot summers, busy springs.
+     */
+    private fun greetingFor(hour: Int, month: java.time.Month): String {
+        val time = when (hour) {
+            in 5..11 -> "Morning"
+            in 12..16 -> "Afternoon"
+            in 17..21 -> "Evening"
+            else -> "Hello"
+        }
+        val seasonal = when {
+            month == java.time.Month.NOVEMBER ||
+                month == java.time.Month.DECEMBER ||
+                month == java.time.Month.JANUARY ||
+                month == java.time.Month.FEBRUARY ->
+                if (hour >= 15) "getting dark early out there" else null
+            month in java.time.Month.JUNE..java.time.Month.AUGUST ->
+                if (hour >= 15) "long day in the heat" else null
+            month == java.time.Month.MARCH ||
+                month == java.time.Month.APRIL ||
+                month == java.time.Month.MAY -> "busy one today"
+            else -> null
+        }
+        return if (seasonal != null) "$time, $seasonal" else time
     }
 
     /**

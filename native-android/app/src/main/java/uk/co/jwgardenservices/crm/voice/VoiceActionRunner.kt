@@ -62,11 +62,41 @@ class VoiceActionRunner(
 
     /** The last change that can be reversed with "undo". */
     private sealed interface Undo {
-        data class Visit(val id: String, val clientName: String) : Undo
+        enum class Kind { TimeLog, Expense, CompletedJob }
+
+        data class Visit(
+            val id: String,
+            val clientName: String,
+            val kind: Kind = Kind.TimeLog,
+            /** False when the visit predates the undone action (hours stay). */
+            val deleteVisit: Boolean = true,
+        ) : Undo
+
         data class Note(val clientId: String, val previous: String?, val clientName: String) : Undo
     }
 
     private var lastUndo: Undo? = null
+
+    /** A debt follow-up waiting for "flag it" or "leave it". */
+    private data class PendingChase(
+        val clientId: String,
+        val clientName: String,
+        val amount: Double,
+    )
+
+    private var pendingChase: PendingChase? = null
+
+    /** Two clients matched too closely: the next sentence picks one. */
+    private data class PendingClarification(
+        val transcript: String,
+        val intent: IntentResult,
+        val candidates: List<String>,
+    )
+
+    private var pendingClarification: PendingClarification? = null
+
+    /** Set while re-running an intent for a client the clarification chose. */
+    private var resolvedClientId: String? = null
 
     /** The visit voice most recently wrote, for follow-up corrections. */
     private data class VoiceVisit(
@@ -104,6 +134,24 @@ class VoiceActionRunner(
      * generic confirmation).
      */
     suspend fun run(transcript: String, intent: IntentResult): String? {
+        // Two clients that close together are a question, not a coin flip.
+        if (pendingClarification == null && intent.intent in CLIENT_SCOPED) {
+            val clients = repository.observeClients().first()
+            val ambiguous = ambiguousFor(clients, transcript)
+            if (ambiguous.size >= 2) {
+                pendingClarification = PendingClarification(
+                    transcript = transcript,
+                    intent = intent,
+                    candidates = ambiguous.map { it.id },
+                )
+                return slow(askWhich(ambiguous))
+            }
+        }
+        return execute(transcript, intent)
+    }
+
+    /** Dispatch only; [run] wraps this with the ambiguity check. */
+    private suspend fun execute(transcript: String, intent: IntentResult): String? {
         val text = transcript.lowercase()
         return when (intent.intent) {
             SpokenIntent.LogHours -> logHours(text)
@@ -198,15 +246,23 @@ class VoiceActionRunner(
     /** True while a draft invoice is waiting for "send it" or "leave it". */
     fun sendPending(): Boolean = pendingSend != null
 
+    /** True while "want me to flag that?" or "which one?" awaits an answer. */
+    fun chasePending(): Boolean = pendingChase != null
+
+    fun clarificationPending(): Boolean = pendingClarification != null
+
     fun clearWrapUp() {
         wrapUp = null
         wrapUpBillables.clear()
         // A half-finished "log hours" question must not outlive the call or
         // hijack the first answer inside a new wrap-up.
         pending = null
-        // Corrections and "send it" only apply inside the call that raised
-        // them; never let a visit from last week be adjusted by accident.
+        // Corrections, "send it", chase offers and "which one?" only apply
+        // inside the call that raised them.
         pendingSend = null
+        pendingChase = null
+        pendingClarification = null
+        resolvedClientId = null
         lastVoiceVisit = null
     }
 
@@ -341,7 +397,7 @@ class VoiceActionRunner(
         )
         val visitId = repository.saveVisit(visit)
         wrapUpBillables.getOrPut(item.clientId) { mutableListOf() } += visitId
-        lastUndo = Undo.Visit(visitId, item.clientName)
+        lastUndo = Undo.Visit(visitId, item.clientName, Undo.Kind.TimeLog)
         lastVoiceVisit = VoiceVisit(visitId, item.clientId, item.clientName, materials = 0.0)
         CallLedger.record("Logged ${hoursLabel(safeHours)} for ${item.clientName}") {
             runCatching { repository.deleteVoiceVisit(visitId) }
@@ -478,8 +534,9 @@ class VoiceActionRunner(
             ),
         )
         val visitId = repository.saveVisit(draft)
-        lastUndo = Undo.Visit(visitId, client.name)
+        lastUndo = Undo.Visit(visitId, client.name, Undo.Kind.TimeLog)
         lastVoiceVisit = VoiceVisit(visitId, client.id, client.name, materials = 0.0)
+        val debt = debtFollowUp(client.id, client.name, visitId)
         CallLedger.record("Logged ${hoursLabel(hours)} for ${client.name}") {
             runCatching { repository.deleteVoiceVisit(visitId) }
             if (visitId == lastVoiceVisit?.id) lastVoiceVisit = null
@@ -505,7 +562,7 @@ class VoiceActionRunner(
                     "${money(draft.amount)}.",
             )
         }
-        return fast(reply)
+        return fast(reply + (debt ?: ""))
     }
 
     /** Answer "what have I got on" for today, tomorrow, a weekday or next week. */
@@ -635,6 +692,9 @@ class VoiceActionRunner(
         // confirmation round-trip with greased gloves on.
         return if (todaysVisit != null) {
             repository.completeJobWithVisit(job.id, todaysVisit.id)
+            // Hours logged earlier stay put; undo only reopens the job.
+            lastUndo = Undo.Visit(todaysVisit.id, name, Undo.Kind.CompletedJob, deleteVisit = false)
+            val debt = debtFollowUp(job.clientId, name, todaysVisit.id)
             CallLedger.record("Marked the job for $name done") {
                 repository.reopenJob(job.id)
                 "That job is back on the schedule."
@@ -644,7 +704,7 @@ class VoiceActionRunner(
                     "Right, marked that done for $name.",
                     "Done — $name's job is closed off.",
                     "Sorted, $name is marked down.",
-                ),
+                ) + (debt ?: ""),
             )
         } else {
             val hours = round2((job.durationMinutes / 60.0).coerceAtLeast(0.5))
@@ -665,8 +725,9 @@ class VoiceActionRunner(
                     jobOutcome = "done",
                 ),
             )
-            lastUndo = Undo.Visit(visitId, name)
+            lastUndo = Undo.Visit(visitId, name, Undo.Kind.CompletedJob)
             lastVoiceVisit = VoiceVisit(visitId, job.clientId, name, materials = 0.0)
+            val debt = debtFollowUp(job.clientId, name, visitId)
             CallLedger.record("Marked the job for $name done, ${hoursLabel(hours)}") {
                 runCatching { repository.deleteVoiceVisit(visitId) }
                 if (visitId == lastVoiceVisit?.id) lastVoiceVisit = null
@@ -676,7 +737,7 @@ class VoiceActionRunner(
                 VoiceLines.pick(
                     "Right, marked that done for $name — ${hoursLabel(hours)}.",
                     "All sorted — stuck ${hoursLabel(hours)} down for $name and closed the job.",
-                ),
+                ) + (debt ?: ""),
             )
         }
     }
@@ -686,15 +747,35 @@ class VoiceActionRunner(
         val action = lastUndo ?: return "Nothing to undo."
         lastUndo = null
         return when (action) {
-            is Undo.Visit -> {
-                runCatching { repository.deleteVoiceVisit(action.id) }
-                    .getOrElse { return "I couldn't remove that visit." }
-                if (action.id == lastVoiceVisit?.id) lastVoiceVisit = null
-                VoiceLines.pick(
-                    "Removed the visit for ${action.clientName}.",
-                    "Taken off — the visit for ${action.clientName} is gone.",
-                    "Done, ${action.clientName}'s visit is deleted.",
-                )
+            is Undo.Visit -> when (action.kind) {
+                Undo.Kind.CompletedJob -> {
+                    // Reopen the job first (deleteVoiceVisit would also do it,
+                    // but only when the visit itself is being removed).
+                    val job = repository.observeJobs().first()
+                        .firstOrNull { it.visitId == action.id }
+                    if (job != null) repository.reopenJob(job.id)
+                    if (action.deleteVisit) {
+                        runCatching { repository.deleteVoiceVisit(action.id) }
+                        if (action.id == lastVoiceVisit?.id) lastVoiceVisit = null
+                    }
+                    "Scratched that — ${action.clientName}'s job is back on the list. " +
+                        "What did you actually get done?"
+                }
+
+                Undo.Kind.Expense -> {
+                    runCatching { repository.deleteVoiceVisit(action.id) }
+                        .getOrElse { return "I couldn't remove that charge." }
+                    if (action.id == lastVoiceVisit?.id) lastVoiceVisit = null
+                    "Right, scratched that. What did you actually want to charge?"
+                }
+
+                Undo.Kind.TimeLog -> {
+                    runCatching { repository.deleteVoiceVisit(action.id) }
+                        .getOrElse { return "I couldn't remove that visit." }
+                    if (action.id == lastVoiceVisit?.id) lastVoiceVisit = null
+                    "Scratched that visit for ${action.clientName}. " +
+                        "How long were you actually there?"
+                }
             }
 
             is Undo.Note -> {
@@ -823,7 +904,7 @@ class VoiceActionRunner(
             amount = round2(amount),
         )
         val visitId = repository.saveVisit(draft)
-        lastUndo = Undo.Visit(visitId, client.name)
+        lastUndo = Undo.Visit(visitId, client.name, Undo.Kind.Expense)
         lastVoiceVisit = VoiceVisit(visitId, client.id, client.name, materials = round2(amount))
         CallLedger.record("£${format(amount)} materials for ${client.name}") {
             runCatching { repository.deleteVoiceVisit(visitId) }
@@ -1337,14 +1418,25 @@ class VoiceActionRunner(
      * map is read once per sentence, not per client.
      */
     private suspend fun clientFor(clients: List<Client>, text: String): Client? {
+        // A clarification just picked one: use it before anything re-scores.
+        resolvedClientId?.let { id ->
+            val chosen = clients.firstOrNull { it.id == id }
+            if (chosen != null) {
+                resolvedClientId = null
+                return chosen
+            }
+        }
         val lower = text.lowercase()
         val aliases = runCatching { repository.allVoiceAliases() }.getOrDefault(emptyList())
         val byClient = aliases.groupBy({ it.first }, { it.second })
-        val named = clients.firstOrNull { matches(it.name, lower) }
-        if (named != null) return named
-        return clients.firstOrNull { client ->
-            byClient[client.id]?.any { alias -> matches(alias, lower) } == true
-        }
+        val scored = clients.mapNotNull { client ->
+            val nameScore = matchScore(client.name, lower)
+            val aliasScore = byClient[client.id].orEmpty()
+                .maxOfOrNull { matchScore(it, lower) } ?: 0.0
+            val score = maxOf(nameScore, aliasScore)
+            if (score > 0.0) client to score else null
+        }.sortedByDescending { (_, score) -> score }
+        return scored.firstOrNull()?.first
     }
 
     /**
@@ -1394,19 +1486,176 @@ class VoiceActionRunner(
      * in the sentence, and a word of five letters or more may be one letter
      * out — "Smiths" is heard as "smith" or "smiff" often enough to matter.
      */
-    private fun matches(clientName: String, text: String): Boolean {
-        val name = clientName.lowercase()
-        if (name.isNotBlank() && text.contains(name)) return true
+    private fun matches(clientName: String, text: String): Boolean =
+        matchScore(clientName, text) > 0.0
+
+    /**
+     * How strongly [clientName] appears in [text]: 1.0 for the name spoken
+     * whole, 0.75 when every significant word matched exactly, 0.55 when one
+     * of them only matched by prefix or a one-letter fuzzy hit.
+     *
+     * The scores exist for ambiguity: two clients landing within 15% of each
+     * other get a question instead of the first row in the table.
+     */
+    private fun matchScore(clientName: String, text: String): Double {
+        val name = clientName.lowercase().trim()
+        if (name.isBlank()) return 0.0
+        if (text.contains(name)) return 1.0
         val words = name.split(Regex("\\s+")).filter { it.length >= 3 && it !in STOP_WORDS }
-        if (words.isEmpty()) return false
+        if (words.isEmpty()) return 0.0
         val tokens = text.split(Regex("\\s+")).filter { it.isNotBlank() }
-        return words.all { word ->
-            tokens.any { token ->
-                token == word ||
-                    (token.length >= 3 && word.startsWith(token)) ||
-                    (word.length >= 5 && token.length >= 5 && abs(word.length - token.length) <= 1 && plausible(token, word))
+        var score = 0.75
+        for (word in words) {
+            val exact = tokens.any { it == word }
+            val loose = exact || tokens.any { token ->
+                (token.length >= 3 && word.startsWith(token)) ||
+                    (word.length >= 5 && token.length >= 5 &&
+                        abs(word.length - token.length) <= 1 && plausible(token, word))
+            }
+            if (!loose) return 0.0
+            if (!exact) score = minOf(score, 0.55)
+        }
+        return score
+    }
+
+    /** Clients matched so closely that a human would ask before acting. */
+    private suspend fun ambiguousFor(clients: List<Client>, transcript: String): List<Client> {
+        if (resolvedClientId != null) return emptyList()
+        val lower = transcript.lowercase()
+        val aliases = runCatching { repository.allVoiceAliases() }
+            .getOrDefault(emptyList())
+            .groupBy({ it.first }, { it.second })
+        val scored = clients.mapNotNull { client ->
+            val nameScore = matchScore(client.name, lower)
+            val aliasScore = aliases[client.id].orEmpty()
+                .maxOfOrNull { matchScore(it, lower) } ?: 0.0
+            val score = maxOf(nameScore, aliasScore)
+            if (score > 0.0) client to score else null
+        }.sortedByDescending { (_, score) -> score }
+        if (scored.size < 2) return emptyList()
+        val best = scored[0].second
+        if ((best - scored[1].second) / best >= 0.15) return emptyList()
+        return scored.take(3).map { it.first }
+    }
+
+    /** "Which one — the rectory or Smiths farm?" */
+    private suspend fun askWhich(candidates: List<Client>): String {
+        val aliases = runCatching { repository.allVoiceAliases() }
+            .getOrDefault(emptyList())
+            .groupBy({ it.first }, { it.second })
+        val labels = candidates.map { client ->
+            aliases[client.id]?.firstOrNull()
+                ?: client.address?.substringBefore(',')?.trim()?.takeIf { it.isNotEmpty() }
+                ?: client.name
+        }
+        val names = labels.take(2).joinToString(" or ")
+        val shared = candidates.first().name.split(Regex("\\s+")).firstOrNull { it.length > 2 }
+        return "Which ${shared ?: "one"}? $names?"
+    }
+
+    /** The answer to "which one?", executed against the original command. */
+    suspend fun continueClarification(transcript: String): String? {
+        val waiting = pendingClarification ?: return null
+        pendingClarification = null
+        val clients = repository.observeClients().first()
+        val aliases = runCatching { repository.allVoiceAliases() }
+            .getOrDefault(emptyList())
+            .groupBy({ it.first }, { it.second })
+        val answer = transcript.lowercase()
+        val candidates = waiting.candidates.mapNotNull { id -> clients.firstOrNull { it.id == id } }
+        val scored = candidates.map { client ->
+            val name = matchScore(client.name, answer)
+            val alias = aliases[client.id].orEmpty()
+                .maxOfOrNull { matchScore(it, answer) } ?: 0.0
+            val street = client.address?.substringBefore(',')
+                ?.let { matchScore(it, answer) } ?: 0.0
+            client to maxOf(name, alias, street)
+        }.sortedByDescending { (_, score) -> score }
+        val chosen = scored.firstOrNull()?.takeIf { (_, score) -> score > 0.0 }?.first
+            ?: return "Right — cancelled that. Say it again when you know which one."
+        resolvedClientId = chosen.id
+        return execute(waiting.transcript, waiting.intent)
+            ?: "Right — ${chosen.name}, then. Say it again?"
+    }
+
+    /** The answer to "want me to flag that?". */
+    suspend fun continueChase(transcript: String): String? {
+        val chasing = pendingChase ?: return null
+        val words = transcript.lowercase()
+            .replace(Regex("[^a-z' ]"), " ")
+            .trim()
+            .split(Regex("\\s+"))
+            .filter { it.isNotBlank() }
+        val yes = words.any { it in SEND_YES } && words.none { it in SEND_NO }
+        val no = words.any { it in SEND_NO }
+        return when {
+            yes -> {
+                pendingChase = null
+                appendDatedNote(
+                    chasing.clientId,
+                    "Chase ${money(chasing.amount)} outstanding",
+                )
+                fast("Right — there's a chase note on ${chasing.clientName}'s file.")
+            }
+            no -> {
+                pendingChase = null
+                fast("Fair enough — I'll leave it.")
+            }
+            else -> {
+                pendingChase = null
+                null
             }
         }
+    }
+
+    /**
+     * After a successful log, mention money already owed by that client and
+     * offer to flag it. The offer is a real state — [continueChase] puts a
+     * dated chase note on the file when the owner says yes.
+     */
+    private suspend fun debtFollowUp(
+        clientId: String,
+        clientName: String,
+        justLoggedVisitId: String?,
+    ): String? {
+        val invoices = repository.observeInvoices().first()
+            .filter {
+                it.clientId == clientId &&
+                    it.status != "paid" &&
+                    it.status != "draft" &&
+                    it.total > 0
+            }
+        val older = repository.observeVisits().first()
+            .filter {
+                it.clientId == clientId &&
+                    !it.billed &&
+                    !it.missed &&
+                    it.invoiceId == null &&
+                    it.amount > 0 &&
+                    it.id != justLoggedVisitId
+            }
+        val invoiceDebt = round2(invoices.sumOf { it.total })
+        val olderDebt = round2(older.sumOf { it.amount })
+        val total = round2(invoiceDebt + olderDebt)
+        if (total <= 0.0) return null
+        pendingChase = PendingChase(clientId, clientName, total)
+        return if (invoiceDebt > 0) {
+            " By the way, $clientName still has an unpaid invoice for " +
+                "${money(invoiceDebt)} — want me to flag that?"
+        } else {
+            " By the way, $clientName has ${money(olderDebt)} of older work not yet " +
+                "invoiced — want me to flag that?"
+        }
+    }
+
+    /** One dated line on a client's notes, the same shape as a spoken note. */
+    private suspend fun appendDatedNote(clientId: String, note: String) {
+        val client = repository.observeClients().first().firstOrNull { it.id == clientId } ?: return
+        val combined = buildString {
+            client.notes?.trim()?.takeIf { it.isNotEmpty() }?.let { append(it).append('\n') }
+            append(LocalDate.now()).append(": ").append(note)
+        }
+        repository.updateClient(client, clientDraft(client, combined))
     }
 
     /** Cheap edit-distance check, bounded to one substitution/insertion. */
@@ -1438,6 +1687,21 @@ class VoiceActionRunner(
     private companion object {
         /** Articles and company suffixes never identify a client on their own. */
         val STOP_WORDS = setOf("the", "and", "ltd", "limited", "llp")
+
+        /** Intents that act on exactly one client, so ambiguity must be asked. */
+        val CLIENT_SCOPED = setOf(
+            SpokenIntent.LogHours,
+            SpokenIntent.MarkJobDone,
+            SpokenIntent.AddNote,
+            SpokenIntent.RaiseInvoice,
+            SpokenIntent.AddExpense,
+            SpokenIntent.NextVisitNote,
+            SpokenIntent.AdjustCharge,
+            SpokenIntent.ClientInfo,
+            SpokenIntent.LastVisit,
+            SpokenIntent.NextJobForClient,
+            SpokenIntent.InvoiceStatus,
+        )
 
         /** Natural ways to accept a pending confirmation. */
         val AFFIRM_WORDS = setOf(
