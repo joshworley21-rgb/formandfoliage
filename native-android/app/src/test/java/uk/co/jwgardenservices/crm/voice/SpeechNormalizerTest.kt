@@ -1,6 +1,7 @@
 package uk.co.jwgardenservices.crm.voice
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -56,5 +57,44 @@ class SpeechNormalizerTest {
     fun `client names that start with number words are left alone`() {
         assertEquals("one stop gardens", normalized("one stop gardens"))
         assertEquals("three sisters landscaping", normalized("three sisters landscaping"))
+    }
+
+    @Test
+    fun `a mid-sentence self correction wins`() {
+        assertEquals(
+            "make it 3 hours for the Smiths",
+            normalized("log two hours actually make it three hours for the Smiths"),
+        )
+        assertEquals(
+            "log 4 hours for the Joneses",
+            normalized("no wait log four hours for the Joneses"),
+        )
+        assertEquals(
+            "stick £40 onto the Smiths",
+            normalized("erm stick £30 sorry I meant stick £40 onto the Smiths"),
+        )
+    }
+
+    @Test
+    fun `a trailing correction phrase does not eat the sentence`() {
+        assertEquals("log 2 hours actually", normalized("log two hours actually"))
+    }
+
+    @Test
+    fun `noise rejection`() {
+        assertTrue(SpeechNormalizer.isNoise(""))
+        assertTrue(SpeechNormalizer.isNoise("..."))
+        assertTrue(SpeechNormalizer.isNoise("um"))
+        assertTrue(SpeechNormalizer.isNoise("the"))
+        assertTrue(SpeechNormalizer.isNoise("er."))
+        // A bare acknowledgement with no question pending is noise; the same
+        // word while a wrap-up prompt is up is an answer, and the caller
+        // bypasses this check for it.
+        assertTrue(SpeechNormalizer.isNoise("Yep"))
+        assertTrue(SpeechNormalizer.isNoise("no"))
+        assertTrue(!SpeechNormalizer.isNoise("undo"))
+        assertTrue(!SpeechNormalizer.isNoise("help"))
+        assertTrue(!SpeechNormalizer.isNoise("log two hours at the Smiths"))
+        assertTrue(!SpeechNormalizer.isNoise("who owes me money"))
     }
 }

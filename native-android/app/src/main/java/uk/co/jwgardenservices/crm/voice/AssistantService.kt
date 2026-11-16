@@ -783,6 +783,13 @@ class AssistantService : Service() {
             // A pending answer ("Yep", "Next", "send it") skips the thinking
             // pause: the reply goes straight to the already-warm voice.
             if (!speech.fastPath) _thinking.value = true
+            // Coughs, "um", stray "the": silently dropped, microphone carries
+            // on. Never while an answer is pending — "no" is a real answer.
+            val pendingAnswer = actions.wrapUpActive() || actions.sendPending()
+            if (!pendingAnswer && SpeechNormalizer.isNoise(heard)) {
+                CrashLog.note(this, TAG, "noise rejected: ${text.take(30)}")
+                return@collect
+            }
             // Interlock starts before the filler: from here until Kokoro's
             // last sample the microphone frames are discarded, so neither the
             // filler nor the confirmation can feed back into the recognizer.
@@ -1325,7 +1332,7 @@ private fun confirmationFor(intent: IntentResult): String {
         SpokenIntent.NextVisitNote -> "Making a note of that."
         SpokenIntent.MarkJobDone ->
             if (topic.isEmpty()) "Marking that job done." else "Marking the job for $topic done."
-        SpokenIntent.WhoOwesMe -> "Checking who owes you."
+        SpokenIntent.CheckDebtors -> "Checking who owes you."
         SpokenIntent.WeeklyEarnings -> "Checking this week's earnings."
         SpokenIntent.Quote ->
             if (topic.isEmpty()) "Preparing your quote." else "Preparing a quote for $topic."

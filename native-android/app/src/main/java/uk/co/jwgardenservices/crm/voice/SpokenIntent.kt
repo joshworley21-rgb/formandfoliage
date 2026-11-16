@@ -15,7 +15,7 @@ enum class SpokenIntent(val wire: String) {
     NextJob("next_job"),
     NextJobAddress("next_job_address"),
     MarkJobDone("mark_job_done"),
-    WhoOwesMe("who_owes_me"),
+    CheckDebtors("who_owes_me"),
     WeeklyEarnings("weekly_earnings"),
     MonthEarnings("month_earnings"),
     HoursThisWeek("hours_this_week"),

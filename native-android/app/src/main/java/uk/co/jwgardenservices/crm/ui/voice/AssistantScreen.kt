@@ -622,7 +622,13 @@ private fun PostCallSummary(
 @Composable
 private fun Bubble(text: String, fromUser: Boolean, pending: Boolean = false) {
     val container = if (fromUser) Color(0xFF233023) else Color(0xFF1D1D1D)
-    val content = if (fromUser) Color(0xFFD9E8CF) else CallOn
+    // A streaming partial is a rumour, not a fact: dimmed grey and italic
+    // until the turn finalises, so live Nemotron feedback reads as provisional.
+    val content = when {
+        fromUser && pending -> CallDim
+        fromUser -> Color(0xFFD9E8CF)
+        else -> CallOn
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (fromUser) Arrangement.End else Arrangement.Start,

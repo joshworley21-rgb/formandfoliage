@@ -143,7 +143,7 @@ object IntentRules {
                 SpokenIntent.AddExpense
 
             text.containsAny("owe me", "owes", "owed", "unpaid", "outstanding", "invoice") ->
-                SpokenIntent.WhoOwesMe
+                SpokenIntent.CheckDebtors
             text.containsAny("earn", "earned", "earnings", "takings", "taken this week", "made this week", "make this week", "income") ->
                 SpokenIntent.WeeklyEarnings
             text.containsAny(
@@ -219,7 +219,7 @@ object IntentRules {
         SpokenIntent.LogHours,
         SpokenIntent.CheckSchedule,
         SpokenIntent.NextJob,
-        SpokenIntent.WhoOwesMe,
+        SpokenIntent.CheckDebtors,
         SpokenIntent.WeeklyEarnings,
         SpokenIntent.AddNote,
         SpokenIntent.Unbilled,

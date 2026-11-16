@@ -105,7 +105,7 @@ object SemanticMatcher {
             "done with the smiths",
             "mark simon done",
         ),
-        SpokenIntent.WhoOwesMe to listOf(
+        SpokenIntent.CheckDebtors to listOf(
             "who owes me money",
             "how much is outstanding",
             "any unpaid invoices",

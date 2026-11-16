@@ -40,10 +40,10 @@ class IntentRulesTest {
         Case("mark the Smiths job done", SpokenIntent.MarkJobDone),
         Case("I've completed the Browns", SpokenIntent.MarkJobDone),
 
-        Case("who owes me money", SpokenIntent.WhoOwesMe),
-        Case("how much is outstanding", SpokenIntent.WhoOwesMe),
-        Case("any unpaid invoices", SpokenIntent.WhoOwesMe),
-        Case("how much does the Smiths owe me", SpokenIntent.WhoOwesMe),
+        Case("who owes me money", SpokenIntent.CheckDebtors),
+        Case("how much is outstanding", SpokenIntent.CheckDebtors),
+        Case("any unpaid invoices", SpokenIntent.CheckDebtors),
+        Case("how much does the Smiths owe me", SpokenIntent.CheckDebtors),
 
         Case("what have I earned this week", SpokenIntent.WeeklyEarnings),
         Case("how much have I taken this week", SpokenIntent.WeeklyEarnings),
@@ -82,7 +82,7 @@ class IntentRulesTest {
 
         // Deliberate misses.
         Case("clock me off at the Browns", SpokenIntent.MarkJobDone),
-        Case("what's the damage on the Smith account", SpokenIntent.WhoOwesMe),
+        Case("what's the damage on the Smith account", SpokenIntent.CheckDebtors),
         Case("how are we doing this week", SpokenIntent.WeeklyEarnings),
     )
 

@@ -72,10 +72,24 @@ object SpeechNormalizer {
         "eighty" to 80.0, "ninety" to 90.0,
     )
 
+    /** "actually", "no wait", "sorry I meant": everything after is the real instruction. */
+    private val correction = Regex(
+        "\\b(?:no\\s+wait|sorry\\s+i\\s+meant|i\\s+meant|i\\s+mean|actually)\\b[,.!]?\\s*",
+        RegexOption.IGNORE_CASE,
+    )
+
     fun normalize(raw: String): String {
         val trimmed = raw.trim()
         if (trimmed.isEmpty()) return trimmed
-        var text = stripFillers(trimmed)
+        // A self-correction supersedes everything said before it — "log two
+        // hours actually make it three" is one command for three hours.
+        var input = trimmed
+        val corrections = correction.findAll(trimmed).toList()
+        if (corrections.isNotEmpty()) {
+            val after = trimmed.substring(corrections.last().range.last + 1).trim()
+            if (after.isNotEmpty()) input = after
+        }
+        var text = stripFillers(input)
 
         text = hourAndAHalf.replace(text) { match ->
             val quarter = match.groupValues[1].startsWith("q", ignoreCase = true)
@@ -187,4 +201,36 @@ object SpeechNormalizer {
 
     private fun format(value: Double): String =
         if (value % 1.0 == 0.0) value.toInt().toString() else value.toString()
+
+    /** Filler that is never an instruction on its own. */
+    private val NON_WORDS = setOf(
+        "uh", "um", "er", "erm", "ah", "eh", "hmm", "huh", "oh", "ow",
+        "the", "a", "an", "and", "so", "or", "but", "err",
+    )
+
+    /** Single words that are commands even though no rule names them. */
+    private val KNOWN_WORDS = setOf("undo", "help", "again", "repeat")
+
+    /**
+     * True when a finalised sentence is not worth a turn: empty, punctuation
+     * only, shorter than three meaningful characters, or a single word that
+     * is neither filler-like nor a command. The caller stays silent and lets
+     * the microphone carry on. Deliberately not applied while an answer is
+     * pending — "no" and "next" are real answers there.
+     */
+    fun isNoise(heard: String): Boolean {
+        val trimmed = heard.trim()
+        if (trimmed.isEmpty()) return true
+        val meaningful = trimmed.count { it.isLetterOrDigit() || it == '£' }
+        if (meaningful < 3) return true
+        val words = trimmed.split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (words.size == 1) {
+            val word = words[0].lowercase().trimEnd('.', ',', '!', '?', '—')
+            if (word in NON_WORDS) return true
+            if (word in KNOWN_WORDS) return false
+            val intent = IntentRules.classify(word)
+            return intent.intent == SpokenIntent.Other && !intent.requiresCloud
+        }
+        return false
+    }
 }

@@ -111,7 +111,7 @@ class VoiceActionRunner(
             SpokenIntent.NextJob -> nextJob()
             SpokenIntent.NextJobAddress -> nextJobAddress()
             SpokenIntent.MarkJobDone -> markJobDone(text)
-            SpokenIntent.WhoOwesMe -> whoOwesMe(text)
+            SpokenIntent.CheckDebtors -> checkDebtors(text)
             SpokenIntent.WeeklyEarnings -> weeklyEarnings()
             SpokenIntent.MonthEarnings -> monthEarnings(text)
             SpokenIntent.HoursThisWeek -> hoursThisWeek(text)
@@ -1164,39 +1164,43 @@ class VoiceActionRunner(
         return "Today: ${money(visits.sumOf { it.amount })} from ${visits.size} visits."
     }
 
-    private suspend fun whoOwesMe(text: String): String {
-        val clients = repository.observeClients().first()
-        val named = clientFor(clients, text)
-        val outstanding = repository.observeInvoices().first()
+    /**
+     * The debtor picture: unpaid invoices AND completed-but-unbilled work,
+     * rolled up per client. A named client answers for themselves alone;
+     * otherwise the worst offenders first, three spoken, the rest counted.
+     */
+    private suspend fun checkDebtors(text: String): String {
+        val clients = repository.observeClients().first().associateBy { it.id }
+        val named = clientFor(clients.values.toList(), text)
+        val invoices = repository.observeInvoices().first()
             .filter { it.status != "paid" && it.status != "draft" && it.total > 0 }
-            .filter { named == null || it.clientId == named.id }
+        val unbilled = repository.observeVisits().first()
+            .filter { !it.billed && !it.missed && it.amount > 0 }
 
-        if (outstanding.isEmpty()) {
-            return if (named != null) {
-                "${named.name} doesn't owe you anything."
+        val owed = HashMap<String, Double>()
+        invoices.forEach { owed.merge(it.clientId, it.total, Double::plus) }
+        unbilled.forEach { owed.merge(it.clientId, it.amount, Double::plus) }
+
+        if (named != null) {
+            val amount = round2(owed[named.id] ?: 0.0)
+            return if (amount <= 0.0) {
+                "${named.name} owes you nothing, and nothing of theirs is waiting."
             } else {
-                "Nobody owes you anything. Every invoice is paid."
+                slow("${named.name} owes you ${money(amount)}.")
             }
         }
-        if (named != null) {
-            val count = outstanding.size
-            return "${named.name} owes ${money(outstanding.sumOf { it.total })} across " +
-                "$count ${if (count == 1) "invoice" else "invoices"}."
-        }
 
-        val byClient = outstanding
-            .groupBy { it.clientId }
-            .mapValues { (_, invoices) -> invoices.sumOf { it.total } }
-            .toList()
-            .sortedByDescending { (_, total) -> total }
-        val total = byClient.sumOf { (_, amount) -> amount }
-        val names = byClient.take(3).joinToString { (clientId, amount) ->
-            val name = clients.firstOrNull { it.id == clientId }?.name ?: "a client"
-            "$name ${money(amount)}"
+        val total = round2(owed.values.sumOf { it })
+        if (total <= 0.0) {
+            return "Nobody owes you anything, and nothing is waiting to be billed."
         }
-        val more = if (byClient.size > 3) ", and ${byClient.size - 3} more" else ""
-        val invoices = if (outstanding.size == 1) "invoice" else "invoices"
-        return "${money(total)} outstanding across ${outstanding.size} $invoices: $names$more."
+        val names = owed.entries.sortedByDescending { it.value }
+            .take(3)
+            .joinToString(", ") { (id, amount) ->
+                "${clients[id]?.name ?: "a client"} owes ${money(round2(amount))}"
+            }
+        val more = if (owed.size > 3) ", and ${owed.size - 3} more" else ""
+        return slow("You've got ${money(total)} outstanding. $names$more.")
     }
 
     private suspend fun nextJobAddress(): String {

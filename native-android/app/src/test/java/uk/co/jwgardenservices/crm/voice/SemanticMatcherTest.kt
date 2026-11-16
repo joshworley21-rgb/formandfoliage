@@ -26,7 +26,7 @@ class SemanticMatcherTest {
     @Test
     fun `other phrasings of the common commands route`() {
         assertEquals(SpokenIntent.MarkJobDone, intent("smiths sorted"))
-        assertEquals(SpokenIntent.WhoOwesMe, intent("anyone owing money"))
+        assertEquals(SpokenIntent.CheckDebtors, intent("anyone owing money"))
         assertEquals(SpokenIntent.CheckSchedule, intent("read me my diary"))
         assertEquals(SpokenIntent.NextJob, intent("what is coming up next"))
         assertEquals(SpokenIntent.TodayEarnings, intent("what have i taken today"))
