@@ -81,6 +81,19 @@
             android:name=".voice.AssistantService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- "Call office" quick-settings tile: one swipe and tap from the lock
+             screen starts or resumes an assistant call. -->
+        <service
+            android:name=".voice.CallOfficeTile"
+            android:icon="@drawable/ic_notification"
+            android:label="Call office"
+            android:exported="true"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>
