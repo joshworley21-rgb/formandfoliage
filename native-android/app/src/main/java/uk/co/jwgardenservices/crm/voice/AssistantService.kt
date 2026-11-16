@@ -93,6 +93,9 @@ class AssistantService : Service() {
     /** Whether a fresh call answers with a short "Hello?". */
     private var pickupGreeting = true
 
+    /** Whether a finished answer is followed by "Anything else?". */
+    private var askFollowUp = true
+
     /** Set once the caller has said something in this call. */
     @Volatile
     private var heardInCall = false
@@ -163,6 +166,9 @@ class AssistantService : Service() {
         }
         scope.launch {
             AssistantPreferences.pickupFlow(this@AssistantService).collect { pickupGreeting = it }
+        }
+        scope.launch {
+            AssistantPreferences.followUpFlow(this@AssistantService).collect { askFollowUp = it }
         }
         scope.launch { handleTranscripts() }
     }
@@ -317,6 +323,25 @@ class AssistantService : Service() {
         }
     }
 
+    /**
+     * Speak a finished answer, optionally nudging the conversation along.
+     * A reply that already ends in a question needs no prompt, and help or
+     * small talk is left alone so it does not feel like a script.
+     */
+    private suspend fun sayAnswer(text: String) {
+        val clean = text.trim()
+        if (clean.isNotEmpty() && askFollowUp && !clean.endsWith("?")) {
+            val nudge = VoiceLines.pick(
+                "Anything else?",
+                "Anything else I can do?",
+                "What else?",
+            )
+            say("$clean $nudge")
+        } else {
+            say(clean)
+        }
+    }
+
     private fun onlineSpeaker(): CloudVoice =
         cloudVoice ?: CloudVoice(this).also { cloudVoice = it }
 
@@ -385,18 +410,18 @@ class AssistantService : Service() {
                     .onFailure { CrashLog.note(this, TAG, "confirmation failed: ${it.message}") }
                     .getOrNull()
                 if (confirmed != null) {
-                    say(confirmed)
+                    sayAnswer(confirmed)
                     return@collect
                 }
                 if (undoRequested(text)) {
-                    say(actions.undoLast())
+                    sayAnswer(actions.undoLast())
                     return@collect
                 }
                 val remembered = runCatching { memoryCommand(text) }
                     .onFailure { CrashLog.note(this, TAG, "memory command failed: ${it.message}") }
                     .getOrNull()
                 if (remembered != null) {
-                    say(remembered)
+                    sayAnswer(remembered)
                     return@collect
                 }
                 // A previous turn may have asked "How many hours?" — finish
@@ -406,7 +431,7 @@ class AssistantService : Service() {
                     .getOrNull()
                 if (followUp != null) {
                     CrashLog.note(this, TAG, "pending reply: ${followUp.take(120)}")
-                    say(followUp)
+                    sayAnswer(followUp)
                 } else {
                     answerTurn(text)
                 }
@@ -439,7 +464,7 @@ class AssistantService : Service() {
             }
             if (replies.isNotEmpty()) {
                 CrashLog.note(this, TAG, "multi-step: ${replies.size} in ${System.currentTimeMillis() - started}ms")
-                say(replies.joinToString(" "))
+                sayAnswer(replies.joinToString(" "))
                 return
             }
         }
@@ -527,7 +552,7 @@ class AssistantService : Service() {
                         TAG,
                         "cloud answered in ${System.currentTimeMillis() - started}ms",
                     )
-                    say(reply.answer)
+                    sayAnswer(reply.answer)
                     return
                 }
                 val intent = reply.intent
@@ -582,7 +607,7 @@ class AssistantService : Service() {
             .onFailure { CrashLog.note(this, TAG, "action failed: ${it.message}") }
             .getOrNull()
         CrashLog.note(this, TAG, "action reply: ${executed ?: "none"}")
-        say(executed ?: confirmationFor(intent))
+        sayAnswer(executed ?: confirmationFor(intent))
     }
 
     /**
@@ -620,6 +645,10 @@ class AssistantService : Service() {
         return when {
             Regex("^(hi|hello|hey|good morning|good afternoon|good evening)\b")
                 .containsMatchIn(lower) -> "Hello. What can I do?"
+            lower in setOf(
+                "no", "no thanks", "nothing", "that's all", "thats all", "all done",
+                "we're done", "were done", "finished", "no thank you",
+            ) -> "Right, I'll leave you to it."
             lower.contains("thank") -> "Any time."
             lower.contains("how are you") -> "All good, thanks. What do you need?"
             lower.contains("what can you do") || lower == "help" -> HELP_TEXT

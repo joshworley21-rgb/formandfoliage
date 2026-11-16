@@ -91,6 +91,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = false)
     val pickupGreeting by AssistantPreferences.pickupFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
+    val followUp by AssistantPreferences.followUpFlow(context)
+        .collectAsStateWithLifecycle(initialValue = true)
     val micSource by AssistantPreferences.micSourceFlow(context)
         .collectAsStateWithLifecycle(initialValue = MicSource.Communication)
     val phononEnabled by AssistantPreferences.phononFlow(context)
@@ -685,6 +687,24 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     text = "A fresh call answers with a short greeting before the microphone " +
                         "opens. The clip is prepared while the line rings, so it does not cost " +
                         "the first reply. Turning it off makes the assistant listen immediately.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Switch(
+                        checked = followUp,
+                        onCheckedChange = { enabled ->
+                            scope.launch { AssistantPreferences.setFollowUp(context, enabled) }
+                        },
+                    )
+                    Text(
+                        text = "Ask \"anything else?\" after each answer",
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+                Text(
+                    text = "A finished answer ends with a short nudge so the call keeps its " +
+                        "rhythm. Replies that already ask a question are left alone.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

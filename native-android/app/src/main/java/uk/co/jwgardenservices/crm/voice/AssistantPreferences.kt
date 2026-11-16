@@ -42,6 +42,7 @@ private val PICKUP_KEY = booleanPreferencesKey("pickup_greeting")
 private val USED_KEY = booleanPreferencesKey("assistant_used")
 private val PHONON_VOICE_KEY = stringPreferencesKey("phonon_voice")
 private val ASR_ENGINE_KEY = stringPreferencesKey("asr_engine")
+private val FOLLOW_UP_KEY = booleanPreferencesKey("follow_up")
 
 /** The on-device speech recogniser. Streaming is the default; Moonshine is a test. */
 enum class AsrEngine(val label: String) {
@@ -203,6 +204,20 @@ object AssistantPreferences {
     suspend fun setPickup(context: Context, enabled: Boolean) {
         context.assistantDataStore.edit { preferences ->
             preferences[PICKUP_KEY] = enabled
+        }
+    }
+
+    /**
+     * Ask "anything else?" after a finished answer, so the call keeps its
+     * conversational rhythm instead of going quiet until the next command.
+     */
+    fun followUpFlow(context: Context): Flow<Boolean> = context.assistantDataStore.data.map { preferences ->
+        preferences[FOLLOW_UP_KEY] ?: true
+    }
+
+    suspend fun setFollowUp(context: Context, enabled: Boolean) {
+        context.assistantDataStore.edit { preferences ->
+            preferences[FOLLOW_UP_KEY] = enabled
         }
     }
 

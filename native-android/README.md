@@ -285,6 +285,11 @@ deliberately left on the web for now. The smaller known gaps:
   "stick Simon down for a half day" is understood without a cloud call.
   Ambiguous turns still go to `voice-route`. It is not an LLM: no download,
   no model, well under a millisecond.
+- **Conversational follow-up**: a finished answer ends with a short
+  "Anything else?" (rotated through a few phrasings), so the call keeps its
+  rhythm instead of going quiet. Replies that already end in a question —
+  slot filling, confirmation, help — are left alone. Settings → Call turns it
+  off. The mic reopens after the nudge as usual.
 - **Conversational confirmation**: "mark Smiths done" accepts natural
   affirmatives ("yeah spot on", "do it", "cheers"), and a changed duration
   ("no, four hours", "make it four") updates the pending hours and re-confirms
