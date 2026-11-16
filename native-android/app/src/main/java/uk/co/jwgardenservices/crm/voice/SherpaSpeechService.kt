@@ -8,6 +8,7 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -119,6 +120,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @Volatile
     private var hotwordNames: List<String> = emptyList()
 
+    /** True when the generated bpe.vocab allows token-level hotword biasing. */
+    @Volatile
+    private var hotwordBiasEnabled = false
+
     /** Set while the confirmation is spoken, so the phone ignores itself. */
     @Volatile
     private var paused = false
@@ -139,6 +144,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     var onBargeIn: (() -> Unit)? = null
 
     private var echoCanceller: AcousticEchoCanceler? = null
+    private var gainController: AutomaticGainControl? = null
 
     @Volatile
     private var pausedAt = 0L
@@ -310,6 +316,12 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         val onlineEngine = if (offlineMode) null else ensureRecognizer()
         if (!offlineMode && onlineEngine == null) return
         hotwordNames = AsrHotwords.names()
+        val hotwordBias = if (!offlineMode && hotwordBiasEnabled) {
+            AsrHotwords.buildBias(hotwordNames)
+        } else {
+            ""
+        }
+        CrashLog.note(context, TAG, "hotword names=${hotwordNames.size} bias=${hotwordBias.isNotBlank()}")
 
         if (!hasMicPermission()) {
             fail("Microphone permission is needed to listen.")
@@ -335,7 +347,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             Thread({ processOffline(record) }, "moonshine-asr")
         } else {
             val engine = onlineEngine ?: return
-            Thread({ process(engine, record) }, "zipformer-asr")
+            Thread({ process(engine, record, hotwordBias) }, "zipformer-asr")
         }.apply { start() }
         } finally {
             startLock.unlock()
@@ -387,8 +399,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     override fun close() {
         released = true
-        runCatching { echoCanceller?.release() }
-        echoCanceller = null
+        releaseMicEffects()
         listening = false
         resumeAfterPause = false
         runCatching { audioRecord?.stop() }
@@ -405,8 +416,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     // --- audio loop -------------------------------------------------------
 
     @SuppressLint("MissingPermission") // checked by startListening before this point
-    private fun process(engine: OnlineRecognizer, record: AudioRecord) {
-        val stream = engine.createStream()
+    private fun process(engine: OnlineRecognizer, record: AudioRecord, hotwords: String) {
+        val stream = if (hotwords.isBlank()) engine.createStream() else engine.createStream(hotwords)
         val vad = createVad()
         var hasSpeech = false
         var lastVoiceAt = 0L
@@ -471,8 +482,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             if (!released) fail(error.message ?: "Speech recognition failed.")
         } finally {
             runCatching { vad?.release() }
-            runCatching { echoCanceller?.release() }
-            echoCanceller = null
+            releaseMicEffects()
             runCatching { record.release() }
             if (audioRecord === record) audioRecord = null
             runCatching { stream.release() }
@@ -574,8 +584,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             if (!released) fail(error.message ?: "Speech recognition failed.")
         } finally {
             runCatching { vad?.release() }
-            runCatching { echoCanceller?.release() }
-            echoCanceller = null
+            releaseMicEffects()
             runCatching { record.release() }
             if (audioRecord === record) audioRecord = null
             listening = false
@@ -725,6 +734,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     private fun createRecognizer(): OnlineRecognizer {
         requireModelFiles()
         val modelDir = copyModelFiles()
+        // Hotword biasing needs the model's pieces as a sentencepiece vocab.
+        // The checkpoint ships only tokens.txt, so an equal-score bpe.vocab is
+        // generated from it once; null means "no biasing, behave as before".
+        val vocab = AsrHotwords.ensureVocab(context, modelDir)
         val config = OnlineRecognizerConfig(
             featConfig = FeatureConfig(sampleRate = SAMPLE_RATE, featureDim = FEATURE_DIM),
             modelConfig = OnlineModelConfig(
@@ -736,6 +749,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 tokens = File(modelDir, TOKENS_FILE).absolutePath,
                 numThreads = 2,
                 provider = "cpu",
+                modelingUnit = if (vocab != null) "bpe" else "",
+                bpeVocab = vocab.orEmpty(),
                 // Leave modelType empty: the 06-26 archive reports
                 // "zipformer2" in its ONNX metadata, and forcing "zipformer"
                 // makes the native loader crash while parsing the encoder.
@@ -754,7 +769,11 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             // background noise noticeably better than greedy decoding.
             decodingMethod = "modified_beam_search",
             maxActivePaths = 4,
+            hotwordsScore = 2.0f,
         )
+        val vocabSource = if (vocab != null) "bpe.vocab" else "no vocab"
+        CrashLog.note(context, TAG, "hotword biasing=${vocab != null} ($vocabSource)")
+        hotwordBiasEnabled = vocab != null
         Log.i(TAG, "Loading streaming Zipformer: ${File(modelDir, ENCODER_FILE)}")
         return OnlineRecognizer(assetManager = null, config = config).also {
             Log.i(TAG, "Streaming recognizer ready")
@@ -800,8 +819,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     @SuppressLint("MissingPermission") // checked by startListening before this point
     private fun createAudioRecord(source: Int): AudioRecord {
-        echoCanceller?.release()
-        echoCanceller = null
+        releaseMicEffects()
         val minBytes = AudioRecord.getMinBufferSize(
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
@@ -830,7 +848,25 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             }.getOrNull()
             CrashLog.note(context, TAG, "echo canceller=${echoCanceller != null}")
         }
+        if (source == MediaRecorder.AudioSource.VOICE_COMMUNICATION) {
+            // Keep hardware AEC for barge-in, but turn Android's automatic gain
+            // control off: on the communication source it ducks and clips the
+            // speech harmonics, which the recogniser reads as worse audio.
+            gainController = runCatching {
+                AutomaticGainControl.create(record.audioSessionId)
+            }.getOrNull()
+            runCatching { gainController?.setEnabled(false) }
+            CrashLog.note(context, TAG, "agc off=${gainController != null}")
+        }
         return record
+    }
+
+    /** Release the platform echo/gain effects; safe to call repeatedly. */
+    private fun releaseMicEffects() {
+        runCatching { echoCanceller?.release() }
+        echoCanceller = null
+        runCatching { gainController?.release() }
+        gainController = null
     }
 
     private fun hasMicPermission(): Boolean = ContextCompat.checkSelfPermission(

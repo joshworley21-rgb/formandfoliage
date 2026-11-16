@@ -218,13 +218,14 @@ deliberately left on the web for now. The smaller known gaps:
   phone audio, while this one still emits live partial words like a phone
   call. Builds are arm64-v8a only. Nothing is downloaded at runtime, so the
   tab works offline.
-- **Hotword correction**: client names are rebuilt from the Room cache at
-  each call and close misses in the final transcript are replaced with the
-  canonical name (one edit for five-letter names, two for nine or more).
-  The streaming model uses a 500-piece BPE vocabulary without its merge
-  table, so sherpa-onnx's token-level hotword biasing cannot be encoded
-  safely; this correction works with the current model and also applies to
-  the Moonshine transcript.
+- **Client-name biasing**: two layers. First, each call builds a `bpe.vocab`
+  from the model's `tokens.txt` (equal scores, so ssentencepiece segments by
+  longest match — the pattern sherpa's own CI uses) and passes the names to
+  `createStream("SMITHS :2.0\n…")`, which biases the decoder while it is
+  listening. Longest match does not always equal the model's true merges, so
+  a second layer replaces near misses in the final transcript with the
+  canonical name (one edit for five-letter names, two for nine or more). The
+  correction also applies to Moonshine. Both layers are logged.
 - **Moonshine v2 (experimental)**: Settings → Assistant settings →
   Moonshine ASR downloads the 135 MB base English model (MIT) on Wi-Fi. It is
   offline, so it has no live partial words; the call buffers one utterance
@@ -275,6 +276,19 @@ deliberately left on the web for now. The smaller known gaps:
   "forget everything" removes them. Facts and the last 24 turns live in a
   DataStore file (`assistant_memory`), so they survive restarts. Nothing is
   sent anywhere unless a turn goes to the cloud.
+- **Semantic fallback**: between the rules and the cloud, a small weighted
+  phrase matcher expands trade slang into synonym groups (log/stick/put/chalk,
+  done/sorted/squared, owe/outstanding/unpaid) and scores it against a
+  curated corpus of British phrasings. It answers locally only when the match
+  is clear and ahead of the runner-up — reads at 0.60, writes at 0.70 — so
+  "stick Simon down for a half day" is understood without a cloud call.
+  Ambiguous turns still go to `voice-route`. It is not an LLM: no download,
+  no model, well under a millisecond.
+- **Conversational confirmation**: "mark Smiths done" accepts natural
+  affirmatives ("yeah spot on", "do it", "cheers"), and a changed duration
+  ("no, four hours", "make it four") updates the pending hours and re-confirms
+  instead of cancelling. Only an explicit "no", "leave it" or "forget it"
+  cancels; anything else is handled as a new command.
 - **Fast path**: the deterministic rules answer the common, unambiguous
   commands (hours, diary, next job, money owed, week's takings) immediately.
   Anything else is classified by the cloud function in about a second. If the
@@ -365,9 +379,11 @@ deliberately left on the web for now. The smaller known gaps:
   quickstart prompt. Custom Gradium Studio voices can also be dropped into
   the same folder.
 - **Call feel**: the microphone runs on `VOICE_COMMUNICATION` with
-  `AcousticEchoCanceler`, so the assistant can hear an interruption over its
-  own speech. Talking over it for about 300 ms cuts playback and hands the
-  floor back immediately. Turn ends are detected by **Silero VAD** (a 640 KB
+  `AcousticEchoCanceler` kept on for barge-in, while `AutomaticGainControl` is
+  explicitly disabled — Android's AGC ducks and clips the speech harmonics on
+  that source, which the recogniser reads as worse audio. Talking over it for
+  about 300 ms cuts playback and hands the floor back immediately. Turn ends
+  are detected by **Silero VAD** (a 640 KB
   `silero_vad.onnx` checked into assets) with the recognizer's endpoint as a
   fallback. Replies split at clauses and conjunctions every ~6 words so
   the first audio starts sooner, and four cached "thinker" clips ("Let me

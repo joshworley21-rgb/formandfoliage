@@ -159,11 +159,14 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             if (closed) return@withLock
             val engine = ensureEngine() ?: return@withLock
             val sid = speakerFor(engine, speakerId)
-            // Only the first clip is prepared eagerly; the rest are generated
-            // on demand so a fast first command never waits for four clips.
-            if (fillers[0] == null) {
-                fillers[0] = withContext(Dispatchers.Default) {
-                    engine.generate(FILLER_TEXTS[0], sid, speed)
+            // The first two clips are prepared eagerly; the rest are
+            // generated on demand so a fast first command never waits for all
+            // of them. Two gives the caller variety without much start-up cost.
+            for (index in 0..1) {
+                if (fillers[index] == null) {
+                    fillers[index] = withContext(Dispatchers.Default) {
+                        engine.generate(FILLER_TEXTS[index], sid, speed)
+                    }
                 }
             }
             // The pickup clip is generated in the same pass, so answering a
@@ -511,7 +514,14 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             if (buffer.isNotEmpty()) buffer.append(' ')
             buffer.append(part)
             words += part.split(Regex("\\s+")).count { it.isNotBlank() }
-            if (words >= 6) {
+            val last = part.lastOrNull()
+            val sentenceEnd = last == '.' || last == '!' || last == '?'
+            val clauseEnd = last == ',' || last == ';' || last == ':' || last == '—' ||
+                last == '–'
+            // Flush at a sentence boundary, after a clause once there are four
+            // words to say, or at six words regardless. The first audio then
+            // starts a clause earlier on longer replies.
+            if (sentenceEnd || words >= 6 || (clauseEnd && words >= 4)) {
                 chunks += buffer.toString()
                 buffer.setLength(0)
                 words = 0
@@ -617,6 +627,9 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             "One moment.",
             "Right, let me see.",
             "One second.",
+            "Just pulling that up.",
+            "Bear with me.",
+            "Having a look now.",
         )
     }
 }

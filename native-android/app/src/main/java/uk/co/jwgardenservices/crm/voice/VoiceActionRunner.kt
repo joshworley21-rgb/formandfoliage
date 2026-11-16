@@ -170,7 +170,15 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
         val visitId = repository.saveVisit(draft)
         lastUndo = Undo.Visit(visitId, client.name)
         val whenText = if (date == LocalDate.now()) "" else " for ${date.dayOfMonth}/${date.monthValue}"
-        return "Logged ${hoursLabel(hours)} for ${client.name}$whenText, ${money(draft.amount)}."
+        return VoiceLines.pick(
+            "Logged ${hoursLabel(hours)} for ${client.name}$whenText, ${money(draft.amount)}.",
+            "Sorted — ${hoursLabel(hours)} down for ${client.name}$whenText, " +
+                "${money(draft.amount)}.",
+            "All logged. ${hoursLabel(hours)} at ${client.name}$whenText, " +
+                "that's ${money(draft.amount)}.",
+            "Done — ${hoursLabel(hours)} for ${client.name}$whenText goes on at " +
+                "${money(draft.amount)}.",
+        )
     }
 
     /** Answer "what have I got on" for today, tomorrow, a weekday or next week. */
@@ -265,7 +273,12 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
         val hours = round2((job.durationMinutes / 60.0).coerceAtLeast(0.5))
         val name = client?.name ?: "the client"
         confirmDone = ConfirmDone(job.id, name, hours, "Completed by voice")
-        return "Mark the job for $name done, ${hoursLabel(hours)}? Say yes to confirm."
+        return VoiceLines.pick(
+            "Mark the job for $name done, ${hoursLabel(hours)}? Say yes to confirm.",
+            "That's $name at ${hoursLabel(hours)} — shall I mark it done? Say yes to confirm.",
+            "About to mark $name's job done at ${hoursLabel(hours)}. Say yes to confirm, " +
+                "or no to leave it.",
+        )
     }
 
     /**
@@ -275,16 +288,46 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
      */
     suspend fun answerConfirmation(transcript: String): String? {
         val waiting = confirmDone ?: return null
-        confirmDone = null
         val lower = transcript.lowercase().trim()
+
+        // "No, four hours" / "actually make it four" adjusts the pending
+        // confirmation instead of cancelling it, then asks again.
+        val changed = spokenHours(lower)
+            ?: Regex("\\bmake it ([a-z0-9]+)\\b").find(lower)
+                ?.groupValues?.get(1)
+                ?.let { parseSpokenNumber(it) }
+        if (changed != null && changed > 0.0) {
+            val updated = waiting.copy(hours = round2(changed))
+            confirmDone = updated
+            return VoiceLines.pick(
+                "${hoursLabel(updated.hours)} for ${updated.clientName} then — say yes to confirm.",
+                "I'll make it ${hoursLabel(updated.hours)} for ${updated.clientName}. " +
+                    "Say yes to confirm.",
+            )
+        }
+
+        confirmDone = null
+        val words = lower
+            .replace(Regex("[^a-z' ]"), " ")
+            .trim()
+            .split(Regex("\\s+"))
+            .filter { it.isNotBlank() }
+        val short = words.isNotEmpty() && words.size <= 4
         return when {
-            Regex("^(yes|yeah|yep|confirm|do it|go ahead|ok|okay)[.!]?$").matches(lower) -> {
+            short && words.all { it in AFFIRM_WORDS } -> {
                 repository.staffCompleteJob(waiting.jobId, waiting.hours, waiting.description)
-                "Marked the job for ${waiting.clientName} done, ${hoursLabel(waiting.hours)}."
+                VoiceLines.pick(
+                    "Marked the job for ${waiting.clientName} done, ${hoursLabel(waiting.hours)}.",
+                    "Done — ${waiting.clientName} is marked down at ${hoursLabel(waiting.hours)}.",
+                    "${waiting.clientName}'s job is closed off, ${hoursLabel(waiting.hours)}.",
+                )
             }
 
-            Regex("^(no|nope|cancel|don't|do not|stop)[.!]?$").matches(lower) ->
-                "Cancelled."
+            short && words.all { it in CANCEL_WORDS } -> VoiceLines.pick(
+                "Cancelled.",
+                "Right, I've left it alone.",
+                "No problem, cancelled.",
+            )
 
             else -> null
         }
@@ -298,14 +341,21 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
             is Undo.Visit -> {
                 runCatching { repository.deleteVisit(action.id) }
                     .getOrElse { return "I couldn't remove that visit." }
-                "Removed the visit for ${action.clientName}."
+                VoiceLines.pick(
+                    "Removed the visit for ${action.clientName}.",
+                    "Taken off — the visit for ${action.clientName} is gone.",
+                    "Done, ${action.clientName}'s visit is deleted.",
+                )
             }
 
             is Undo.Note -> {
                 val client = repository.client(action.clientId)
                     ?: return "That client is gone."
                 repository.updateClient(client, clientDraft(client, action.previous))
-                "Removed that note for ${action.clientName}."
+                VoiceLines.pick(
+                    "Removed that note for ${action.clientName}.",
+                    "Right, the note for ${action.clientName} is gone.",
+                )
             }
         }
     }
@@ -343,7 +393,11 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
         }
         repository.updateClient(client, clientDraft(client, combined))
         lastUndo = Undo.Note(client.id, previous, client.name)
-        return "Noted for ${client.name}."
+        return VoiceLines.pick(
+            "Noted for ${client.name}.",
+            "Got it — that's on ${client.name}'s notes.",
+            "Written down for ${client.name}.",
+        )
     }
 
     private fun clientDraft(client: Client, notes: String?) = ClientDraft(
@@ -644,5 +698,22 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
     private companion object {
         /** Articles and company suffixes never identify a client on their own. */
         val STOP_WORDS = setOf("the", "and", "ltd", "limited", "llp")
+
+        /** Natural ways to accept a pending confirmation. */
+        val AFFIRM_WORDS = setOf(
+            "yes", "yeah", "yep", "yup", "ya", "aye", "sure", "right", "correct",
+            "spot", "on", "do", "it", "done", "go", "ahead", "cheers", "good",
+            "great", "lovely", "okay", "ok", "alright", "absolutely", "definitely",
+            "please", "thanks", "thank", "you", "that", "that's", "fine",
+            "confirmed", "confirm", "agree", "accepted", "proper", "sorted",
+            "sounds", "brilliant", "perfect", "cracking", "dead",
+        )
+
+        /** Natural ways to abandon a pending confirmation. */
+        val CANCEL_WORDS = setOf(
+            "no", "nope", "nah", "cancel", "stop", "leave", "it", "don't", "dont",
+            "do", "not", "forget", "scratch", "that", "never", "mind", "bother",
+            "wait", "hold", "scrap", "actually", "wrong", "rubbish",
+        )
     }
 }

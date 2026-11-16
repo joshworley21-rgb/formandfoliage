@@ -462,6 +462,27 @@ class AssistantService : Service() {
             return
         }
 
+        // 1.5 Semantic fallback: the rules are word-for-word, so British slang
+        //     ("stick Simon down for a half day") slips past them. A weighted
+        //     phrase match against a curated corpus routes the clear cases
+        //     locally and instantly; anything ambiguous still goes to the
+        //     cloud below.
+        if (!quick.requiresCloud) {
+            val routed = SemanticMatcher.classify(lower)
+            val dateSafe = routed != null && (!temporal || routed.first in dateIndependent)
+            if (routed != null && dateSafe) {
+                val score = "%.2f".format(routed.second)
+                CrashLog.note(
+                    this,
+                    TAG,
+                    "intent=semantic:${routed.first.wire} score=$score " +
+                        "in ${System.currentTimeMillis() - started}ms",
+                )
+                runIntent(text, IntentResult(routed.first, quick.clientOrTopic, false))
+                return
+            }
+        }
+
         // 2. Exactly one optional cloud call. The business snapshot is built
         //    only now, and only when a cloud call is actually allowed: a local
         //    answer never pays for the Room/DataStore reads.
