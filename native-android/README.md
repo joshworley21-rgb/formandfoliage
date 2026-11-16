@@ -195,8 +195,9 @@ deliberately left on the web for now. The smaller known gaps:
 - **Dialling and pickup**: the green button rings out with a generated UK
   ringback (400 + 450 Hz, 0.4/0.2/0.4 s cadence) instead of showing a model
   loading spinner. When the recogniser is listening it stops, the status
-  changes to Dialling… → Connected, and the assistant answers with a short
-  "Hello?" before reopening the mic. The clip is generated with the cached
+  changes to Dialling… → Connected, and the assistant answers with "Hello,
+  how can I help?" before reopening the mic. The greeting is also shown in
+  the transcript. The clip is generated with the cached
   filler, so it costs nothing on later calls. Re-entering the tab does not
   repeat it, and it is skipped if the caller has already started speaking.
   Settings → Assistant settings → Call turns the greeting off (the ringback

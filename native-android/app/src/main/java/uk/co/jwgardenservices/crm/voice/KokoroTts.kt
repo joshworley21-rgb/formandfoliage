@@ -37,6 +37,9 @@ import kotlin.math.abs
  * AudioTrack and returns once playback finishes, so callers can mute the mic
  * for the whole utterance.
  */
+/** Said once when a fresh call connects; also shown in the transcript. */
+internal const val PICKUP_TEXT = "Hello, how can I help?"
+
 class KokoroTts(private val context: Context) : AutoCloseable {
 
     private val loadLock = Mutex()
@@ -173,19 +176,18 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         }
     }
 
-    /** Answer the call with a short "Hello?", using the cached clip when warm. */
+    /** Answer the call with the greeting, using the cached clip when warm. */
     suspend fun speakPickup(
         speakerId: Int = KokoroVoice.BmFable.speakerId,
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
-    ) {
-        if (closed) return
+    ): Boolean {
+        if (closed) return false
         if (phononActive()) {
-            runCatching { phononSpeech().speak(PICKUP_TEXT) }
-            return
+            return runCatching { phononSpeech().speak(PICKUP_TEXT) }.isSuccess
         }
-        speakLock.withLock {
-            if (closed) return@withLock
-            val engine = ensureEngine() ?: return@withLock
+        return speakLock.withLock {
+            if (closed) return@withLock false
+            val engine = ensureEngine() ?: return@withLock false
             val sid = speakerFor(engine, speakerId)
             val audio = pickup ?: withContext(Dispatchers.Default) {
                 engine.generate(PICKUP_TEXT, sid, speed)
@@ -530,11 +532,11 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         }
     }
 
-    private suspend fun play(audio: GeneratedAudio) {
+    private suspend fun play(audio: GeneratedAudio): Boolean {
         val samples = trimSilence(audio.samples, audio.sampleRate)
         if (samples.isEmpty()) {
             CrashLog.note(context, TAG, "empty audio returned by Kokoro")
-            return
+            return false
         }
         val pcm = ShortArray(samples.size) { index ->
             (samples[index].coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt().toShort()
@@ -560,7 +562,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         track = player
         CrashLog.note(context, TAG, "playing ${pcm.size} samples @ ${audio.sampleRate} Hz")
         try {
-            if (player.write(pcm, 0, pcm.size) <= 0) return
+            if (player.write(pcm, 0, pcm.size) <= 0) return false
             player.play()
             // Static playback has no blocking write; wait out the clip and a
             // small tail so the last syllable is not cut off. Check in slices
@@ -578,6 +580,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             if (track === player) track = null
             CrashLog.note(context, TAG, "playback finished")
         }
+        return true
     }
 
     override fun close() {
@@ -605,9 +608,6 @@ class KokoroTts(private val context: Context) : AutoCloseable {
 
         /** Bump whenever the set of copied files changes. */
         const val COPY_VERSION = "2"
-
-        /** Said once when a fresh call connects. */
-        const val PICKUP_TEXT = "Hello?"
 
         /** Rotated while a slower answer is on its way. */
         val FILLER_TEXTS = listOf(

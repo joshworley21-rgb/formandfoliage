@@ -22,6 +22,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -236,18 +237,44 @@ class AssistantService : Service() {
         } ?: false
         setNotification(LISTENING_TEXT)
         _dialling.value = false
-        if (!connected || !_callActive.value) return
-        if (heardInCall || _thinking.value || _speaking.value) return
-        if (speech.state.value.partial.isNotBlank() || !pickupGreeting) return
+        if (!connected || !_callActive.value) {
+            CrashLog.note(this, TAG, "pickup skipped: line not connected")
+            return
+        }
+        if (heardInCall || _thinking.value || _speaking.value) {
+            CrashLog.note(this, TAG, "pickup skipped: caller already speaking")
+            return
+        }
+        if (speech.state.value.partial.isNotBlank()) {
+            CrashLog.note(this, TAG, "pickup skipped: partial speech")
+            return
+        }
+        val wantsGreeting = runCatching {
+            AssistantPreferences.pickupFlow(this@AssistantService).first()
+        }.getOrDefault(pickupGreeting)
+        if (!wantsGreeting) {
+            CrashLog.note(this, TAG, "pickup skipped: greeting is off")
+            return
+        }
+        val greeting = PICKUP_TEXT
         val started = System.currentTimeMillis()
         speech.pauseForSpeech()
         _speaking.value = true
+        // Show the greeting in the conversation immediately, even if the
+        // speaker is muted or the clip fails.
+        _turns.value = (_turns.value + AssistantTurn(fromUser = false, text = greeting))
+            .takeLast(MAX_TURNS)
+        val focused = requestAudioFocus()
         try {
-            speaker.speakPickup(speakerId, speed)
+            // Let the ringback AudioTrack release and the route settle before
+            // the first syllable, otherwise the greeting can start clipped.
+            delay(120)
+            val spoken = speaker.speakPickup(speakerId, speed)
+            CrashLog.note(this, TAG, "pickup spoken=$spoken in ${System.currentTimeMillis() - started}ms")
         } finally {
+            if (focused) abandonAudioFocus()
             _speaking.value = false
             speech.resumeAfterSpeech()
-            CrashLog.note(this, TAG, "pickup in ${System.currentTimeMillis() - started}ms")
         }
     }
 

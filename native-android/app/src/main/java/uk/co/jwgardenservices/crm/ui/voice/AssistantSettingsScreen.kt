@@ -487,14 +487,14 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         },
                     )
                     Text(
-                        text = "Say \"Hello?\" when a call connects",
+                        text = "Say \"Hello, how can I help?\" when a call connects",
                         modifier = Modifier.padding(start = 8.dp),
                     )
                 }
                 Text(
-                    text = "A fresh call answers with a short hello before the microphone opens. " +
-                        "The clip is prepared when the call starts, so it does not cost the first " +
-                        "reply. Turning it off makes the assistant listen immediately.",
+                    text = "A fresh call answers with a short greeting before the microphone " +
+                        "opens. The clip is prepared while the line rings, so it does not cost " +
+                        "the first reply. Turning it off makes the assistant listen immediately.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
