@@ -179,6 +179,10 @@ class AssistantService : Service() {
         CrashLog.note(this, TAG, if (fresh) "call starting" else "call resuming")
         if (fresh) {
             heardInCall = false
+            // A new call must not inherit a reply from the last one.
+            speaker.stopPlayback()
+            cloudVoice?.stop()
+            _speaking.value = false
             // Ring out while the model and voice load; the caller hears a
             // dialling line instead of a loading spinner.
             _dialling.value = true
@@ -284,6 +288,7 @@ class AssistantService : Service() {
 
     /** Speak a reply and add it to the rolling transcript. */
     private suspend fun say(text: String) {
+        if (!_callActive.value) return
         val clean = text.trim()
         if (clean.isEmpty()) return
         _thinking.value = false
@@ -329,6 +334,9 @@ class AssistantService : Service() {
         _callActive.value = false
         _dialling.value = false
         ringback.stop()
+        speaker.stopPlayback()
+        cloudVoice?.stop()
+        _speaking.value = false
         speech.stopListening()
         abandonAudioFocus()
         runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }

@@ -4,10 +4,12 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.os.SystemClock
 import android.system.Os
 import android.util.Log
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -72,6 +74,21 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
                 }
                 if (samples.get() == 0) {
                     CrashLog.note(context, TAG, "no audio for: ${clean.take(40)}")
+                }
+                // engine.speak() returns when generation finishes, not when the
+                // AudioTrack has played. The streaming buffer can hold around
+                // two seconds, so stopping and releasing here would cut off a
+                // short greeting or the end of a long reply.
+                if (!stopped && !closed) {
+                    val total = samples.get()
+                    val deadline = SystemClock.elapsedRealtime() + 30_000
+                    while (!stopped && !closed &&
+                        player.playbackHeadPosition < total &&
+                        SystemClock.elapsedRealtime() < deadline
+                    ) {
+                        delay(20)
+                    }
+                    delay(40)
                 }
                 true
             } finally {
