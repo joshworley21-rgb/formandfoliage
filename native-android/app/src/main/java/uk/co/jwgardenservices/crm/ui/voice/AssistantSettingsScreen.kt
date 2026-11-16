@@ -57,6 +57,7 @@ import uk.co.jwgardenservices.crm.voice.MicSource
 import uk.co.jwgardenservices.crm.voice.MoonshineDownloader
 import uk.co.jwgardenservices.crm.voice.NemotronDownloader
 import uk.co.jwgardenservices.crm.voice.PhononDownloader
+import uk.co.jwgardenservices.crm.voice.PunctuationDownloader
 import uk.co.jwgardenservices.crm.voice.PhononVoice
 import uk.co.jwgardenservices.crm.voice.PiperVoice
 import uk.co.jwgardenservices.crm.voice.PiperVoiceDownloader
@@ -111,6 +112,13 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     val nemotronState by NemotronDownloader.state.collectAsStateWithLifecycle()
     var nemotronInstalled by remember { mutableStateOf(NemotronDownloader.isInstalled(context)) }
     var nemotronSaved by remember { mutableLongStateOf(NemotronDownloader.savedBytes(context)) }
+    val punctuationState by PunctuationDownloader.state.collectAsStateWithLifecycle()
+    var punctuationInstalled by remember {
+        mutableStateOf(PunctuationDownloader.isInstalled(context))
+    }
+    var punctuationSaved by remember {
+        mutableLongStateOf(PunctuationDownloader.savedBytes(context))
+    }
     val asrEngine by AssistantPreferences.asrEngineFlow(context)
         .collectAsStateWithLifecycle(initialValue = AsrEngine.Moonshine)
 
@@ -147,6 +155,17 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
             is NemotronDownloader.State.Working -> Unit
             else -> nemotronSaved = NemotronDownloader.savedBytes(context)
+        }
+    }
+    LaunchedEffect(punctuationState) {
+        when (punctuationState) {
+            is PunctuationDownloader.State.Done -> {
+                punctuationInstalled = true
+                punctuationSaved = 0
+                PunctuationDownloader.clearResult()
+            }
+            is PunctuationDownloader.State.Working -> Unit
+            else -> punctuationSaved = PunctuationDownloader.savedBytes(context)
         }
     }
     LaunchedEffect(hqState) {
@@ -501,6 +520,68 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                failure?.let { error ->
+                    Text(
+                        text = error.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+
+        SectionCard(title = "Punctuation") {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "A tiny English punctuation model (Apache 2.0) capitalises and " +
+                        "punctuates finished sentences before they are saved, so dictated notes " +
+                        "read like English and commands split cleanly. About 8 MB.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                val working = punctuationState as? PunctuationDownloader.State.Working
+                val failure = punctuationState as? PunctuationDownloader.State.Failed
+                if (working != null) {
+                    LinearProgressIndicator(
+                        progress = { working.progress },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "Downloading… ${working.done / MEGABYTE} of " +
+                            "${working.total / MEGABYTE} MB",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = { PunctuationDownloader.cancel() }) { Text("Cancel") }
+                }
+
+                if (punctuationInstalled) {
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                PunctuationDownloader.remove(context)
+                                punctuationInstalled = false
+                                punctuationSaved = 0
+                            }
+                        },
+                    ) { Text("Remove punctuation model") }
+                } else if (working == null) {
+                    OutlinedButton(
+                        onClick = { PunctuationDownloader.start(context) },
+                    ) {
+                        Text(
+                            if (punctuationSaved > 0) {
+                                "Resume download (${punctuationSaved / MEGABYTE} MB saved)"
+                            } else {
+                                "Download punctuation model (8 MB)"
+                            },
+                        )
+                    }
+                }
+
                 failure?.let { error ->
                     Text(
                         text = error.message,

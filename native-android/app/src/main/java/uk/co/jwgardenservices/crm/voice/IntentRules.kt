@@ -123,6 +123,14 @@ object IntentRules {
                 "start an invoice",
             ) -> SpokenIntent.RaiseInvoice
 
+            // Corrections to the visit just logged: "add £40 for green
+            // waste", "change the rate to £45 an hour". The £ comes from the
+            // normaliser; the plain-digit form covers unnormalised input.
+            Regex("\\badd\\s+£?\\d").containsMatchIn(text) ||
+                text.contains("change the rate") ||
+                Regex("\\brate\\s+(?:to|of|at)\\s*£?\\d").containsMatchIn(text) ->
+                SpokenIntent.AdjustCharge
+
             text.containsAny("owe me", "owes", "owed", "unpaid", "outstanding", "invoice") ->
                 SpokenIntent.WhoOwesMe
             text.containsAny("earn", "earned", "earnings", "takings", "taken this week", "made this week", "make this week", "income") ->
@@ -209,7 +217,8 @@ object IntentRules {
         SpokenIntent.NextJobForClient,
         SpokenIntent.TodayEarnings,
         SpokenIntent.DayWrapUp,
-        SpokenIntent.RaiseInvoice -> true
+        SpokenIntent.RaiseInvoice,
+        SpokenIntent.AdjustCharge -> true
 
         else -> false
     }

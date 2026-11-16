@@ -40,7 +40,14 @@ import kotlin.math.abs
  * "log Smiths" with no hours — is remembered as [pending] and completed by the
  * next sentence, so the conversation can take two turns instead of failing.
  */
-class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.crmRepository) {
+class VoiceActionRunner(
+    private val repository: CrmRepository = ServiceLocator.crmRepository,
+    /**
+     * Builds the PDF and emails a draft invoice. Supplied by the service,
+     * which owns the Context; null only in tests, where sending is refused.
+     */
+    private val sendInvoice: (suspend (String) -> String)? = null,
+) {
 
     private data class PendingLog(
         val client: Client?,
@@ -72,6 +79,25 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
     }
 
     private var lastUndo: Undo? = null
+
+    /** The visit voice most recently wrote, for follow-up corrections. */
+    private data class VoiceVisit(
+        val id: String,
+        val clientId: String,
+        val clientName: String,
+        val materials: Double,
+    )
+
+    private var lastVoiceVisit: VoiceVisit? = null
+
+    /** A draft invoice waiting for "send it" or "leave it". */
+    private data class PendingSend(
+        val invoiceId: String,
+        val clientName: String,
+        val total: Double,
+    )
+
+    private var pendingSend: PendingSend? = null
 
     fun hasPending(): Boolean = pending != null
 
@@ -107,6 +133,7 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
             SpokenIntent.TodayEarnings -> todayEarnings()
             SpokenIntent.DayWrapUp -> startWrapUp()
             SpokenIntent.RaiseInvoice -> raiseInvoice(text)
+            SpokenIntent.AdjustCharge -> adjustCharge(text)
             else -> null
         }
     }
@@ -180,6 +207,10 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
         // hijack the first answer inside a new wrap-up.
         pending = null
         confirmDone = null
+        // Corrections and "send it" only apply inside the call that raised
+        // them; never let a visit from last week be adjusted by accident.
+        pendingSend = null
+        lastVoiceVisit = null
     }
 
     /** Hand the visits of a finished wrap-up to the caller for invoicing. */
@@ -314,6 +345,7 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
         val visitId = repository.saveVisit(visit)
         wrapUpBillables.getOrPut(item.clientId) { mutableListOf() } += visitId
         lastUndo = Undo.Visit(visitId, item.clientName)
+        lastVoiceVisit = VoiceVisit(visitId, item.clientId, item.clientName, materials = 0.0)
         state.jobsLogged++
         state.hoursLogged = round2(state.hoursLogged + safeHours)
         state.amountLogged = round2(state.amountLogged + visit.amount)
@@ -443,6 +475,7 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
         )
         val visitId = repository.saveVisit(draft)
         lastUndo = Undo.Visit(visitId, client.name)
+        lastVoiceVisit = VoiceVisit(visitId, client.id, client.name, materials = 0.0)
         val whenText = if (date == LocalDate.now()) "" else " for ${date.dayOfMonth}/${date.monthValue}"
         return VoiceLines.pick(
             "Logged ${hoursLabel(hours)} for ${client.name}$whenText, ${money(draft.amount)}.",
@@ -750,13 +783,142 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
                 "ready to bill."
 
         val visitsText = if (visits.size == 1) "one visit" else "${visits.size} visits"
-        val total = money(if (made.total > 0.0) made.total else expected)
+        val totalValue = if (made.total > 0.0) made.total else expected
+        pendingSend = PendingSend(made.invoiceId, client.name, totalValue)
         return VoiceLines.pick(
-            "Draft invoice for ${client.name} — $visitsText, $total. It's in drafts to review.",
-            "That's a draft for ${client.name}, $visitsText, $total. Have a look before it goes out.",
-            "In drafts: ${client.name}, $visitsText, $total. Nothing sent yet.",
+            "Draft invoice for ${client.name} — $visitsText, ${money(totalValue)}. " +
+                "Send it, or leave it in drafts?",
+            "That's a draft for ${client.name}, $visitsText, ${money(totalValue)}. " +
+                "Send it now, or leave it?",
+            "In drafts: ${client.name}, $visitsText, ${money(totalValue)}. " +
+                "Send it, or leave it there?",
         )
     }
+
+    /**
+     * The answer to "say send it". Deliberately a separate two-step: money
+     * only leaves the phone after a spoken confirmation with the total in it.
+     * Anything that is not a yes or a no clears the question and is
+     * classified normally.
+     */
+    suspend fun continueSend(transcript: String): String? {
+        val pending = pendingSend ?: return null
+        val lower = transcript.lowercase().trim()
+        val words = lower.replace(Regex("[^a-z' ]"), " ")
+            .trim()
+            .split(Regex("\\s+"))
+            .filter { it.isNotBlank() }
+        val yes = words.any { it in SEND_YES } && words.none { it in SEND_NO }
+        val no = words.any { it in SEND_NO }
+        return when {
+            yes -> {
+                pendingSend = null
+                val sender = sendInvoice ?: return "Open the invoice to send it — I can't attach the PDF from here."
+                sender(pending.invoiceId)
+            }
+            no -> {
+                pendingSend = null
+                "Left it in drafts — ${pending.clientName}, ${money(pending.total)}."
+            }
+            else -> {
+                pendingSend = null
+                null
+            }
+        }
+    }
+
+    /**
+     * Follow-up corrections to the last voice-logged visit: "add £40 for
+     * green waste" changes the materials and re-prices it, "change the rate
+     * to £45 an hour" updates the client's rate and re-prices the visit.
+     */
+    private suspend fun adjustCharge(text: String): String {
+        val last = lastVoiceVisit ?: return "There's no voice-logged visit to adjust yet."
+        val lower = text.lowercase()
+
+        val rateMatch = Regex("rate\\s+(?:to|of|at)\\s*£?(\\d+(?:\\.\\d+)?)").find(lower)
+        val rate = rateMatch?.groupValues?.get(1)?.toDoubleOrNull()
+        if (rate != null) return changeRate(last, rate)
+
+        val added = Regex("add\\s*£?(\\d+(?:\\.\\d+)?)\\s*(?:for|of|on)?\\s*(.*)").find(lower)
+            ?: return "Add how much, and for what?"
+        val amount = added.groupValues[1].toDoubleOrNull() ?: return "Add how much?"
+        val note = added.groupValues[2].trim()
+            .split(Regex("\\s+"))
+            .filter { it.isNotBlank() }
+            .dropWhile { it in NOTE_FILLER }
+            .joinToString(" ")
+            .trim()
+            .ifBlank { "extra materials" }
+        return repriced(last, last.materials + amount, note)
+    }
+
+    private suspend fun changeRate(last: VoiceVisit, rate: Double): String {
+        if (rate <= 0.0 || rate > 1000.0) return "That rate doesn't look right."
+        val client = repository.observeClients().first().firstOrNull { it.id == last.clientId }
+            ?: return "That visit's client is missing."
+        repository.updateClient(
+            client,
+            ClientDraft(
+                name = client.name,
+                address = client.address,
+                phone = client.phone,
+                email = client.email,
+                notes = client.notes,
+                billingMode = "hourly",
+                hourlyRate = rate,
+                fixedPrice = client.fixedPrice,
+                paymentReminders = client.paymentReminders,
+            ),
+        )
+        val line = repriced(last, last.materials, null)
+        return "$line ${client.name}'s rate is £${format(rate)} an hour from now on."
+    }
+
+    /** Apply a materials change to the visit, then re-price and read it back. */
+    private suspend fun repriced(
+        last: VoiceVisit,
+        materials: Double,
+        note: String?,
+    ): String {
+        val current = repository.observeVisits().first().firstOrNull { it.id == last.id }
+            ?: return "That visit has gone."
+        if (current.billed || current.invoiceId != null) {
+            return "That visit is already on an invoice — adjust it there."
+        }
+        val client = repository.observeClients().first().firstOrNull { it.id == current.clientId }
+            ?: return "That visit's client is missing."
+        val safeMaterials = round2(materials.coerceAtLeast(0.0))
+        val amount = round2(
+            priceVisit(
+                BillingSource(client.billingMode, client.hourlyRate, client.fixedPrice),
+                current.hours,
+                safeMaterials,
+            ),
+        )
+        repository.saveVisit(
+            VisitDraft(
+                id = current.id,
+                clientId = current.clientId,
+                visitDate = current.visitDate,
+                hours = current.hours,
+                materialsCost = safeMaterials,
+                materialsNote = note ?: current.materialsNote,
+                description = current.description,
+                amount = amount,
+                missed = current.missed,
+            ),
+        )
+        lastVoiceVisit = last.copy(materials = safeMaterials)
+        val extra = note?.takeIf { it.isNotBlank() }?.let { " with $it" }.orEmpty()
+        return VoiceLines.pick(
+            "Sorted — that visit is ${money(amount)} now$extra.",
+            "Added. It comes to ${money(amount)}$extra.",
+        )
+    }
+
+    private fun format(value: Double): String =
+        if (value % 1.0 == 0.0) value.toInt().toString() else value.toString()
 
     private suspend fun unbilled(): String {
         val clients = repository.observeClients().first()
@@ -1099,6 +1261,22 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
 
         /** Ways to end the loop early. */
         val WRAP_UP_STOP = setOf("stop", "cancel", "exit", "quit", "enough")
+
+        /** "say send it" answers for a draft invoice. */
+        val SEND_YES = setOf(
+            "send", "sent", "email", "post", "yes", "yeah", "yep", "yup",
+            "go", "ahead", "do", "it", "please", "now",
+        )
+
+        val SEND_NO = setOf(
+            "no", "nope", "nah", "don't", "dont", "leave", "hold", "later",
+            "drafts", "cancel", "wait",
+        )
+
+        /** Words in "add £40 to that visit" that are not a materials note. */
+        val NOTE_FILLER = setOf(
+            "the", "to", "on", "for", "that", "it", "this", "visit", "invoice", "and",
+        )
 
         /** Natural ways to abandon a pending confirmation. */
         val CANCEL_WORDS = setOf(

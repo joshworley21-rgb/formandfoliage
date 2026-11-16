@@ -394,6 +394,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             else -> null
         }
         if (!offlineMode && onlineEngine == null) return
+        // Load the tiny punctuation model off the call path; the first
+        // sentence is then punctuated without a stall.
+        runCatching { Punctuator.warm(context) }
         hotwordNames = AsrHotwords.biasTerms(context)
         val hotwordBias = if (!offlineMode && hotwordBiasEnabled) {
             AsrHotwords.buildBias(hotwordNames)
@@ -803,9 +806,14 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     private fun publish(text: String) {
         val corrected = AsrHotwords.correct(text, hotwordNames)
         if (corrected == lastResult) return
-        lastResult = corrected
-        _state.update { it.copy(finalText = corrected, partial = "") }
-        _transcripts.tryEmit(corrected)
+        // Punctuation and truecase on the finished sentence only: it makes a
+        // dictated note read like English and gives the multi-command
+        // splitter real sentence boundaries. Off unless the model is
+        // installed, and failure falls back to the raw transcript.
+        val punctuated = Punctuator.punctuate(context, corrected)
+        lastResult = punctuated
+        _state.update { it.copy(finalText = punctuated, partial = "") }
+        _transcripts.tryEmit(punctuated)
     }
 
     // --- setup ------------------------------------------------------------

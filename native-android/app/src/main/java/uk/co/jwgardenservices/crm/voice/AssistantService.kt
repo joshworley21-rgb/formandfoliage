@@ -16,6 +16,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
 import android.support.v4.media.session.MediaSessionCompat
+import android.util.Base64
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -37,6 +38,9 @@ import uk.co.jwgardenservices.crm.MainActivity
 import uk.co.jwgardenservices.crm.R
 import uk.co.jwgardenservices.crm.core.CrashLog
 import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
+import uk.co.jwgardenservices.crm.data.repository.invoiceItems
+import uk.co.jwgardenservices.crm.data.repository.sendInvoice
+import uk.co.jwgardenservices.crm.ui.invoices.InvoicePdf
 
 /**
  * Keeps the Assistant microphone alive as a foreground service.
@@ -65,7 +69,9 @@ class AssistantService : Service() {
     }
 
     /** Writes spoken commands into the same Room cache the screens use. */
-    private val actions by lazy { VoiceActionRunner() }
+    private val actions by lazy {
+        VoiceActionRunner(sendInvoice = { invoiceId -> sendInvoiceByVoice(invoiceId) })
+    }
 
     private val _speaking = MutableStateFlow(false)
     val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
@@ -459,6 +465,38 @@ class AssistantService : Service() {
         }
     }
 
+    /**
+     * The "send it" half of a voice-raised draft: build the same PDF the
+     * Invoices screen shares, hand it to the email function, and report what
+     * happened. Every failure leaves the invoice in drafts.
+     */
+    private suspend fun sendInvoiceByVoice(invoiceId: String): String = runCatching {
+        withContext(Dispatchers.IO) { ServiceLocator.syncEngine.syncNow() }
+        val repository = ServiceLocator.crmRepository
+        val invoice = repository.observeInvoices().first().firstOrNull { it.id == invoiceId }
+            ?: return@runCatching "That draft isn't here any more."
+        val client = repository.observeClients().first().firstOrNull { it.id == invoice.clientId }
+            ?: return@runCatching "That invoice's client is missing."
+        val pdf = withContext(Dispatchers.IO) {
+            InvoicePdf.build(
+                this@AssistantService,
+                invoice,
+                client,
+                repository.invoiceItems(invoiceId),
+                repository.getSettings(),
+            )
+        }
+        val base64 = withContext(Dispatchers.IO) {
+            Base64.encodeToString(pdf.readBytes(), Base64.NO_WRAP)
+        }
+        val result = repository.sendInvoice(invoiceId, base64)
+        if (result.sent) {
+            "Sent to ${result.to ?: client.name}."
+        } else {
+            result.reason ?: "Email isn't set up yet, so it's still in drafts."
+        }
+    }.getOrElse { "I couldn't send it: ${it.message ?: "unknown error"}." }
+
     /** Close the microphone but keep the service (and the loaded model) alive. */
     fun pauseListening() {
         if (!speech.isListening()) return
@@ -713,6 +751,14 @@ class AssistantService : Service() {
                     sayAnswer(confirmed)
                     return@collect
                 }
+                // "Say send it" — the second half of raising a draft invoice.
+                val sent = runCatching { actions.continueSend(heard) }
+                    .onFailure { CrashLog.note(this, TAG, "send reply failed: ${it.message}") }
+                    .getOrNull()
+                if (sent != null) {
+                    sayAnswer(sent)
+                    return@collect
+                }
                 if (undoRequested(heard)) {
                     sayAnswer(actions.undoLast())
                     return@collect
@@ -801,6 +847,7 @@ class AssistantService : Service() {
             // Unbilled visits are read locally; the draft call itself is
             // server-side and safe to attempt from the rule path.
             SpokenIntent.RaiseInvoice,
+            SpokenIntent.AdjustCharge,
         )
         val dateIndependent = quick.intent in dateIndependentIntents
         val localTemporal = dateIndependent && temporal
@@ -958,12 +1005,18 @@ class AssistantService : Service() {
     }
 
     /**
-     * Split a sentence into independent commands. "and then", "then" and ";"
-     * are explicit. A plain "and" only splits when both sides look like a
+     * Split a sentence into independent commands. "and then", "then", ";"
+     * and — once punctuation is enabled — a full stop before a capital are
+     * explicit. A plain "and" only splits when both sides look like a
      * command, so "Louisa and George" stays one client name.
      */
     private fun splitMultiCommand(text: String): List<String> {
-        val strong = text.split(Regex("\\b(?:and then|then)\\b|;", RegexOption.IGNORE_CASE))
+        val strong = text.split(
+            Regex(
+                "\\b(?:and then|then)\\b|;|(?<=[.!?])\\s+(?=[A-Z])",
+                RegexOption.IGNORE_CASE,
+            ),
+        )
             .map { it.trim() }
             .filter { it.isNotEmpty() }
         if (strong.size > 1) return strong
@@ -988,7 +1041,8 @@ class AssistantService : Service() {
 
     /** A few free replies so greetings are not answered with a help list. */
     private fun smallTalk(text: String): String? {
-        val lower = text.lowercase().trim()
+        // Punctuated input ("No thanks.") must still match the plain forms.
+        val lower = text.lowercase().trim().trimEnd('.', '!', '?', ',')
         return when {
             Regex("^(hi|hello|hey|good morning|good afternoon|good evening)\b")
                 .containsMatchIn(lower) -> "Hello. What can I do?"
@@ -1224,6 +1278,7 @@ private fun confirmationFor(intent: IntentResult): String {
         SpokenIntent.TodayEarnings -> "Checking today's takings."
         SpokenIntent.DayWrapUp -> "Running through today's jobs."
         SpokenIntent.RaiseInvoice -> "Drafting that invoice."
+        SpokenIntent.AdjustCharge -> "Adjusting that visit."
         SpokenIntent.MarkJobDone ->
             if (topic.isEmpty()) "Marking that job done." else "Marking the job for $topic done."
         SpokenIntent.WhoOwesMe -> "Checking who owes you."

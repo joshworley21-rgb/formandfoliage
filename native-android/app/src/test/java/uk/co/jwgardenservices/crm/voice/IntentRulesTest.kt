@@ -61,6 +61,8 @@ class IntentRulesTest {
         Case("has the Smiths' invoice been paid", SpokenIntent.InvoiceStatus),
         Case("raise an invoice for the Smiths", SpokenIntent.RaiseInvoice),
         Case("draft invoice for Simon", SpokenIntent.RaiseInvoice),
+        Case("add £40 for green waste", SpokenIntent.AdjustCharge),
+        Case("change the rate to £45 an hour", SpokenIntent.AdjustCharge),
         Case("when is the Smiths next in", SpokenIntent.NextJobForClient),
         Case("what have I taken today", SpokenIntent.TodayEarnings),
 
