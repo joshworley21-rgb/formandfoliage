@@ -442,7 +442,7 @@ class AssistantService : Service() {
         val lower = text.lowercase()
         val temporal = TEMPORAL_WORDS.any { lower.contains(it) }
         val quick = IntentRules.classify(text)
-        val dateIndependent = quick.intent in setOf(
+        val dateIndependentIntents = setOf(
             SpokenIntent.CheckSchedule,
             SpokenIntent.AddNote,
             SpokenIntent.ClientList,
@@ -451,6 +451,7 @@ class AssistantService : Service() {
             SpokenIntent.NextJobForClient,
             SpokenIntent.TodayEarnings,
         )
+        val dateIndependent = quick.intent in dateIndependentIntents
         val localTemporal = dateIndependent && temporal
         if ((!temporal || localTemporal) && IntentRules.isConfident(quick.intent) && !quick.requiresCloud) {
             CrashLog.note(
@@ -469,7 +470,7 @@ class AssistantService : Service() {
         //     cloud below.
         if (!quick.requiresCloud) {
             val routed = SemanticMatcher.classify(lower)
-            val dateSafe = routed != null && (!temporal || routed.first in dateIndependent)
+            val dateSafe = routed != null && (!temporal || routed.first in dateIndependentIntents)
             if (routed != null && dateSafe) {
                 val score = "%.2f".format(routed.second)
                 CrashLog.note(
