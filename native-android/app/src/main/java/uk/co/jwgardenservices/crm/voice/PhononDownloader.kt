@@ -37,13 +37,16 @@ import java.util.concurrent.TimeUnit
  * checkpoint; the others are ~256 KB files downloaded on demand into the
  * model's `voices/` folder, where the runtime registers them by file name.
  */
-enum class PhononVoice(val label: String, val voiceId: String?) {
-    Default("Phonon default voice", null),
+enum class PhononVoice(val label: String, val voiceId: String) {
+    Zoey("Zoey — American female", "NbpkqMVS3CJeq2j8"),
+    Easton("Easton — American male", "LMDIYE0Oa377Qh6Z"),
+    Juniper("Juniper — American female", "NIWIOv5vTi5eRMj8"),
+    Micah("Micah — American male", "40QrMVgAxFiUnP9f"),
     Maeve("Maeve — British female", "6PWnV0Nq4wu7RVBT"),
     Freya("Freya — young British female (Gradium demo)", "GgfEkEJtxZR7gnpy"),
-    Toby("Toby — British male", "dME3IWyZBvmh1n1q"),
+    Alfie("Alfie — British male", "X6NceqF285Gr04gb"),
     Hugh("Hugh — British male", "YyKcxPG7iIgS3jsK"),
-    Easton("Easton — American male", "LMDIYE0Oa377Qh6Z"),
+
 }
 
 object PhononDownloader {
@@ -107,8 +110,6 @@ object PhononDownloader {
      * small, so this is a plain download rather than a resumable model fetch.
      */
     suspend fun installVoice(context: Context, voice: PhononVoice): Boolean {
-        if (voice == PhononVoice.Default) return true
-        val id = voice.voiceId ?: return true
         return withContext(Dispatchers.IO) {
             runCatching {
                 if (!isInstalled(context)) throw IOException("Download the Phonon model first.")

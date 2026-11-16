@@ -217,20 +217,17 @@ deliberately left on the web for now. The smaller known gaps:
   remains).
 - **Warm start**: once the assistant has been used, the app loads the
   recogniser in the background after launch, so a returning caller opens the
-  tab to a warm model instead of watching the 190 MB asset load. First ever
-  use still loads it. The voice warms in parallel at call start.
+  tab to a warm model instead of watching the model load. The voice warms in
+  parallel at call start.
 - **First reply**: the business snapshot (Room + DataStore reads) is built
   only when a turn actually goes to the cloud. The local commands — diary,
   hours, notes, invoices, takings — answer without it. A cloud turn still
   covers its wait with the cached "Let me check." after 300 ms.
-- **Bundled model**: the LibriSpeech + GigaSpeech streaming Zipformer
-  (English, int8 encoder/joiner) ships in
-  `app/src/main/assets/sherpa-onnx-streaming-zipformer-en-2023-06-21/`
-  — about 190 MB in the APK, decoded with modified beam search. It is the
-  accuracy-first choice: the smaller 20M and 06-26 models misheard real
-  phone audio, while this one still emits live partial words like a phone
-  call. Builds are arm64-v8a only. Nothing is downloaded at runtime, so the
-  tab works offline.
+- **Speech models**: none are bundled. The default is **Moonshine v2 base**
+  (135 MB, offline, English), downloaded from Settings; **Nemotron 3.5
+  streaming** (662 MB, true streaming with live words) is the optional
+  alternative. Only the selected engine is held in memory, and it is released
+  30 s after the app goes to the background so the process stays small.
 - **Client-name biasing**: two layers. First, each call builds a `bpe.vocab`
   from the model's `tokens.txt` (equal scores, so ssentencepiece segments by
   longest match — the pattern sherpa's own CI uses) and passes the names to
@@ -242,8 +239,8 @@ deliberately left on the web for now. The smaller known gaps:
 - **Nemotron 3.5 (experimental)**: Settings → Assistant settings → Nemotron
   ASR downloads NVIDIA Nemotron 3.5 Speech Streaming 0.6B int8 (English/en
   only, about 662 MB) over Wi-Fi or mobile data. It is a **true streaming**
-  online transducer, so it produces live partial words like the Zipformer,
-  from a 2026-era model trained for noisy phone audio. It holds about 650 MB
+  online transducer, so it produces live partial words, from a 2026-era model
+  trained for noisy phone audio. It holds about 650 MB
   in memory while selected and is released when switching back. NVIDIA Open
   Model License, commercial use permitted.
 - **Quick resume**: a new call checks whether the selected recogniser and the
@@ -253,14 +250,12 @@ deliberately left on the web for now. The smaller known gaps:
   Moonshine ASR downloads the 135 MB base English model (MIT) over Wi-Fi or
   mobile data. It is
   offline, so it has no live partial words; the call buffers one utterance
-  and decodes it after the VAD endpoint. The Zipformer remains the default
-  because it streams and carries the hotwords. Moonshine is loaded during
-  the ringback and can be removed from the same card.
-- **Not in git**: the AAR, the Zipformer model and the Kokoro voice model are
-  ~390 MB of binaries; the 640 KB Silero VAD model is checked in so no build
-  depends on fetching it. The Phonon runtime is compiled by the APK workflow
-  from the pinned xn-ptts tag. `:app:downloadSherpa` fetches the ASR pieces and
-  `:app:downloadKokoro` downloads and extracts the Kokoro archive (SHA-256
+  and decodes it after the VAD endpoint. It is the default engine, loaded
+  during the ringback, and can be removed from the same card.
+- **Not in git**: the sherpa AAR and the Kokoro fallback model are binaries;
+  the 640 KB Silero VAD model is checked in. The Phonon runtime is compiled by
+  the APK workflow from the pinned xn-ptts tag. `:app:downloadSherpa` fetches
+  the AAR and `:app:downloadKokoro` extracts the Kokoro archive (SHA-256
   checked); `preBuild` depends on both, so a fresh clone needs a connection
   for its first build only.
 - **Command classifier**: the deterministic rules answer the common commands
@@ -348,13 +343,13 @@ deliberately left on the web for now. The smaller known gaps:
   and is only reachable by a signed-in user's token through `voice-route`.
   Without the secret, cloud-routed turns speak "I couldn't reach the online
   rates" and the local path keeps working.
-- The recognizer is read from assets via `OnlineRecognizer(assetManager,
-  config)`. Its endpoint detector (roughly 1.2 s of trailing silence) is what
-  decides the speaker has stopped and commits the line.
-- **Settings → Assistant settings** opens the voice controls: the Kokoro
-  profiles (`bf_alice` through `bm_lewis`), the speaking rate (0.80×–1.30×),
-  the local voices (cori, Supertonic and Phonon) and the memory/cloud
-  switches. A preview button auditions the selection.
+- The streaming recogniser is created from the downloaded model files. Its
+  endpoint detector (roughly 0.4–0.65 s of trailing silence) decides the
+  speaker has stopped and commits the line; Silero VAD is the primary
+  endpoint.
+- **Settings → Assistant settings** opens the voice controls: Phonon 31m and
+  its eight catalog voices, the call options and the memory/cloud switches.
+  A preview button auditions the selected Phonon voice.
 - **Conversation flow**: there is no extra "Got it." before local answers —
   the reply itself is spoken as soon as the action finishes. Only a
   cloud-routed turn says "Checking online rates…" first.
@@ -362,51 +357,24 @@ deliberately left on the web for now. The smaller known gaps:
   released as soon as it finishes, so a call or the van's media takes priority
   without being paused for the whole time the call is connected; losing focus
   stops Kokoro mid-sentence.
-- **Spoken confirmation**: once the classifier has understood the line,
-  `KokoroTts` synthesises a short reply on-device with Kokoro-82M and plays
-  it at 24 kHz. The voice is `bm_fable` (speaker 25 of
-  `kokoro-multi-lang-v1_0`). British voices use `lexicon-gb-en.txt` with
-  espeak's `en-gb`, and Kokoro's padding silence is trimmed before playback
-  so replies are not separated by dead air. Settings → Assistant settings →
-  Voice quality can download the full fp32 model (350 MB, Wi-Fi only) for a
-  more natural voice; it applies from the next reply, no restart needed.
-  `KokoroHqDownloader` prefers the plain `model.onnx` in the public
-  `voice-models` Storage bucket (`scripts/upload-kokoro-fp32.sh` populates
-  it): one resumable HTTP `Range` download with real megabytes and a 60 s
-  stall watchdog. Until that object exists it falls back to the official
-  `.tar.bz2` from GitHub, downloaded to `cacheDir` and then unpacked in a
-  separate "Unpacking" phase — bzip2 on a phone takes minutes, so the two
-  phases are shown separately. Either way the work runs outside the settings
-  screen, so leaving it does not cancel the download, and the bundled int8
-  model is used if the fp32 file ever fails to load. Microphone frames are
-  discarded for the whole utterance so the phone does not transcribe itself;
-  the mic reopens the instant playback finishes, so the next command is
-  hands-free. Kokoro is process-scoped and warmed when a call starts, and a
-  multi-sentence reply is synthesised sentence by sentence so the first words
-  play while the rest is still generating.
-- **Local voices** (optional, free, Settings → Assistant settings → Local
-  voices): British Piper VITS voices from the official sherpa-onnx releases —
-  alan, jenny, northern English male, cori-high, dii-high and miro-high,
-  67–110 MB each — plus Kitten TTS v0.8 mini/nano (67/31 MB), Supertonic 3
-  int8 (129 MB, ten styles, the first is used) and the Coqui LJSpeech VITS
-  voice (115 MB, US English). They load
-  faster than fp32 Kokoro, use less memory and often sound less synthetic;
-  selecting one replaces Kokoro until "Use Kokoro instead". Downloads resume
-  like the other models, and the same "Preview this voice" button auditions
-  them.
+- **Voice**: reply text is synthesised by **Phonon 31m** (Apache 2.0,
+  ~62 MB, 24 kHz float PCM streamed while it speaks) through the Rust
+  runtime built by the APK workflow and called via JNA. Kokoro int8 stays
+  only as an internal fallback if Phonon fails to load; it is not offered in
+  Settings and never warms unless needed. Audio focus is transient per
+  sentence, microphone frames are discarded while the assistant speaks, and
+  the mic reopens when playback finishes.
 - **Phonon 31m** (optional, Apache 2.0, Settings → Assistant settings →
   Phonon 31m): about 62 MB and streamed as 24 kHz float PCM while it speaks.
   The Rust runtime (`libptts_ffi.so`) is built for arm64-v8a by the APK
   workflow — no native binary is committed — and called through JNA. While
   it is on it replaces the other local voices; Kokoro remains the fallback.
-  The 40m models are CC BY-NC and deliberately not offered. The checkpoint
-  ships its own default voice, which is not the voice Gradium's browser demo
-  uses; Settings → Phonon 31m has a **Voice** picker for catalog voices
-  (Maeve, Freya, Toby, Hugh and Easton). Selecting one downloads its ~256 KB
-  `voices/<name>.safetensors` file, reloads the engine and the **Preview
-  Phonon voice** button auditions it. Freya is the voice used in Gradium's
-  quickstart prompt. Custom Gradium Studio voices can also be dropped into
-  the same folder.
+  The 40m models are CC BY-NC and deliberately not offered. Settings →
+  Phonon 31m has a **Voice** picker limited to eight catalog voices: Zoey,
+  Easton, Juniper, Micah, Maeve, Freya, Alfie and Hugh. Selecting one
+  downloads its ~256 KB `voices/<name>.safetensors` file, reloads the engine
+  and the **Preview Phonon voice** button auditions it. "Remove old model
+  downloads" deletes any voice outside that list.
 - **Call feel**: the microphone runs on `VOICE_COMMUNICATION` with
   `AcousticEchoCanceler` kept on for barge-in, while `AutomaticGainControl` is
   explicitly disabled — Android's AGC ducks and clips the speech harmonics on
@@ -419,12 +387,6 @@ deliberately left on the web for now. The smaller known gaps:
   check.", "One moment.", …) rotate to cover a slow cloud turn. Settings →
   Microphone switches to `VOICE_RECOGNITION` for accuracy at the cost of
   barge-in.
-- **Natural online voice** (optional, Settings → Kokoro voice): reply text is
-  posted to the `voice-speak` Edge Function, which returns OpenAI
-  `gpt-4o-mini-tts` audio. It falls back to Kokoro when offline or when the
-  request fails. Only the reply text is sent, never the owner's speech; it is
-  billed to the project's OpenAI key per character. The Android native TTS
-  engine and its manifest query are gone.
 - `:app:downloadKokoro` extracts only the English pieces from
   `kokoro-int8-multi-lang-v1_0.tar.bz2`: `model.int8.onnx` (109 MB),
   `voices.bin` (27 MB), `tokens.txt`, the US/GB lexicons and the 19 MB
@@ -435,12 +397,11 @@ deliberately left on the web for now. The smaller known gaps:
   JitPack repository they needed have all been removed. Speech runs on the
   vendored official `sherpa-onnx-1.13.8.aar`; neither model weights nor the
   AAR are committed.
-- Known limits: the recognizer is English-only, punctuation and casing are
-  not restored, the first utterance waits for the Kokoro model to load
-  (a few seconds), and the screen needs to stay on while listening. A
-  foreground mic service is the next step.
-- sherpa-onnx, the streaming Zipformer model, Kokoro-82M and its voices are
-  Apache 2.0 (k2-fsa / Alpha Cephei / hexgrad).
+- Known limits: the recognisers are English-only, punctuation and casing are
+  not restored, and the first call after a cold start waits for the selected
+  model to load behind the ringback.
+- sherpa-onnx is Apache 2.0; Moonshine is MIT; Nemotron follows the NVIDIA
+  Open Model License; Phonon is Apache 2.0; Kokoro-82M is Apache 2.0.
 
 ## Code layout
 

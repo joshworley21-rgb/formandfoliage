@@ -46,7 +46,6 @@ private val FOLLOW_UP_KEY = booleanPreferencesKey("follow_up")
 
 /** The on-device speech recogniser. Streaming is the default; Moonshine is a test. */
 enum class AsrEngine(val label: String) {
-    Zipformer("Zipformer — streaming, live words"),
     Moonshine("Moonshine v2 — offline, English (en)"),
     Nemotron("Nemotron — streaming, live words, English (en)"),
 }
@@ -87,15 +86,10 @@ object AssistantPreferences {
     }
 
     /** Optional fp32 model, downloaded separately; int8 is the default. */
-    fun highQualityFlow(context: Context): Flow<Boolean> = context.assistantDataStore.data.map { preferences ->
-        preferences[HIGH_QUALITY_KEY] ?: false
-    }
+    /** The fp32 Kokoro download was removed; int8 is the only fallback. */
+    fun highQualityFlow(context: Context): Flow<Boolean> = kotlinx.coroutines.flow.flowOf(false)
 
-    suspend fun setHighQuality(context: Context, enabled: Boolean) {
-        context.assistantDataStore.edit { preferences ->
-            preferences[HIGH_QUALITY_KEY] = enabled
-        }
-    }
+    suspend fun setHighQuality(context: Context, enabled: Boolean) = Unit
 
     /** Kokoro's speaking rate: below 1.0 is slower, above 1.0 is brisker. */
     fun speedFlow(context: Context): Flow<Float> = context.assistantDataStore.data.map { preferences ->
@@ -109,7 +103,7 @@ object AssistantPreferences {
     }
 
     fun asrEngineFlow(context: Context): Flow<AsrEngine> = context.assistantDataStore.data.map { preferences ->
-        AsrEngine.entries.firstOrNull { it.name == preferences[ASR_ENGINE_KEY] } ?: AsrEngine.Zipformer
+        AsrEngine.entries.firstOrNull { it.name == preferences[ASR_ENGINE_KEY] } ?: AsrEngine.Moonshine
     }
 
     suspend fun setAsrEngine(context: Context, engine: AsrEngine) {
@@ -144,13 +138,10 @@ object AssistantPreferences {
         }
     }
 
-    /**
-     * A catalog voice for Phonon, or [PhononVoice.Default] for the voice that
-     * ships with the checkpoint.
-     */
+    /** A catalog voice for Phonon. */
     fun phononVoiceFlow(context: Context): Flow<PhononVoice> = context.assistantDataStore.data.map { preferences ->
         PhononVoice.entries.firstOrNull { it.name == preferences[PHONON_VOICE_KEY] }
-            ?: PhononVoice.Default
+            ?: PhononVoice.Freya
     }
 
     suspend fun setPhononVoice(context: Context, voice: PhononVoice) {
@@ -164,34 +155,23 @@ object AssistantPreferences {
      * Falls back to Kokoro when the request fails, so the assistant is never
      * silent.
      */
-    fun onlineVoiceFlow(context: Context): Flow<Boolean> = context.assistantDataStore.data.map { preferences ->
-        preferences[ONLINE_VOICE_KEY] ?: false
-    }
+    /** Online voices were removed: Phonon 31m is the only offered voice. */
+    fun onlineVoiceFlow(context: Context): Flow<Boolean> = kotlinx.coroutines.flow.flowOf(false)
 
-    suspend fun setOnlineVoice(context: Context, enabled: Boolean) {
-        context.assistantDataStore.edit { preferences ->
-            preferences[ONLINE_VOICE_KEY] = enabled
-        }
-    }
+    suspend fun setOnlineVoice(context: Context, enabled: Boolean) = Unit
 
     /**
      * A downloaded Piper voice, or null for Kokoro. Selecting one replaces
      * Kokoro entirely; the eight Kokoro speakers stay available for when no
      * Piper voice is selected.
      */
-    fun piperVoiceFlow(context: Context): Flow<PiperVoice?> = context.assistantDataStore.data.map { preferences ->
-        PiperVoice.entries.firstOrNull { it.name == preferences[PIPER_KEY] }
-    }
+    /**
+     * Downloadable local voice packs were removed: Phonon is the voice, and
+     * Kokoro is only an internal fallback if Phonon fails. Always null.
+     */
+    fun piperVoiceFlow(context: Context): Flow<PiperVoice?> = kotlinx.coroutines.flow.flowOf(null)
 
-    suspend fun setPiperVoice(context: Context, voice: PiperVoice?) {
-        context.assistantDataStore.edit { preferences ->
-            if (voice == null) {
-                preferences.remove(PIPER_KEY)
-            } else {
-                preferences[PIPER_KEY] = voice.name
-            }
-        }
-    }
+    suspend fun setPiperVoice(context: Context, voice: PiperVoice?) = Unit
 
     /**
      * Say a short "Hello?" when a fresh call connects. On by default: it is

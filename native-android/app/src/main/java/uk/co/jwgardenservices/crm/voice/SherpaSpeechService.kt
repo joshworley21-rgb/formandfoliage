@@ -91,9 +91,6 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     /** Serialises starts: three ensureListening calls must not open three mics. */
     private val startLock = Mutex()
 
-    /** Serialises model loading, so a warm-up and a call cannot both build it. */
-    private val loadLock = Mutex()
-
     /** Moonshine loading is separate: it is 135 MB and only loaded on demand. */
     private val moonshineLock = Mutex()
 
@@ -104,7 +101,6 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     private val _transcripts = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val transcripts: SharedFlow<String> = _transcripts.asSharedFlow()
 
-    private var recognizer: OnlineRecognizer? = null
     private var moonshine: OfflineRecognizer? = null
     private var nemotron: OnlineRecognizer? = null
     private val nemotronLock = Mutex()
@@ -168,20 +164,18 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
      */
     suspend fun prepare(forCall: Boolean = false) {
         if (released) return
-        // Moonshine is 135 MB: never pull that into memory at app launch. The
-        // ringback covers its load when a call actually starts.
+        // Neither model is bundled: never pull one into memory at app launch.
+        // The ringback covers its load when a call actually starts.
         val engine = runCatching { AssistantPreferences.asrEngineFlow(context).first() }
-            .getOrDefault(AsrEngine.Zipformer)
-        if (engine == AsrEngine.Moonshine && MoonshineDownloader.isInstalled(context)) {
-            if (forCall) ensureMoonshine()
-            return
+            .getOrDefault(AsrEngine.Moonshine)
+        when {
+            engine == AsrEngine.Moonshine && MoonshineDownloader.isInstalled(context) -> {
+                if (forCall) ensureMoonshine()
+            }
+            engine == AsrEngine.Nemotron && NemotronDownloader.isInstalled(context) -> {
+                if (forCall) ensureNemotron()
+            }
         }
-        if (engine == AsrEngine.Nemotron && NemotronDownloader.isInstalled(context)) {
-            if (forCall) ensureNemotron()
-            return
-        }
-        if (recognizer != null) return
-        ensureRecognizer()
     }
 
     /**
@@ -253,13 +247,6 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         if (listening) return
         moonshine?.release()
         moonshine = null
-    }
-
-    /** Free the 190 MB streaming model when Moonshine is selected. */
-    fun releaseOnline() {
-        if (listening) return
-        recognizer?.release()
-        recognizer = null
     }
 
     /**
@@ -370,49 +357,13 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
      */
     fun releaseIdle() {
         if (listening) return
-        releaseOnline()
         releaseMoonshine()
         releaseNemotron()
     }
 
     /** Warm checks so a returning caller can skip the dial tone. */
-    fun onlineWarm(): Boolean = recognizer != null
     fun moonshineWarm(): Boolean = moonshine != null
     fun nemotronWarm(): Boolean = nemotron != null
-
-    /** Build the recogniser once, under a lock shared by prepare and listen. */
-    private suspend fun ensureRecognizer(): OnlineRecognizer? {
-        recognizer?.let { return it }
-        return loadLock.withLock {
-            recognizer?.let { return@withLock it }
-            _state.update { it.copy(phase = Phase.Loading, message = "Loading offline speech model…") }
-            val started = System.currentTimeMillis()
-            val created = try {
-                withContext(Dispatchers.IO) { createRecognizer() }
-            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                Log.e(TAG, "Could not load the sherpa-onnx model", error)
-                fail("The offline speech model could not be loaded. Check assets/$MODEL_DIR.")
-                return@withLock null
-            }
-            if (released) {
-                created.release()
-                null
-            } else {
-                recognizer = created
-                CrashLog.note(
-                    context,
-                    TAG,
-                    "recogniser ready in ${System.currentTimeMillis() - started}ms",
-                )
-                _state.update { state ->
-                    if (state.phase == Phase.Loading) state.copy(phase = Phase.Ready, message = null) else state
-                }
-                created
-            }
-        }
-    }
 
     /**
      * Open the mic, loading the model from assets the first time. Returns
@@ -429,20 +380,18 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         val selected = AssistantPreferences.asrEngineFlow(context).first()
         offlineMode = selected == AsrEngine.Moonshine && MoonshineDownloader.isInstalled(context)
         if (selected == AsrEngine.Moonshine && !offlineMode) {
-            CrashLog.note(context, TAG, "Moonshine selected but not installed; using Zipformer")
+            fail("Moonshine is not downloaded. Open Assistant settings to install it.")
+            return
         }
         val onlineEngine = when {
             offlineMode -> null
-            selected == AsrEngine.Nemotron && NemotronDownloader.isInstalled(context) -> {
-                val nemotronEngine = ensureNemotron()
-                if (nemotronEngine == null) {
-                    CrashLog.note(context, TAG, "Nemotron unavailable; falling back to Zipformer")
-                    ensureRecognizer()
-                } else {
-                    nemotronEngine
-                }
+            selected == AsrEngine.Nemotron && NemotronDownloader.isInstalled(context) ->
+                ensureNemotron()
+            selected == AsrEngine.Nemotron -> {
+                fail("Nemotron is not downloaded. Open Assistant settings to install it.")
+                return
             }
-            else -> ensureRecognizer()
+            else -> null
         }
         if (!offlineMode && onlineEngine == null) return
         hotwordNames = AsrHotwords.names()
@@ -536,8 +485,6 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         val worker = thread
         thread = null
         if (worker != null) runCatching { worker.join(2_000) }
-        runCatching { recognizer?.release() }
-        recognizer = null
         runCatching { moonshine?.release() }
         moonshine = null
         runCatching { nemotron?.release() }
@@ -863,92 +810,6 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     // --- setup ------------------------------------------------------------
 
-    private fun createRecognizer(): OnlineRecognizer {
-        requireModelFiles()
-        val modelDir = copyModelFiles()
-        // Hotword biasing needs the model's pieces as a sentencepiece vocab.
-        // The checkpoint ships only tokens.txt, so an equal-score bpe.vocab is
-        // generated from it once; null means "no biasing, behave as before".
-        val vocab = AsrHotwords.ensureVocab(context, modelDir)
-        val config = OnlineRecognizerConfig(
-            featConfig = FeatureConfig(sampleRate = SAMPLE_RATE, featureDim = FEATURE_DIM),
-            modelConfig = OnlineModelConfig(
-                transducer = OnlineTransducerModelConfig(
-                    encoder = File(modelDir, ENCODER_FILE).absolutePath,
-                    decoder = File(modelDir, DECODER_FILE).absolutePath,
-                    joiner = File(modelDir, JOINER_FILE).absolutePath,
-                ),
-                tokens = File(modelDir, TOKENS_FILE).absolutePath,
-                numThreads = 2,
-                provider = "cpu",
-                modelingUnit = if (vocab != null) "bpe" else "",
-                bpeVocab = vocab.orEmpty(),
-                // Leave modelType empty: the 06-26 archive reports
-                // "zipformer2" in its ONNX metadata, and forcing "zipformer"
-                // makes the native loader crash while parsing the encoder.
-            ),
-            // Commit the line quickly after speech ends: 0.65 s of trailing
-            // silence even without recognised words, 0.4 s once something was
-            // heard. Shorter than this starts cutting people off mid-sentence;
-            // longer is pure dead air before the reply.
-            endpointConfig = EndpointConfig(
-                rule1 = EndpointRule(mustContainNonSilence = false, minTrailingSilence = 0.65f, minUtteranceLength = 0f),
-                rule2 = EndpointRule(mustContainNonSilence = true, minTrailingSilence = 0.4f, minUtteranceLength = 0f),
-                rule3 = EndpointRule(mustContainNonSilence = false, minTrailingSilence = 0f, minUtteranceLength = 20f),
-            ),
-            enableEndpoint = true,
-            // Beam search costs little on a phone and handles accents and
-            // background noise noticeably better than greedy decoding.
-            decodingMethod = "modified_beam_search",
-            maxActivePaths = 4,
-            hotwordsScore = 2.0f,
-        )
-        val vocabSource = if (vocab != null) "bpe.vocab" else "no vocab"
-        CrashLog.note(context, TAG, "hotword biasing=${vocab != null} ($vocabSource)")
-        hotwordBiasEnabled = vocab != null
-        Log.i(TAG, "Loading streaming Zipformer: ${File(modelDir, ENCODER_FILE)}")
-        return OnlineRecognizer(assetManager = null, config = config).also {
-            Log.i(TAG, "Streaming recognizer ready")
-        }
-    }
-
-    /**
-     * Stream the model out of assets into internal storage once. The 180 MB
-     * encoder is too large for the AssetManager buffer path, the same way the
-     * Kokoro model was.
-     */
-    private fun copyModelFiles(): File {
-        val dir = File(context.filesDir, MODEL_DIR)
-        val names = listOf(ENCODER_FILE, DECODER_FILE, JOINER_FILE, TOKENS_FILE)
-        if (File(dir, ".complete").isFile && names.all { File(dir, it).isFile }) return dir
-
-        dir.deleteRecursively()
-        dir.mkdirs()
-        val started = System.currentTimeMillis()
-        names.forEach { name ->
-            context.assets.open("$MODEL_DIR/$name").use { input ->
-                File(dir, name).outputStream().use { output -> input.copyTo(output, 64 * 1024) }
-            }
-        }
-        File(dir, ".complete").writeText("1")
-        CrashLog.note(
-            context,
-            TAG,
-            "copied ASR model in ${System.currentTimeMillis() - started} ms",
-        )
-        return dir
-    }
-
-    /** Fail with a clear message instead of a native crash when assets are absent. */
-    private fun requireModelFiles() {
-        val missing = listOf(ENCODER, DECODER, JOINER, TOKENS).filterNot { path ->
-            runCatching { context.assets.open(path).close() }.isSuccess
-        }
-        if (missing.isNotEmpty()) {
-            throw IOException("Missing model files in assets: ${missing.joinToString()}")
-        }
-    }
-
     @SuppressLint("MissingPermission") // checked by startListening before this point
     private fun createAudioRecord(source: Int): AudioRecord {
         releaseMicEffects()
@@ -1036,22 +897,6 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
         const val VAD_MODEL = "silero_vad.onnx"
 
-        /**
-         * Streaming Zipformer (English, LibriSpeech + GigaSpeech, int8) from
-         * https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models
-         * The GigaSpeech-trained model hears real phone audio much better
-         * than the smaller LibriSpeech-only ones while still emitting live
-         * partial words. Decoder stays float32 per the model card.
-         */
-        const val MODEL_DIR = "sherpa-onnx-streaming-zipformer-en-2023-06-21"
-        const val ENCODER_FILE = "encoder-epoch-99-avg-1.int8.onnx"
-        const val DECODER_FILE = "decoder-epoch-99-avg-1.onnx"
-        const val JOINER_FILE = "joiner-epoch-99-avg-1.int8.onnx"
-        const val TOKENS_FILE = "tokens.txt"
-        const val ENCODER = "$MODEL_DIR/$ENCODER_FILE"
-        const val DECODER = "$MODEL_DIR/$DECODER_FILE"
-        const val JOINER = "$MODEL_DIR/$JOINER_FILE"
-        const val TOKENS = "$MODEL_DIR/$TOKENS_FILE"
     }
 }
 

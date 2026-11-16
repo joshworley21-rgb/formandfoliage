@@ -154,19 +154,15 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
                 val voices = created.voices
                 val selected = runCatching {
                     AssistantPreferences.phononVoiceFlow(context).first()
-                }.getOrDefault(PhononVoice.Default)
-                val chosen = selected.takeIf { it != PhononVoice.Default }
-                    ?.name
-                    ?.let { name ->
-                        voices.firstOrNull {
-                            it.equals(name, ignoreCase = true) ||
-                                it.substringBefore('.').equals(name, ignoreCase = true)
-                        }
-                    }
+                }.getOrDefault(PhononVoice.Freya)
+                val chosen = voices.firstOrNull {
+                    it.equals(selected.name, ignoreCase = true) ||
+                        it.substringBefore('.').equals(selected.name, ignoreCase = true)
+                }
                 if (chosen != null) {
                     runCatching { created.setVoice(chosen) }
                         .onFailure { CrashLog.note(context, TAG, "voice $chosen failed: ${it.message}") }
-                } else if (selected != PhononVoice.Default) {
+                } else {
                     CrashLog.note(
                         context,
                         TAG,

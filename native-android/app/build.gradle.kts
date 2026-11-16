@@ -173,33 +173,14 @@ dependencies {
 }
 
 // --- Offline speech binaries -------------------------------------------------
-// The sherpa-onnx AAR and the streaming Zipformer model are ~92 MB together,
-// so they are not committed. This task downloads whichever file is missing (or
-// whose checksum no longer matches). preBuild depends on it, so a fresh clone
-// only needs network access once.
-val sherpaModelDir = "src/main/assets/sherpa-onnx-streaming-zipformer-en-2023-06-21"
-val sherpaModelUrl =
-    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21/resolve/main"
+// The sherpa-onnx AAR is not committed; this task downloads it when missing
+// (or when the checksum no longer matches). preBuild depends on it, so a fresh
+// clone only needs network access once. The speech models are downloaded from
+// within the app instead of bundled.
 val sherpaDownloads: Map<String, Pair<String, String>> = mapOf(
     "libs/sherpa-onnx-1.13.8.aar" to (
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar" to
             "633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96"
-        ),
-    "$sherpaModelDir/encoder-epoch-99-avg-1.int8.onnx" to (
-        "$sherpaModelUrl/encoder-epoch-99-avg-1.int8.onnx" to
-            "32c98281c7bd8b63e3e142d007251b37f120572e8fdea9a4f5a79ce22b10ec4f"
-        ),
-    "$sherpaModelDir/decoder-epoch-99-avg-1.onnx" to (
-        "$sherpaModelUrl/decoder-epoch-99-avg-1.onnx" to
-            "9da02b77cb08826756ec6a88635f35a40374e4164e7c6359121a9145958a6ceb"
-        ),
-    "$sherpaModelDir/joiner-epoch-99-avg-1.int8.onnx" to (
-        "$sherpaModelUrl/joiner-epoch-99-avg-1.int8.onnx" to
-            "831477d390e59a61f1b6a6f763b9903e6c6366ff6034f1ddba613be82637122f"
-        ),
-    "$sherpaModelDir/tokens.txt" to (
-        "$sherpaModelUrl/tokens.txt" to
-            "49e3c2646595fd907228b3c6787069658f67b17377c60aeb8619c4551b2316fb"
         ),
 )
 
@@ -218,7 +199,7 @@ fun sha256(file: File): String {
 
 val downloadSherpa by tasks.registering {
     group = "build"
-    description = "Downloads the sherpa-onnx AAR and streaming Zipformer model if missing."
+    description = "Downloads the sherpa-onnx AAR if missing."
     val root = layout.projectDirectory
     outputs.files(sherpaDownloads.keys.map { root.file(it).asFile })
     doLast {

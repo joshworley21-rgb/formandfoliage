@@ -110,7 +110,7 @@ class AssistantService : Service() {
     private var askFollowUp = true
 
     /** Selected recogniser, mirrored so the quick-resume check is synchronous. */
-    private var selectedEngine = AsrEngine.Zipformer
+    private var selectedEngine = AsrEngine.Moonshine
 
     /** Set once the caller has said something in this call. */
     @Volatile
@@ -444,7 +444,6 @@ class AssistantService : Service() {
     private fun selectedEngineWarm(): Boolean {
         val voiceWarm = speaker.isWarm()
         return voiceWarm && when (selectedEngine) {
-            AsrEngine.Zipformer -> speech.onlineWarm()
             AsrEngine.Moonshine -> speech.moonshineWarm()
             AsrEngine.Nemotron -> speech.nemotronWarm()
         }
