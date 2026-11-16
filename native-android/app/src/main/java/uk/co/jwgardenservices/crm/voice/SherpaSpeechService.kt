@@ -359,6 +359,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         if (listening) return
         releaseMoonshine()
         releaseNemotron()
+        // A few megabytes that only matter while a call is up; it reloads
+        // from disk on the next one.
+        Punctuator.release()
     }
 
     /** Warm checks so a returning caller can skip the dial tone. */
