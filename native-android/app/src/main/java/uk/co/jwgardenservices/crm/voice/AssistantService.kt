@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Binder
 import android.os.Build
@@ -422,7 +423,7 @@ class AssistantService : Service() {
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val speaker = manager.availableCommunicationDevices.firstOrNull {
-                    it.type == AudioManager.DEVICE_SPEAKERPHONE
+                    it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
                 }
                 if (on && speaker != null) {
                     manager.setCommunicationDevice(speaker)
