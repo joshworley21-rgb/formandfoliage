@@ -76,7 +76,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         speakerId: Int = KokoroVoice.BmFable.speakerId,
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
     ) {
-        val clean = text.trim()
+        val clean = TtsProsody.smooth(text)
         if (closed || clean.isEmpty()) return
         if (phononActive()) {
             val spoken = runCatching { phononSpeech().speak(clean) }.getOrDefault(false)
@@ -263,7 +263,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         speakerId: Int = KokoroVoice.BmFable.speakerId,
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
     ) {
-        val clean = text.trim()
+        val clean = TtsProsody.smooth(text)
         if (closed || clean.isEmpty()) return
         if (phononActive()) {
             speak(clean, speakerId, speed)

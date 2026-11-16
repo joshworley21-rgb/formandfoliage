@@ -54,7 +54,7 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
      * so the caller can fall back to the local voice.
      */
     suspend fun speak(text: String): Boolean {
-        val clean = text.trim()
+        val clean = TtsProsody.smooth(text)
         if (closed || clean.isEmpty()) return false
         return speakLock.withLock {
             if (closed) return@withLock false

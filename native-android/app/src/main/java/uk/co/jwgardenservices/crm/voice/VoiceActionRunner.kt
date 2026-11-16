@@ -316,7 +316,14 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
         state.jobsLogged++
         state.hoursLogged = round2(state.hoursLogged + safeHours)
         state.amountLogged = round2(state.amountLogged + visit.amount)
-        return "Logged ${hoursLabel(safeHours)}, ${money(visit.amount)}."
+        // Ultra-short cadence: inside a rapid loop a full read-back on every
+        // job feels like a machine; the totals come once at the end.
+        return VoiceLines.pick(
+            "Logged ${hoursLabel(safeHours)}, ${money(visit.amount)}.",
+            "${hoursLabel(safeHours)} down, ${money(visit.amount)}.",
+            "Done, ${hoursLabel(safeHours)}, ${money(visit.amount)}.",
+            "That's in, ${hoursLabel(safeHours)}.",
+        )
     }
 
     private fun summary(state: WrapUp, stopped: Boolean = false): String {
