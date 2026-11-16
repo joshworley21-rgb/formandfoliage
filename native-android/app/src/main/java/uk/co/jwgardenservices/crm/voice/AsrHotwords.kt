@@ -29,6 +29,7 @@ import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
 object AsrHotwords {
     private const val TAG = "AsrHotwords"
     private const val MAX_NAMES = 40
+    private const val MAX_TOTAL = 64
     private const val BOOST = 2.0f
 
     /** Client names for this call, sanitised for the tokenizer. */
@@ -39,6 +40,21 @@ object AsrHotwords {
         .filter { it.length in 3..30 }
         .distinct()
         .take(MAX_NAMES)
+
+    /**
+     * Everything to bias this call with: client names first, then the patch
+     * vocabulary and trade terms from the bundled website profile. Places
+     * ("Berryfields") and plants ("Ceanothus") come straight from the site's
+     * own words, so the beam search holds onto them while you speak.
+     */
+    suspend fun biasTerms(context: android.content.Context): List<String> {
+        val clients = names()
+        val profile = BusinessBrain.load(context)
+        val patch = (BusinessBrain.vocabulary(profile) + BusinessBrain.tradeTerms(profile))
+            .map { sanitize(it) }
+            .filter { it.length in 3..30 }
+        return (clients + patch).distinct().take(MAX_TOTAL)
+    }
 
     /**
      * Build a `bpe.vocab` next to the copied model files, once. Equal scores

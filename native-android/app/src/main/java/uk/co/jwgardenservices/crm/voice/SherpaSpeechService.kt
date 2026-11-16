@@ -394,7 +394,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             else -> null
         }
         if (!offlineMode && onlineEngine == null) return
-        hotwordNames = AsrHotwords.names()
+        hotwordNames = AsrHotwords.biasTerms(context)
         val hotwordBias = if (!offlineMode && hotwordBiasEnabled) {
             AsrHotwords.buildBias(hotwordNames)
         } else {

@@ -135,7 +135,7 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
             return "Which client was that for?"
         }
         this.pending = null
-        return saveHours(client, hours, pending.date)
+        return saveHours(client, hours, pending.date, transcript)
     }
 
     // --- end-of-day wrap-up ----------------------------------------------
@@ -407,16 +407,24 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
             pending = PendingLog(client = null, date = date, hours = hours)
             return "Which client was that for?"
         }
-        return saveHours(client, hours, date)
+        return saveHours(client, hours, date, transcript)
     }
 
-    private suspend fun saveHours(client: Client, hours: Double, date: LocalDate): String {
+    private suspend fun saveHours(
+        client: Client,
+        hours: Double,
+        date: LocalDate,
+        source: String = "",
+    ): String {
         val draft = VisitDraft(
             clientId = client.id,
             visitDate = date.toString(),
             hours = round2(hours),
             materialsCost = 0.0,
-            description = "Logged by voice",
+            // The shorthand the owner said ("maintenance", "hedge") becomes
+            // the website's own line-item wording for the visit, the invoice
+            // PDF and the client email; the spoken reply stays short.
+            description = TradeTerms.lineItemFor(source) ?: "Logged by voice",
             amount = round2(
                 priceVisit(
                     BillingSource(client.billingMode, client.hourlyRate, client.fixedPrice),
