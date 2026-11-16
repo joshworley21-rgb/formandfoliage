@@ -257,6 +257,7 @@ class AssistantService : Service() {
             return
         }
         val greeting = PICKUP_TEXT
+        CrashLog.note(this, TAG, "pickup greeting: $greeting")
         val started = System.currentTimeMillis()
         speech.pauseForSpeech()
         _speaking.value = true
