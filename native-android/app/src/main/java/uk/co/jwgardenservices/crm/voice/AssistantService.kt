@@ -73,6 +73,10 @@ class AssistantService : Service() {
     private val _callActive = MutableStateFlow(false)
     val callActive: StateFlow<Boolean> = _callActive.asStateFlow()
 
+    /** True from the green button until the line is ready and the assistant answers. */
+    private val _dialling = MutableStateFlow(false)
+    val dialling: StateFlow<Boolean> = _dialling.asStateFlow()
+
     private val _turns = MutableStateFlow<List<AssistantTurn>>(emptyList())
     val turns: StateFlow<List<AssistantTurn>> = _turns.asStateFlow()
 
@@ -91,6 +95,9 @@ class AssistantService : Service() {
     /** Set once the caller has said something in this call. */
     @Volatile
     private var heardInCall = false
+
+    /** Ringback while the recogniser and voice warm up. */
+    private val ringback = VoiceRingback()
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
 
@@ -169,14 +176,18 @@ class AssistantService : Service() {
         // only a call that was not already connected gets the pickup greeting.
         val fresh = !_callActive.value
         CrashLog.note(this, TAG, if (fresh) "call starting" else "call resuming")
-        endedByUser = false
-        if (fresh) heardInCall = false
+        if (fresh) {
+            heardInCall = false
+            // Ring out while the model and voice load; the caller hears a
+            // dialling line instead of a loading spinner.
+            _dialling.value = true
+            ringback.start()
+        }
         _callActive.value = true
-        startInForeground()
+        startInForeground(if (fresh) CALLING_TEXT else LISTENING_TEXT)
         scope.launch { AssistantPreferences.markUsed(this@AssistantService) }
-        scope.launch { ensureListening() }
-        // The voice warms in parallel with the recogniser. A fresh call then
-        // answers with the cached "Hello?" instead of a dead line.
+        // Rejoining an existing call just reopens the microphone.
+        if (!fresh) scope.launch { ensureListening() }
         scope.launch(Dispatchers.Default) {
             val callVoice = runCatching { AssistantPreferences.voiceFlow(this@AssistantService).first() }
                 .getOrDefault(voice)
@@ -184,18 +195,38 @@ class AssistantService : Service() {
                 .getOrDefault(speed)
             voice = callVoice
             speed = callSpeed
-            speaker.warmUp()
-            runCatching { speaker.prepareFiller(callVoice.speakerId, callSpeed) }
-            if (fresh && pickupGreeting) answerWithPickup(callVoice.speakerId, callSpeed)
+            // Load the recogniser and the voice together. On a fresh call the
+            // microphone stays closed while the ringback plays, so it cannot
+            // hear the tones as a command.
+            coroutineScope {
+                launch { runCatching { speech.prepare() } }
+                speaker.warmUp()
+                runCatching { speaker.prepareFiller(callVoice.speakerId, callSpeed) }
+            }
+            if (fresh) connectCall(callVoice.speakerId, callSpeed)
         }
         return START_NOT_STICKY
     }
 
-    /** Say "Hello?" at the start of a fresh call, then reopen the mic. */
-    private suspend fun answerWithPickup(speakerId: Int, speed: Float) {
-        // Wait for the line to connect before answering. This is both the
-        // phone-call order and what stops the recogniser hearing the greeting
-        // when the ASR model finishes loading mid-sentence.
+    /**
+     * Finish dialling: stop the ringback, open the line and answer with the
+     * cached "Hello?". Waiting for [SherpaSpeechService.Phase.Listening]
+     * keeps the greeting out of the recogniser.
+     */
+    private suspend fun connectCall(speakerId: Int, speed: Float) {
+        if (!_callActive.value) {
+            ringback.stop()
+            _dialling.value = false
+            return
+        }
+        // Both models are warm by now. Ring off, then open the microphone.
+        ringback.stop()
+        speech.startListening()
+        if (!_callActive.value) {
+            speech.stopListening()
+            _dialling.value = false
+            return
+        }
         val connected = withTimeoutOrNull(8_000) {
             speech.state.first {
                 it.phase == SherpaSpeechService.Phase.Listening ||
@@ -203,9 +234,11 @@ class AssistantService : Service() {
             }
             speech.isListening()
         } ?: false
-        if (!connected) return
-        if (!_callActive.value || heardInCall || _thinking.value || _speaking.value) return
-        if (speech.state.value.partial.isNotBlank()) return
+        setNotification(LISTENING_TEXT)
+        _dialling.value = false
+        if (!connected || !_callActive.value) return
+        if (heardInCall || _thinking.value || _speaking.value) return
+        if (speech.state.value.partial.isNotBlank() || !pickupGreeting) return
         val started = System.currentTimeMillis()
         speech.pauseForSpeech()
         _speaking.value = true
@@ -276,8 +309,9 @@ class AssistantService : Service() {
      */
     fun endCall() {
         CrashLog.note(this, TAG, "call ended")
-        endedByUser = true
         _callActive.value = false
+        _dialling.value = false
+        ringback.stop()
         speech.stopListening()
         abandonAudioFocus()
         runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
@@ -294,7 +328,11 @@ class AssistantService : Service() {
 
     private suspend fun handleTranscripts() {
         speech.transcripts.collect { text ->
-            heardInCall = true
+            if (!heardInCall) {
+                heardInCall = true
+                ringback.stop()
+                _dialling.value = false
+            }
             CrashLog.note(this, TAG, "transcript: ${text.take(120)}")
             addTurn(AssistantTurn(fromUser = true, text = text))
             _thinking.value = true
@@ -588,13 +626,15 @@ class AssistantService : Service() {
     override fun onDestroy() {
         CrashLog.note(this, TAG, "service destroyed")
         _callActive.value = false
+        _dialling.value = false
+        ringback.stop()
         abandonAudioFocus()
         scope.cancel()
         speaker.stopPlayback()
         cloudVoice?.close()
         cloudVoice = null
-        // Kokoro and the intent model are process-scoped too; leave them loaded.
-        // The recognizer is process-scoped on purpose: close the microphone,
+        // Kokoro is process-scoped too; leave it loaded. The recogniser is
+        // process-scoped on purpose: close the microphone,
         // but leave the 190 MB model loaded for the next call.
         speech.stopListening()
         super.onDestroy()
@@ -650,7 +690,7 @@ class AssistantService : Service() {
         audioManager = null
     }
 
-    private fun startInForeground() {
+    private fun startInForeground(text: String = LISTENING_TEXT) {
         val manager = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -664,7 +704,7 @@ class AssistantService : Service() {
         ServiceCompat.startForeground(
             this,
             NOTIFICATION_ID,
-            buildNotification(LISTENING_TEXT),
+            buildNotification(text),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             } else {
@@ -703,6 +743,7 @@ class AssistantService : Service() {
         const val CHANNEL_ID = "assistant_mic"
         const val NOTIFICATION_ID = 41
         const val CHECKING_ONLINE = "Checking online rates."
+        const val CALLING_TEXT = "Assistant is dialling…"
         const val LISTENING_TEXT = "Assistant is listening for your next command"
         const val CLOUD_TAG = "CloudRouter"
         const val HELP_TEXT = "I can log hours, check your diary, mark a job done, add a client " +
@@ -710,13 +751,6 @@ class AssistantService : Service() {
         val TEMPORAL_WORDS = listOf("week", "tomorrow", "month", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
         const val MAX_TURNS = 40
 
-        /**
-         * Set when the user hangs up, so returning to the tab shows "Start
-         * call" instead of silently reopening the microphone. Reset by the
-         * start action or by a fresh process.
-         */
-        @Volatile
-        var endedByUser: Boolean = false
     }
 }
 

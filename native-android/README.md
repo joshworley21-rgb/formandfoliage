@@ -168,18 +168,21 @@ deliberately left on the web for now. The smaller known gaps:
 
 - The **Assistant** tab (mic icon, centre of the phone bar between Schedule
   and Invoices) is laid out like a phone call: a status orb, a rolling
-  transcript and one red **End call** button. Granting the microphone
-  permission starts a foreground service that owns the recording loop, so
-  there is no push-to-talk. Speech is recognised entirely on the phone and
-  partial words appear as an italic bubble while the recognizer is still
-  deciding. Clients lives behind More; staff keep their shorter bar.
+  transcript and one button. Opening the tab is silent and does not dial;
+  pressing the green **Call** button starts the foreground service, plays a
+  UK ringback while the recogniser and voice warm up, then the assistant
+  answers and the orb becomes **Connected**. The microphone permission is
+  requested on that first call, not on entering the tab. Speech is recognised
+  entirely on the phone and partial words appear as an italic bubble while
+  the recognizer is still deciding. Clients lives behind More; staff keep
+  their shorter bar.
 - **The call survives the tab.** Leaving the Assistant tab unbinds the screen
-  but does not stop the service; the microphone closes while you are
+  but does not stop a connected call; the microphone closes while you are
   elsewhere and reopens on return. The recognizer itself is process-scoped
   (`SpeechEngine`), so even **End call** followed by a new call reuses the
   loaded 190 MB model — it is rebuilt only when Android kills the app.
-  **End call** closes the mic and drops the notification; the screen then
-  offers **Start call**.
+  **End call** closes the mic, stops any ringback and drops the notification;
+  the screen then offers the green **Call** button again.
 - **Rolling transcript**: every recognised sentence and every spoken reply is
   kept in the service (last 40 turns) and shown as a bubble, so the question
   does not disappear when the answer is read out. Leaving and re-entering the
@@ -189,12 +192,15 @@ deliberately left on the web for now. The smaller known gaps:
   command is finalised without a tap. Shortening these is the cheapest
   latency win in the whole pipeline; any shorter starts cutting people off
   mid-sentence.
-- **Pickup greeting**: a fresh call answers with a short "Hello?" before the
-  microphone opens, and the tab changes from Connecting… to Listening… when
-  the line is ready. The clip is generated with the cached filler while the
-  recogniser loads, so it does not delay the first command. Re-entering the
-  tab does not repeat it, and it is skipped if the caller has already started
-  speaking. Settings → Assistant settings → Call turns it off.
+- **Dialling and pickup**: the green button rings out with a generated UK
+  ringback (400 + 450 Hz, 0.4/0.2/0.4 s cadence) instead of showing a model
+  loading spinner. When the recogniser is listening it stops, the status
+  changes to Dialling… → Connected, and the assistant answers with a short
+  "Hello?" before reopening the mic. The clip is generated with the cached
+  filler, so it costs nothing on later calls. Re-entering the tab does not
+  repeat it, and it is skipped if the caller has already started speaking.
+  Settings → Assistant settings → Call turns the greeting off (the ringback
+  remains).
 - **Warm start**: once the assistant has been used, the app loads the
   recogniser in the background after launch, so a returning caller opens the
   tab to a warm model instead of watching the 190 MB asset load. First ever

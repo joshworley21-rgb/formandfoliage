@@ -69,12 +69,11 @@ import uk.co.jwgardenservices.crm.voice.SherpaSpeechService
 /**
  * The Assistant tab, laid out like a phone call.
  *
- * Joining the tab connects (or rejoins) the foreground [AssistantService],
- * which owns the recording loop, endpoint detection, the command classifier and
- * Kokoro playback. The service is not stopped when the screen leaves: the call
- * stays connected while the app is open, the microphone pauses while the user
- * is elsewhere, and the red button hangs up. That is what stops the speech
- * model having to load again every time the tab is opened.
+ * Opening the tab binds to [AssistantService] but does not dial. The green
+ * button starts the call: a ringback plays while the recogniser and voice
+ * warm up, then the assistant answers "Hello?" and the microphone opens. The
+ * service keeps the loaded models when the screen leaves, so the next call is
+ * quick, and the red button hangs up.
  *
  * Every recognised sentence and every spoken reply is kept in the service's
  * rolling transcript, so the other person's words do not vanish when the
@@ -88,6 +87,7 @@ fun AssistantScreen() {
     var speaking by remember { mutableStateOf(false) }
     var thinking by remember { mutableStateOf(false) }
     var callActive by remember { mutableStateOf(false) }
+    var dialling by remember { mutableStateOf(false) }
     var turns by remember { mutableStateOf<List<AssistantTurn>>(emptyList()) }
     var granted by remember { mutableStateOf(micGranted(context)) }
 
@@ -98,13 +98,7 @@ fun AssistantScreen() {
         if (result) startCall(context)
     }
 
-    LaunchedEffect(granted) {
-        if (!granted) permission.launch(Manifest.permission.RECORD_AUDIO)
-    }
-
-    DisposableEffect(granted) {
-        if (!granted) return@DisposableEffect onDispose { }
-
+    DisposableEffect(Unit) {
         val intent = Intent(context, AssistantService::class.java)
         val connection = object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
@@ -118,10 +112,9 @@ fun AssistantScreen() {
                 callActive = false
             }
         }
-        // A call that was hung up stays hung up when the tab is reopened.
-        if (!AssistantService.endedByUser) {
-            ContextCompat.startForegroundService(context, intent)
-        }
+        // Binding keeps the screen in touch with the service without opening
+        // the microphone. The call only begins when the green button is
+        // pressed, so opening the tab is silent and does not dial out.
         context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
 
         onDispose {
@@ -153,21 +146,22 @@ fun AssistantScreen() {
         launch { bound.speaking.collect { speaking = it } }
         launch { bound.thinking.collect { thinking = it } }
         launch { bound.callActive.collect { callActive = it } }
+        launch { bound.dialling.collect { dialling = it } }
         launch { bound.turns.collect { turns = it } }
     }
 
-    val listening = callActive && state.phase == SherpaSpeechService.Phase.Listening && !speaking
-    val loading = callActive && state.phase == SherpaSpeechService.Phase.Loading
+    val listening = callActive && !dialling &&
+        state.phase == SherpaSpeechService.Phase.Listening && !speaking
     val status = when {
         !granted -> "Microphone permission needed"
-        !callActive -> "Call ended"
-        loading -> "Connecting…"
+        !callActive -> "Ready to call"
+        dialling -> "Dialling…"
         thinking -> "Thinking…"
         speaking -> "Speaking…"
-        state.phase == SherpaSpeechService.Phase.Listening -> "Listening…"
+        state.phase == SherpaSpeechService.Phase.Listening -> "Connected"
         state.phase == SherpaSpeechService.Phase.Error -> "Unavailable"
         state.phase == SherpaSpeechService.Phase.Ready -> "Reconnecting…"
-        else -> "Connecting…"
+        else -> "Dialling…"
     }
 
     Column(
@@ -209,7 +203,7 @@ fun AssistantScreen() {
         CallOrb(
             active = callActive,
             speaking = speaking || thinking,
-            loading = loading,
+            loading = dialling,
             level = if (listening) state.level else 0f,
         )
 
@@ -256,17 +250,8 @@ fun AssistantScreen() {
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(8.dp))
-            FilledIconButton(
-                onClick = { permission.launch(Manifest.permission.RECORD_AUDIO) },
-                modifier = Modifier.size(64.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                ),
-            ) {
-                Icon(Icons.Filled.Mic, contentDescription = "Allow microphone", modifier = Modifier.size(28.dp))
-            }
-        } else if (callActive) {
+        }
+        if (callActive) {
             CallButton(
                 label = "End call",
                 container = MaterialTheme.colorScheme.error,
@@ -275,11 +260,13 @@ fun AssistantScreen() {
             ) { Icon(Icons.Filled.CallEnd, contentDescription = "End call", modifier = Modifier.size(30.dp)) }
         } else {
             CallButton(
-                label = "Start call",
-                container = MaterialTheme.colorScheme.primary,
-                content = MaterialTheme.colorScheme.onPrimary,
-                onClick = { startCall(context) },
-            ) { Icon(Icons.Filled.Call, contentDescription = "Start call", modifier = Modifier.size(28.dp)) }
+                label = "Call",
+                container = CallGreen,
+                content = Color.White,
+                onClick = {
+                    if (granted) startCall(context) else permission.launch(Manifest.permission.RECORD_AUDIO)
+                },
+            ) { Icon(Icons.Filled.Call, contentDescription = "Call the assistant", modifier = Modifier.size(28.dp)) }
         }
 
         Spacer(Modifier.height(6.dp))
@@ -444,9 +431,11 @@ private fun CallButton(
     }
 }
 
-/** Hang up, open the microphone again, or start a fresh call. */
+/** The familiar phone-call green, independent of the app's theme. */
+private val CallGreen = Color(0xFF1B8F3A)
+
+/** Dial out: start the call on the green button, not when the tab opens. */
 private fun startCall(context: Context) {
-    AssistantService.endedByUser = false
     ContextCompat.startForegroundService(
         context,
         Intent(context, AssistantService::class.java),
