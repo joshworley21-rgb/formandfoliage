@@ -101,6 +101,24 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     /** True when the voice engine is already loaded, so a call can resume fast. */
     fun isWarm(): Boolean = tts != null || phonon?.isReady == true
 
+    /**
+     * Unload the voice model while the app is backgrounded with no call.
+     * Unlike [close] this can be reopened by the next utterance.
+     */
+    suspend fun releaseIdle() {
+        if (closed) return
+        runCatching { phonon?.close() }
+        phonon = null
+        speakLock.withLock {
+            loadLock.withLock {
+                runCatching { tts?.release() }
+                tts = null
+                fillers.clear()
+                pickup = null
+            }
+        }
+    }
+
     /** Load the model in the background so the first reply is not delayed by it. */
     suspend fun warmUp() {
         if (closed) return

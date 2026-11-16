@@ -217,6 +217,7 @@ class AssistantService : Service() {
             if (!warm) ringback.start()
         }
         _callActive.value = true
+        callActiveNow = true
         startInForeground(if (fresh) CALLING_TEXT else LISTENING_TEXT)
         scope.launch { AssistantPreferences.markUsed(this@AssistantService) }
         // Rejoining an existing call just reopens the microphone.
@@ -389,6 +390,7 @@ class AssistantService : Service() {
     fun endCall() {
         CrashLog.note(this, TAG, "call ended")
         _callActive.value = false
+        callActiveNow = false
         _dialling.value = false
         _connectedAt.value = 0
         _muted.value = false
@@ -781,6 +783,8 @@ class AssistantService : Service() {
     override fun onDestroy() {
         CrashLog.note(this, TAG, "service destroyed")
         _callActive.value = false
+        callActiveNow = false
+        callActiveNow = false
         _dialling.value = false
         _connectedAt.value = 0
         _muted.value = false
@@ -908,6 +912,10 @@ class AssistantService : Service() {
             "note, read out invoices and takings, or say undo to reverse the last change."
         val TEMPORAL_WORDS = listOf("week", "tomorrow", "month", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
         const val MAX_TURNS = 40
+
+        /** True while a call is connected, for the background model release. */
+        @Volatile
+        var callActiveNow: Boolean = false
 
     }
 }

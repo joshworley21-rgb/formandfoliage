@@ -361,6 +361,20 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         nemotron = null
     }
 
+    /**
+     * Free the recognisers while the app is in the background and no call is
+     * active. A 190 MB (or 660 MB) resident process is the first thing the
+     * system kills, which cold-starts the app and shows the splash again on
+     * return; dropping the models keeps the process small. The next call
+     * reloads them behind the ringback.
+     */
+    fun releaseIdle() {
+        if (listening) return
+        releaseOnline()
+        releaseMoonshine()
+        releaseNemotron()
+    }
+
     /** Warm checks so a returning caller can skip the dial tone. */
     fun onlineWarm(): Boolean = recognizer != null
     fun moonshineWarm(): Boolean = moonshine != null

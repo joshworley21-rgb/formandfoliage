@@ -192,6 +192,14 @@ deliberately left on the web for now. The smaller known gaps:
   command is finalised without a tap. Shortening these is the cheapest
   latency win in the whole pipeline; any shorter starts cutting people off
   mid-sentence.
+- **Returning to the app**: the task is retained (`alwaysRetainTaskState`) and
+  the last signed-in workspace is cached process-wide, so a recreated
+  activity renders the workspace immediately instead of flashing the
+  "Opening your workspace…" splash while the session revalidates. With no call
+  active, the assistant releases the recogniser and voice after 30 s in the
+  background: a resident 190–660 MB model makes the process the first thing
+  Android reclaims, which cold-starts the app on return. The next call
+  reloads behind the ringback.
 - **Call screen**: the Assistant tab is a dark call sheet — a glowing orb,
   "J W Assistant", a ticking call timer, animated speaking bars, a status
   pill, the rolling transcript, and Mute / Speaker / End controls. Mute stops
