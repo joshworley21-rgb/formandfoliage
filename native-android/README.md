@@ -218,6 +218,19 @@ deliberately left on the web for now. The smaller known gaps:
   phone audio, while this one still emits live partial words like a phone
   call. Builds are arm64-v8a only. Nothing is downloaded at runtime, so the
   tab works offline.
+- **Hotword correction**: client names are rebuilt from the Room cache at
+  each call and close misses in the final transcript are replaced with the
+  canonical name (one edit for five-letter names, two for nine or more).
+  The streaming model uses a 500-piece BPE vocabulary without its merge
+  table, so sherpa-onnx's token-level hotword biasing cannot be encoded
+  safely; this correction works with the current model and also applies to
+  the Moonshine transcript.
+- **Moonshine v2 (experimental)**: Settings → Assistant settings →
+  Moonshine ASR downloads the 135 MB base English model (MIT) on Wi-Fi. It is
+  offline, so it has no live partial words; the call buffers one utterance
+  and decodes it after the VAD endpoint. The Zipformer remains the default
+  because it streams and carries the hotwords. Moonshine is loaded during
+  the ringback and can be removed from the same card.
 - **Not in git**: the AAR, the Zipformer model and the Kokoro voice model are
   ~390 MB of binaries; the 640 KB Silero VAD model is checked in so no build
   depends on fetching it. The Phonon runtime is compiled by the APK workflow

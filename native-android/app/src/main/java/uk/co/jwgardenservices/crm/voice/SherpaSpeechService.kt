@@ -14,6 +14,10 @@ import androidx.core.content.ContextCompat
 import com.k2fsa.sherpa.onnx.EndpointConfig
 import com.k2fsa.sherpa.onnx.EndpointRule
 import com.k2fsa.sherpa.onnx.FeatureConfig
+import com.k2fsa.sherpa.onnx.OfflineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineRecognizer
+import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OfflineMoonshineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
@@ -36,6 +40,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+import java.util.ArrayDeque
 import uk.co.jwgardenservices.crm.core.CrashLog
 import kotlin.math.sqrt
 
@@ -88,6 +93,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     /** Serialises model loading, so a warm-up and a call cannot both build it. */
     private val loadLock = Mutex()
 
+    /** Moonshine loading is separate: it is 135 MB and only loaded on demand. */
+    private val moonshineLock = Mutex()
+
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
@@ -96,11 +104,20 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     val transcripts: SharedFlow<String> = _transcripts.asSharedFlow()
 
     private var recognizer: OnlineRecognizer? = null
+    private var moonshine: OfflineRecognizer? = null
     private var audioRecord: AudioRecord? = null
     private var thread: Thread? = null
 
     @Volatile
     private var listening = false
+
+    /** True when the current call is using the offline Moonshine recogniser. */
+    @Volatile
+    private var offlineMode = false
+
+    /** Client names used to correct the final transcript for this call. */
+    @Volatile
+    private var hotwordNames: List<String> = emptyList()
 
     /** Set while the confirmation is spoken, so the phone ignores itself. */
     @Volatile
@@ -141,9 +158,96 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
      * safe to call while a call is starting: [loadLock] makes the two share
      * one load instead of racing.
      */
-    suspend fun prepare() {
-        if (released || recognizer != null) return
+    suspend fun prepare(forCall: Boolean = false) {
+        if (released) return
+        // Moonshine is 135 MB: never pull that into memory at app launch. The
+        // ringback covers its load when a call actually starts.
+        val engine = runCatching { AssistantPreferences.asrEngineFlow(context).first() }
+            .getOrDefault(AsrEngine.Zipformer)
+        if (engine == AsrEngine.Moonshine && MoonshineDownloader.isInstalled(context)) {
+            if (forCall) ensureMoonshine()
+            return
+        }
+        if (recognizer != null) return
         ensureRecognizer()
+    }
+
+    /**
+     * Load the optional offline Moonshine recogniser.
+     *
+     * It has no streaming API, so it is decoded one utterance at a time after
+     * the VAD endpoint. Kept process-wide like the Zipformer.
+     */
+    private suspend fun ensureMoonshine(): OfflineRecognizer? {
+        moonshine?.let { return it }
+        return moonshineLock.withLock {
+            moonshine?.let { return@withLock it }
+            val dir = MoonshineDownloader.dir(context)
+            if (!MoonshineDownloader.isInstalled(context)) {
+                fail("Moonshine is not downloaded. Open Assistant settings to install it.")
+                return@withLock null
+            }
+            _state.update { it.copy(phase = Phase.Loading, message = "Loading Moonshine…") }
+            val started = System.currentTimeMillis()
+            val created = try {
+                withContext(Dispatchers.IO) {
+                    OfflineRecognizer(
+                        assetManager = null,
+                        config = OfflineRecognizerConfig(
+                            featConfig = FeatureConfig(
+                                sampleRate = SAMPLE_RATE,
+                                featureDim = FEATURE_DIM,
+                            ),
+                            modelConfig = OfflineModelConfig(
+                                moonshine = OfflineMoonshineModelConfig(
+                                    encoder = File(dir, "encoder_model.ort").absolutePath,
+                                    mergedDecoder = File(dir, "decoder_model_merged.ort").absolutePath,
+                                ),
+                                tokens = File(dir, "tokens.txt").absolutePath,
+                                numThreads = 2,
+                                provider = "cpu",
+                            ),
+                            decodingMethod = "greedy_search",
+                        ),
+                    )
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.e(TAG, "Could not load Moonshine", error)
+                fail("Moonshine could not be loaded. Check the downloaded files.")
+                return@withLock null
+            }
+            if (released) {
+                created.release()
+                null
+            } else {
+                moonshine = created
+                CrashLog.note(
+                    context,
+                    TAG,
+                    "Moonshine ready in ${System.currentTimeMillis() - started}ms",
+                )
+                _state.update { state ->
+                    if (state.phase == Phase.Loading) state.copy(phase = Phase.Ready, message = null) else state
+                }
+                created
+            }
+        }
+    }
+
+    /** Free the 135 MB Moonshine model when the owner switches back or removes it. */
+    fun releaseMoonshine() {
+        if (listening) return
+        moonshine?.release()
+        moonshine = null
+    }
+
+    /** Free the 190 MB streaming model when Moonshine is selected. */
+    fun releaseOnline() {
+        if (listening) return
+        recognizer?.release()
+        recognizer = null
     }
 
     /** Build the recogniser once, under a lock shared by prepare and listen. */
@@ -192,7 +296,20 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         try {
         if (released || listening) return
 
-        if (ensureRecognizer() == null) return
+        val selected = AssistantPreferences.asrEngineFlow(context).first()
+        offlineMode = selected == AsrEngine.Moonshine && MoonshineDownloader.isInstalled(context)
+        if (selected == AsrEngine.Moonshine && !offlineMode) {
+            CrashLog.note(context, TAG, "Moonshine selected but not installed; using Zipformer")
+        }
+        if (offlineMode) {
+            if (ensureMoonshine() == null) {
+                offlineMode = false
+                CrashLog.note(context, TAG, "Moonshine unavailable; falling back to Zipformer")
+            }
+        }
+        val onlineEngine = if (offlineMode) null else ensureRecognizer()
+        if (!offlineMode && onlineEngine == null) return
+        hotwordNames = AsrHotwords.names()
 
         if (!hasMicPermission()) {
             fail("Microphone permission is needed to listen.")
@@ -209,14 +326,17 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             fail("The microphone could not be opened.")
             return
         }
-        val engine = recognizer ?: return
-
         audioRecord = record
         listening = true
         paused = false
         _state.update { it.copy(phase = Phase.Listening, message = null, partial = "") }
 
-        thread = Thread({ process(engine, record) }, "sherpa-asr").apply { start() }
+        thread = if (offlineMode) {
+            Thread({ processOffline(record) }, "moonshine-asr")
+        } else {
+            val engine = onlineEngine ?: return
+            Thread({ process(engine, record) }, "zipformer-asr")
+        }.apply { start() }
         } finally {
             startLock.unlock()
         }
@@ -277,6 +397,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         if (worker != null) runCatching { worker.join(2_000) }
         runCatching { recognizer?.release() }
         recognizer = null
+        runCatching { moonshine?.release() }
+        moonshine = null
         _state.value = UiState()
     }
 
@@ -360,6 +482,131 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     it.copy(phase = Phase.Ready, partial = "")
                 }
             }
+        }
+    }
+
+    /**
+     * Moonshine loop: collect one utterance with Silero VAD, then decode it
+     * offline. There are no live partials; the final sentence appears after the
+     * endpoint. A 0.4 s pre-roll keeps the first syllable.
+     */
+    private fun processOffline(record: AudioRecord) {
+        val vad = createVad()
+        var hasSpeech = false
+        var lastVoiceAt = 0L
+        var pausedClean = false
+        var frames = 0
+        val utterance = ArrayList<Float>(SAMPLE_RATE * 4)
+        val preRoll = ArrayDeque<Float>()
+        CrashLog.note(context, TAG, "moonshine loop starting (source=${record.audioSource})")
+        try {
+            record.startRecording()
+            if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                fail("The microphone did not start recording.")
+                return
+            }
+            val buffer = ShortArray(FRAME_SAMPLES)
+            while (listening) {
+                val read = record.read(buffer, 0, buffer.size)
+                if (read < 0) {
+                    Log.e(TAG, "AudioRecord.read failed with $read")
+                    continue
+                }
+                if (read == 0) continue
+                if (paused) {
+                    if (!pausedClean) {
+                        hasSpeech = false
+                        vad?.reset()
+                        utterance.clear()
+                        preRoll.clear()
+                        pausedClean = true
+                    }
+                    maybeBargeIn(buffer, read)
+                    continue
+                }
+                pausedClean = false
+                val samples = FloatArray(read) { buffer[it] / 32768.0f }
+                vad?.acceptWaveform(samples)
+                val voiced = vad?.isSpeechDetected() == true
+                val now = SystemClock.elapsedRealtime()
+
+                if (!hasSpeech) {
+                    for (sample in samples) {
+                        preRoll.addLast(sample)
+                        while (preRoll.size > PRE_ROLL_SAMPLES) preRoll.removeFirst()
+                    }
+                    if (voiced) {
+                        hasSpeech = true
+                        lastVoiceAt = now
+                        utterance.addAll(preRoll)
+                        preRoll.clear()
+                    }
+                } else {
+                    if (voiced) lastVoiceAt = now
+                    for (sample in samples) utterance.add(sample)
+                    val endpoint = !voiced && now - lastVoiceAt >= ENDPOINT_SILENCE_MS
+                    if (endpoint || utterance.size >= MAX_UTTERANCE_SAMPLES) {
+                        val text = decodeOffline(utterance)
+                        utterance.clear()
+                        hasSpeech = false
+                        vad?.reset()
+                        if (text.isNotEmpty()) {
+                            pauseForSpeech()
+                            // Decoding blocked the loop, so the record buffer
+                            // holds pre-decode audio. Flush it before the next
+                            // listening turn so it cannot become a phantom line.
+                            runCatching {
+                                record.stop()
+                                record.startRecording()
+                            }
+                            publish(text)
+                        }
+                    }
+                }
+
+                frames += 1
+                if (frames % 100 == 0) {
+                    Log.d(TAG, "moonshine frames=$frames buffered=${utterance.size}")
+                }
+            }
+        } catch (error: Exception) {
+            Log.e(TAG, "Moonshine loop failed", error)
+            if (!released) fail(error.message ?: "Speech recognition failed.")
+        } finally {
+            runCatching { vad?.release() }
+            runCatching { echoCanceller?.release() }
+            echoCanceller = null
+            runCatching { record.release() }
+            if (audioRecord === record) audioRecord = null
+            listening = false
+            if (!released) {
+                _state.update { it.copy(phase = Phase.Ready, partial = "") }
+            }
+        }
+    }
+
+    /** Decode one buffered utterance with Moonshine and return the text. */
+    private fun decodeOffline(samples: List<Float>): String {
+        val engine = moonshine ?: return ""
+        if (samples.isEmpty()) return ""
+        val started = SystemClock.elapsedRealtime()
+        val stream = engine.createStream()
+        return try {
+            stream.acceptWaveform(samples.toFloatArray(), SAMPLE_RATE)
+            engine.decode(stream)
+            val text = engine.getResult(stream).text.trim()
+            CrashLog.note(
+                context,
+                TAG,
+                "moonshine ${SystemClock.elapsedRealtime() - started}ms " +
+                    "(${samples.size / SAMPLE_RATE}s): ${text.take(120)}",
+            )
+            text
+        } catch (error: Exception) {
+            CrashLog.note(context, TAG, "moonshine decode failed: ${error.message}")
+            ""
+        } finally {
+            runCatching { stream.release() }
         }
     }
 
@@ -466,10 +713,11 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     }
 
     private fun publish(text: String) {
-        if (text == lastResult) return
-        lastResult = text
-        _state.update { it.copy(finalText = text, partial = "") }
-        _transcripts.tryEmit(text)
+        val corrected = AsrHotwords.correct(text, hotwordNames)
+        if (corrected == lastResult) return
+        lastResult = corrected
+        _state.update { it.copy(finalText = corrected, partial = "") }
+        _transcripts.tryEmit(corrected)
     }
 
     // --- setup ------------------------------------------------------------
@@ -611,6 +859,12 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
         /** Silence after the last voiced frame that ends the turn. */
         const val ENDPOINT_SILENCE_MS = 450L
+
+        /** Audio kept before VAD reports speech, so the first word is not clipped. */
+        const val PRE_ROLL_SAMPLES = SAMPLE_RATE * 4 / 10
+
+        /** Decode a very long turn rather than buffering forever. */
+        const val MAX_UTTERANCE_SAMPLES = SAMPLE_RATE * 20
 
         const val VAD_MODEL = "silero_vad.onnx"
 

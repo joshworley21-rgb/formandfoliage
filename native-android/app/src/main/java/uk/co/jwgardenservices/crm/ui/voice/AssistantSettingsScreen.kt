@@ -48,15 +48,18 @@ import uk.co.jwgardenservices.crm.ui.common.SectionCard
 import uk.co.jwgardenservices.crm.ui.common.ShareText
 import uk.co.jwgardenservices.crm.voice.AssistantContext
 import uk.co.jwgardenservices.crm.voice.AssistantMemory
+import uk.co.jwgardenservices.crm.voice.AsrEngine
 import uk.co.jwgardenservices.crm.voice.AssistantPreferences
 import uk.co.jwgardenservices.crm.voice.KokoroHqDownloader
 import uk.co.jwgardenservices.crm.voice.KokoroEngine
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
 import uk.co.jwgardenservices.crm.voice.MicSource
+import uk.co.jwgardenservices.crm.voice.MoonshineDownloader
 import uk.co.jwgardenservices.crm.voice.PhononDownloader
 import uk.co.jwgardenservices.crm.voice.PhononVoice
 import uk.co.jwgardenservices.crm.voice.PiperVoice
 import uk.co.jwgardenservices.crm.voice.PiperVoiceDownloader
+import uk.co.jwgardenservices.crm.voice.SpeechEngine
 
 /**
  * The offline assistant's own settings: Kokoro voice profile and the contents
@@ -99,6 +102,11 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = PhononVoice.Default)
     var voiceDownloading by remember { mutableStateOf(false) }
     var voiceError by remember { mutableStateOf<String?>(null) }
+    val moonshineState by MoonshineDownloader.state.collectAsStateWithLifecycle()
+    var moonshineInstalled by remember { mutableStateOf(MoonshineDownloader.isInstalled(context)) }
+    var moonshineSaved by remember { mutableLongStateOf(MoonshineDownloader.savedBytes(context)) }
+    val asrEngine by AssistantPreferences.asrEngineFlow(context)
+        .collectAsStateWithLifecycle(initialValue = AsrEngine.Zipformer)
 
     LaunchedEffect(phononState) {
         when (val snapshot = phononState) {
@@ -111,6 +119,17 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
             is PhononDownloader.State.Working -> Unit
             else -> phononSaved = PhononDownloader.savedBytes(context)
+        }
+    }
+    LaunchedEffect(moonshineState) {
+        when (val snapshot = moonshineState) {
+            is MoonshineDownloader.State.Done -> {
+                moonshineInstalled = true
+                moonshineSaved = 0
+                MoonshineDownloader.clearResult()
+            }
+            is MoonshineDownloader.State.Working -> Unit
+            else -> moonshineSaved = MoonshineDownloader.savedBytes(context)
         }
     }
     LaunchedEffect(hqState) {
@@ -531,6 +550,107 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 }
 
                 if (!unmetered && working == null && !phononInstalled) {
+                    Text(
+                        text = "Connect to Wi-Fi to download the model.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                failure?.let { error ->
+                    Text(
+                        text = error.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+
+        SectionCard(title = "Moonshine ASR (experimental)") {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "Moonshine v2 base English, MIT licence. About 135 MB. It is an " +
+                        "offline model: there are no live partial words, just a transcript when " +
+                        "you stop speaking. The Zipformer stays the default for its live words " +
+                        "and automatic client-name hotwords; switch below to compare.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                val working = moonshineState as? MoonshineDownloader.State.Working
+                val failure = moonshineState as? MoonshineDownloader.State.Failed
+                if (working != null) {
+                    LinearProgressIndicator(
+                        progress = { working.progress },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "Downloading… ${working.done / MEGABYTE} of " +
+                            "${working.total / MEGABYTE} MB",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = { MoonshineDownloader.cancel() }) { Text("Cancel") }
+                }
+
+                if (moonshineInstalled) {
+                    Text(
+                        text = "Speech engine",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    OptionPicker(
+                        options = AsrEngine.entries,
+                        selected = asrEngine,
+                        label = { it?.label ?: AsrEngine.Zipformer.label },
+                        onSelect = { engine ->
+                            scope.launch {
+                                AssistantPreferences.setAsrEngine(context, engine)
+                                if (engine == AsrEngine.Zipformer) {
+                                    SpeechEngine.get(context).releaseMoonshine()
+                                } else {
+                                    SpeechEngine.get(context).releaseOnline()
+                                }
+                            }
+                        },
+                    )
+                    Text(
+                        text = "Takes effect on the next call. Moonshine keeps about 135 MB " +
+                            "in memory while selected; switch back to Zipformer after comparing.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                MoonshineDownloader.remove(context)
+                                AssistantPreferences.setAsrEngine(context, AsrEngine.Zipformer)
+                                SpeechEngine.get(context).releaseMoonshine()
+                                moonshineInstalled = false
+                                moonshineSaved = 0
+                            }
+                        },
+                    ) { Text("Remove Moonshine model") }
+                } else if (working == null) {
+                    OutlinedButton(
+                        onClick = {
+                            if (!unmetered) return@OutlinedButton
+                            MoonshineDownloader.start(context)
+                        },
+                    ) {
+                        Text(
+                            if (moonshineSaved > 0) {
+                                "Resume Moonshine download (${moonshineSaved / MEGABYTE} MB saved)"
+                            } else {
+                                "Download Moonshine v2 (135 MB)"
+                            },
+                        )
+                    }
+                }
+
+                if (!unmetered && working == null && !moonshineInstalled) {
                     Text(
                         text = "Connect to Wi-Fi to download the model.",
                         style = MaterialTheme.typography.bodySmall,

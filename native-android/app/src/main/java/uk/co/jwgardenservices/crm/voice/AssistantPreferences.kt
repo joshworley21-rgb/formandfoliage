@@ -41,6 +41,13 @@ private val PHONON_KEY = booleanPreferencesKey("phonon_enabled")
 private val PICKUP_KEY = booleanPreferencesKey("pickup_greeting")
 private val USED_KEY = booleanPreferencesKey("assistant_used")
 private val PHONON_VOICE_KEY = stringPreferencesKey("phonon_voice")
+private val ASR_ENGINE_KEY = stringPreferencesKey("asr_engine")
+
+/** The on-device speech recogniser. Streaming is the default; Moonshine is a test. */
+enum class AsrEngine(val label: String) {
+    Zipformer("Zipformer — streaming, live words"),
+    Moonshine("Moonshine v2 — experimental, offline"),
+}
 
 /**
  * Where the microphone audio comes from.
@@ -96,6 +103,16 @@ object AssistantPreferences {
     suspend fun setSpeed(context: Context, speed: Float) {
         context.assistantDataStore.edit { preferences ->
             preferences[SPEED_KEY] = speed.coerceIn(MIN_SPEED, MAX_SPEED)
+        }
+    }
+
+    fun asrEngineFlow(context: Context): Flow<AsrEngine> = context.assistantDataStore.data.map { preferences ->
+        AsrEngine.entries.firstOrNull { it.name == preferences[ASR_ENGINE_KEY] } ?: AsrEngine.Zipformer
+    }
+
+    suspend fun setAsrEngine(context: Context, engine: AsrEngine) {
+        context.assistantDataStore.edit { preferences ->
+            preferences[ASR_ENGINE_KEY] = engine.name
         }
     }
 
