@@ -345,19 +345,6 @@ fun AssistantScreen() {
                     )
                 }
             }
-        } else if (ledger.isNotEmpty()) {
-            PostCallSummary(
-                entries = ledger,
-                onUndo = { entry ->
-                    scope.launch {
-                        val reply = CallLedger.undo(entry.id)
-                        if (reply != null) {
-                            Toast.makeText(context, reply, Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                },
-                onDismiss = { CallLedger.clear() },
-            )
         } else {
             CallButton(
                 label = if (granted) "Call" else "Allow microphone",
@@ -373,6 +360,22 @@ fun AssistantScreen() {
                     modifier = Modifier.size(28.dp),
                 )
             }
+        }
+
+        if (!callActive && ledger.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            PostCallSummary(
+                entries = ledger,
+                onUndo = { entry ->
+                    scope.launch {
+                        val reply = CallLedger.undo(entry.id)
+                        if (reply != null) {
+                            Toast.makeText(context, reply, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+                onDismiss = { CallLedger.clear() },
+            )
         }
 
         Spacer(Modifier.height(6.dp))

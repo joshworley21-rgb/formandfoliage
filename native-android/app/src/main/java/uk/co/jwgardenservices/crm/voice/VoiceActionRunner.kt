@@ -813,7 +813,12 @@ class VoiceActionRunner(
             .trim()
             .removeSuffix(".")
             .ifBlank { "materials" }
-        val lineItem = TradeTerms.lineItemFor(note) ?: "Materials — $note"
+        val lineItem = when {
+            TradeTerms.lineItemFor(note) != null -> TradeTerms.lineItemFor(note)
+            note.equals("materials", ignoreCase = true) ||
+                note.equals("parts", ignoreCase = true) -> "Materials"
+            else -> "Materials — $note"
+        }
 
         val draft = VisitDraft(
             clientId = client.id,
@@ -1395,7 +1400,7 @@ class VoiceActionRunner(
 
         /** Words in "add £40 to that visit" that are not a materials note. */
         val NOTE_FILLER = setOf(
-            "the", "to", "on", "for", "that", "it", "this", "visit", "invoice", "and",
+            "the", "to", "on", "of", "for", "that", "it", "this", "visit", "invoice", "and",
         )
 
         /** Natural ways to abandon a pending confirmation. */
