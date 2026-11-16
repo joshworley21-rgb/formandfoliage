@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.AudioDeviceCallback
 import android.media.AudioFocusRequest
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
@@ -33,6 +34,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import uk.co.jwgardenservices.crm.MainActivity
 import uk.co.jwgardenservices.crm.R
@@ -136,7 +138,7 @@ class AssistantService : Service() {
     private var focusRequest: AudioFocusRequest? = null
 
     /** Re-routes the call when earphones or the van's head unit connect mid-call. */
-    private var deviceCallback: AudioManager.AudioDeviceCallback? = null
+    private var deviceCallback: AudioDeviceCallback? = null
 
     /** Owns the head-unit call button while a call is up; idle starts use the receiver. */
     private var mediaSession: MediaSessionCompat? = null
@@ -656,7 +658,7 @@ class AssistantService : Service() {
     private fun watchAudioDevices() {
         if (deviceCallback != null) return
         val manager = getSystemService(AudioManager::class.java) ?: return
-        val callback = object : AudioManager.AudioDeviceCallback() {
+        val callback = object : AudioDeviceCallback() {
             override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
                 routeCallAudio()
             }
@@ -1283,6 +1285,7 @@ private fun confirmationFor(intent: IntentResult): String {
         SpokenIntent.DayWrapUp -> "Running through today's jobs."
         SpokenIntent.RaiseInvoice -> "Drafting that invoice."
         SpokenIntent.AdjustCharge -> "Adjusting that visit."
+        SpokenIntent.AddExpense -> "Adding that to the account."
         SpokenIntent.MarkJobDone ->
             if (topic.isEmpty()) "Marking that job done." else "Marking the job for $topic done."
         SpokenIntent.WhoOwesMe -> "Checking who owes you."

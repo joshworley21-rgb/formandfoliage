@@ -9,6 +9,7 @@ import uk.co.jwgardenservices.crm.data.model.VisitDraft
 import uk.co.jwgardenservices.crm.data.repository.CrmRepository
 import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
 import uk.co.jwgardenservices.crm.data.repository.createInvoice
+import uk.co.jwgardenservices.crm.data.repository.deleteInvoice
 import uk.co.jwgardenservices.crm.domain.BillingSource
 import uk.co.jwgardenservices.crm.domain.formatDayMonth
 import uk.co.jwgardenservices.crm.domain.formatDayMonthYear
@@ -453,7 +454,7 @@ class VoiceActionRunner(
             pending = PendingLog(client = null, date = date, hours = hours)
             return "Which client was that for?"
         }
-        return saveHours(client, hours, date, transcript)
+        return saveHours(client, hours, date, text)
     }
 
     private suspend fun saveHours(
@@ -804,10 +805,11 @@ class VoiceActionRunner(
             return if (lastVoiceVisit != null) adjustCharge(text) else "Which client was that for?"
         }
 
-        val note = text
-            .substringAfter(Regex("£[\\d.]+").find(text)?.value ?: "", text)
+        val money = Regex("£[\\d.]+").find(text)?.value
+        val note = (if (money != null) text.substringAfter(money, text) else text)
             .replaceFirst(Regex("^(?:\\s*(?:of|for)\\s+)(.*)$"), "$1")
-            .substringBefore(Regex("\\s+(?:onto|on|for|at)\\s+"))
+            .split(Regex("\\s+(?:onto|on|for|at)\\s+"))
+            .first()
             .replace(Regex("\\b(?:materials?|parts)\\b"), "")
             .replace(Regex("\\s+"), " ")
             .trim()

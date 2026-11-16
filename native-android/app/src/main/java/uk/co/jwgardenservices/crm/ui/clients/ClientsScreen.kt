@@ -207,16 +207,17 @@ fun ClientsScreen(viewModel: CrmViewModel, isStaff: Boolean) {
             },
             loadAliases = { id -> viewModel.voiceAliases(id) },
             onSave = { draft, aliasText ->
+                val target = editing
                 scope.launch {
                     saveError = null
                     try {
-                        viewModel.saveClient(draft, editing)
-                        if (editing != null) {
+                        viewModel.saveClient(draft, target)
+                        if (target != null) {
                             val aliases = aliasText.split(',')
                                 .map { it.trim() }
                                 .filter { it.isNotEmpty() }
                             if (aliases.isNotEmpty() || aliasText.isNotBlank()) {
-                                viewModel.saveVoiceAliases(editing.id, aliases)
+                                viewModel.saveVoiceAliases(target.id, aliases)
                             }
                         }
                         creating = false
