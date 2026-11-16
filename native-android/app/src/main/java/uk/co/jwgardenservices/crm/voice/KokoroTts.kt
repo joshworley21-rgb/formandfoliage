@@ -202,6 +202,29 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         }
     }
 
+    /**
+     * Prepare the rest of the filler pool after the line has connected, so a
+     * slow cloud turn always has a warm clip without delaying the greeting.
+     */
+    suspend fun prepareRemainingFillers(
+        speakerId: Int = KokoroVoice.BmFable.speakerId,
+        speed: Float = AssistantPreferences.DEFAULT_SPEED,
+    ) {
+        if (closed) return
+        if (phononActive()) return
+        speakLock.withLock {
+            if (closed) return@withLock
+            val engine = ensureEngine() ?: return@withLock
+            val sid = speakerFor(engine, speakerId)
+            for (index in FILLER_TEXTS.indices) {
+                if (fillers[index] != null) continue
+                fillers[index] = withContext(Dispatchers.Default) {
+                    engine.generate(FILLER_TEXTS[index], sid, speed)
+                }
+            }
+        }
+    }
+
     /** Drop the cached clips when the voice or speed changes. */
     fun clearFiller() {
         fillers.clear()

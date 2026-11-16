@@ -208,7 +208,14 @@ class AssistantService : Service() {
                 speaker.warmUp()
                 runCatching { speaker.prepareFiller(callVoice.speakerId, callSpeed) }
             }
-            if (fresh) connectCall(callVoice.speakerId, callSpeed)
+            if (fresh) {
+                connectCall(callVoice.speakerId, callSpeed)
+                // Now the line is connected, finish warming the filler pool in
+                // the background; nothing waits on it.
+                if (cloudConversation && _callActive.value) {
+                    runCatching { speaker.prepareRemainingFillers(callVoice.speakerId, callSpeed) }
+                }
+            }
         }
         return START_NOT_STICKY
     }

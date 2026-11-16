@@ -27,6 +27,12 @@ object SemanticMatcher {
         SpokenIntent.MarkJobDone,
     )
 
+    /** Live data or a quote always goes to the cloud, never this matcher. */
+    private val LIVE = setOf(
+        "weather", "forecast", "traffic", "supplier", "online", "website",
+        "price", "pricing", "quote", "cost", "costs", "charge", "rate", "rates",
+    )
+
     private val STOP = setOf(
         "the", "a", "an", "at", "for", "on", "in", "to", "of", "my", "me", "i",
         "is", "it", "and", "that", "this", "with", "has", "have", "had", "did",
@@ -34,6 +40,10 @@ object SemanticMatcher {
         "what", "whats", "when", "who", "how", "much", "many", "got", "get",
         "be", "been", "am", "just", "about", "then", "please", "can", "could",
         "would", "should", "all", "still", "up", "there", "here", "s", "am",
+        // Numbers add no routing meaning; "half day" and "half hour" still do.
+        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+        "ten", "eleven", "twelve", "fifteen", "twenty", "thirty", "forty",
+        "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand",
     )
 
     /** Word → shared concept. Unknown words stand for themselves. */
@@ -211,6 +221,7 @@ object SemanticMatcher {
     fun classify(text: String): Pair<SpokenIntent, Double>? {
         val sentence = concepts(text).toSet()
         if (sentence.size < 2) return null
+        if (sentence.any { it in LIVE }) return null
 
         var bestIntent: SpokenIntent? = null
         var best = 0.0
@@ -248,6 +259,7 @@ object SemanticMatcher {
             .asSequence()
             .map { it.trim('\'') }
             .filter { it.isNotBlank() && it !in STOP }
+            .filter { word -> word.any { it.isLetter() } }
             .map { SYNONYMS[it] ?: it }
             .toList()
 }
