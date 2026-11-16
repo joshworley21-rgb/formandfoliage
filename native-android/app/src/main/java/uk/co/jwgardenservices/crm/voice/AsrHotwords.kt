@@ -80,23 +80,69 @@ object AsrHotwords {
         val tokens = text.split(Regex("\\s+")).toMutableList()
         var index = 0
         while (index < tokens.size) {
-            var replaced = false
+            // An exact name is left alone, but skip the whole span so a
+            // shorter client name cannot match the tail of a longer one.
+            var exactEnd = -1
             for (name in names) {
-                val parts = name.split(Regex("\\s+"))
-                val end = index + parts.size
+                val end = index + words(name)
                 if (end > tokens.size) continue
-                val slice = tokens.subList(index, end)
-                    .joinToString(" ") { it.trim(',', '.', '!', '?', ';', ':') }
-                if (!similar(slice, name)) continue
-                val tail = tokens[end - 1].takeLastWhile { it in ",.!?;:" }
-                for (i in index until end) tokens[i] = ""
-                tokens[index] = name + tail
-                replaced = true
-                break
+                if (slice(tokens, index, end) == name) {
+                    exactEnd = end
+                    break
+                }
             }
-            if (!replaced) index += 1
+            if (exactEnd != -1) {
+                index = exactEnd
+                continue
+            }
+
+            // Otherwise take the closest near miss at this position.
+            var bestName: String? = null
+            var bestEnd = index
+            var bestDistance = Int.MAX_VALUE
+            for (name in names) {
+                val end = index + words(name)
+                if (end > tokens.size) continue
+                val allowed = allowedEdits(name)
+                if (allowed == 0) continue
+                val heard = slice(tokens, index, end)
+                if (abs(heard.length - name.length) > allowed) continue
+                val distance = distance(heard, name)
+                if (distance in 1..allowed && distance < bestDistance) {
+                    bestName = name
+                    bestEnd = end
+                    bestDistance = distance
+                }
+            }
+            if (bestName == null) {
+                index += 1
+                continue
+            }
+
+            val tail = tokens[bestEnd - 1].takeLastWhile { it in ",.!?;:" }
+            for (i in index until bestEnd) tokens[i] = ""
+            tokens[index] = bestName + tail
+            // Advance past the replacement: without this, a multi-word name
+            // leaves blank tokens behind and the same span matches again on
+            // the next pass, spinning forever.
+            index = bestEnd
         }
         return tokens.filter { it.isNotEmpty() }.joinToString(" ")
+    }
+
+    private fun slice(tokens: List<String>, start: Int, end: Int): String =
+        tokens.subList(start, end)
+            .joinToString(" ") { it.trim(',', '.', '!', '?', ';', ':') }
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+    private fun words(name: String): Int =
+        name.split(Regex("\\s+")).count { it.isNotBlank() }
+
+    private fun allowedEdits(name: String): Int = when {
+        name.length >= 9 -> 2
+        name.length >= 5 -> 1
+        else -> 0
     }
 
     /** Uppercase, letters and spaces only; the tokenizer has no apostrophes. */
@@ -104,19 +150,6 @@ object AsrHotwords {
         .replace(Regex("[^A-Z ]"), " ")
         .replace(Regex("\\s+"), " ")
         .trim()
-
-    /** True only for a near miss: exact matches need no replacement. */
-    private fun similar(heard: String, name: String): Boolean {
-        if (heard == name) return false
-        val allowed = when {
-            name.length >= 9 -> 2
-            name.length >= 5 -> 1
-            else -> 0
-        }
-        if (allowed == 0) return false
-        if (abs(heard.length - name.length) > allowed) return false
-        return distance(heard, name) <= allowed
-    }
 
     private fun distance(a: String, b: String): Int {
         var previous = IntArray(b.length + 1) { it }

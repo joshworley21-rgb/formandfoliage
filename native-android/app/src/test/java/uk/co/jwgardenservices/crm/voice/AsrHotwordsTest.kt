@@ -50,4 +50,21 @@ class AsrHotwordsTest {
             AsrHotwords.correct("FINISHED AT SMITH.", listOf("SMITHS")),
         )
     }
+
+    @Test
+    fun `two word names replace once and terminate`() {
+        // Regression: the blank token left by a multi-word replacement used to
+        // make the same span match again on every pass, hanging the thread.
+        assertEquals(
+            "MARK MRS JONES DONE",
+            AsrHotwords.correct("MARK MRS JONS DONE", listOf("MRS JONES")),
+        )
+        assertEquals("MRS JONES", AsrHotwords.correct("MRS JONS", listOf("MRS JONES")))
+    }
+
+    @Test
+    fun `an exact name wins over a similar shorter name`() {
+        assertEquals("SMITHS", AsrHotwords.correct("SMITHS", listOf("SMITHS", "SMITH")))
+        assertEquals("SMITH", AsrHotwords.correct("SMITH", listOf("SMITHS", "SMITH")))
+    }
 }
