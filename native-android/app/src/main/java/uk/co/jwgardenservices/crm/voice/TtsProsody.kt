@@ -40,6 +40,40 @@ object TtsProsody {
     private val money = Regex("£(\\d+(?:\\.\\d+)?)")
     private val commaRun = Regex("\\s*,\\s*")
 
+    /** Full month names or their usual abbreviations, longest form first. */
+    private const val MONTH = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|" +
+        "june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+
+    private val slashDate = Regex("\\b(\\d{1,2})/(\\d{1,2})\\b(?:/(\\d{4})\\b)?")
+    private val dayMonthDate = Regex(
+        "\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+($MONTH)\\b\\.?(?:\\s+(\\d{4})\\b)?",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private val monthAbbreviation = Regex(
+        "\\b(jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\\b\\.?",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private val weekdayAbbreviation = Regex(
+        "\\b(mon|tues|tue|wed|thurs|thur|thu|fri|sat|sun)\\b\\.?",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private val ordinals = listOf(
+        "first", "second", "third", "fourth", "fifth", "sixth", "seventh",
+        "eighth", "ninth", "tenth", "eleventh", "twelfth", "thirteenth",
+        "fourteenth", "fifteenth", "sixteenth", "seventeenth", "eighteenth",
+        "nineteenth", "twentieth",
+    )
+
+    private val weekdayNames = mapOf(
+        "mon" to "Monday", "tue" to "Tuesday", "tues" to "Tuesday",
+        "wed" to "Wednesday", "thu" to "Thursday", "thur" to "Thursday",
+        "thurs" to "Thursday", "fri" to "Friday", "sat" to "Saturday",
+        "sun" to "Sunday",
+    )
+
     private val units = listOf(
         "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
     )
@@ -76,11 +110,88 @@ object TtsProsody {
         return "$lead... $rest"
     }
 
-    /** Phonon-only: em-dash breaths and trade-counter money. */
-    fun forPhonon(text: String): String =
-        money.replace(commaRun.replace(smooth(text), " — ")) { match ->
-            spokenMoney(match.groupValues[1])
+    /**
+     * Phonon-only: dates said the way people say them, em-dash breaths and
+     * trade-counter money. Runs on the finished reply, after the database
+     * values are already in the template and before any audio is generated.
+     */
+    fun forPhonon(text: String): String {
+        var shaped = smooth(text)
+        shaped = spokenDates(shaped)
+        shaped = weekdayAbbreviation.replace(shaped) { match ->
+            weekdayNames[match.groupValues[1].lowercase()] ?: match.value
         }
+        shaped = monthAbbreviation.replace(shaped) { match ->
+            monthName(match.groupValues[1])
+        }
+        shaped = commaRun.replace(shaped, " — ")
+        return money.replace(shaped) { match -> spokenMoney(match.groupValues[1]) }
+    }
+
+    /** "14/11" / "14 Nov" / "14th November" -> "the fourteenth of November". */
+    private fun spokenDates(text: String): String {
+        var shaped = slashDate.replace(text) { match ->
+            val day = match.groupValues[1].toIntOrNull() ?: return@replace match.value
+            val month = match.groupValues[2].toIntOrNull() ?: return@replace match.value
+            if (day !in 1..31 || month !in 1..12) return@replace match.value
+            val year = match.groupValues[3]
+            "the ${ordinal(day)} of ${monthNameByNumber(month)}" + yearPart(year)
+        }
+        shaped = dayMonthDate.replace(shaped) { match ->
+            val day = match.groupValues[1].toIntOrNull() ?: return@replace match.value
+            if (day !in 1..31) return@replace match.value
+            "the ${ordinal(day)} of ${monthName(match.groupValues[2])}" +
+                yearPart(match.groupValues[3])
+        }
+        return shaped
+    }
+
+    private fun yearPart(raw: String): String = raw.takeIf { it.isNotBlank() }
+        ?.let { " " + yearWords(it) }
+        .orEmpty()
+
+    private fun ordinal(day: Int): String = when {
+        day in 1..20 -> ordinals[day - 1]
+        day == 30 -> "thirtieth"
+        day == 31 -> "thirty first"
+        day in 21..29 -> "twenty ${ordinals[day - 21]}"
+        else -> day.toString()
+    }
+
+    /** 2025 -> "twenty twenty five"; 2005 -> "two thousand and five". */
+    private fun yearWords(raw: String): String {
+        val year = raw.toIntOrNull() ?: return raw
+        val high = year / 100
+        val low = year % 100
+        return when {
+            low == 0 -> "${words(high)} hundred"
+            year in 2000..2009 -> "two thousand and ${words(low)}"
+            low < 10 -> "${words(high)} oh ${words(low)}"
+            else -> "${words(high)} ${words(low)}"
+        }
+    }
+
+    private fun monthName(matched: String): String = when (matched.take(3).lowercase()) {
+        "jan" -> "January"
+        "feb" -> "February"
+        "mar" -> "March"
+        "apr" -> "April"
+        "may" -> "May"
+        "jun" -> "June"
+        "jul" -> "July"
+        "aug" -> "August"
+        "sep" -> "September"
+        "oct" -> "October"
+        "nov" -> "November"
+        else -> "December"
+    }
+
+    private fun monthNameByNumber(month: Int): String = monthName(
+        listOf(
+            "jan", "feb", "mar", "apr", "may", "jun",
+            "jul", "aug", "sep", "oct", "nov", "dec",
+        ).getOrElse(month - 1) { "jan" },
+    )
 
     /** "£180" -> "one hundred and eighty quid"; "£845" -> "845 pounds". */
     private fun spokenMoney(raw: String): String {

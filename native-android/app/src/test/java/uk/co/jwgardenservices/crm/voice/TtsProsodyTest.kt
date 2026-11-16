@@ -54,4 +54,63 @@ class TtsProsodyTest {
         assertTrue(shaped.contains("£87.50"))
         assertTrue(!shaped.contains("—"))
     }
+
+    @Test
+    fun `day and month abbreviations speak naturally`() {
+        assertEquals(
+            "the Smiths on the fourteenth of November",
+            TtsProsody.forPhonon("the Smiths on 14 Nov"),
+        )
+        assertEquals(
+            "the first of November",
+            TtsProsody.forPhonon("1st Nov"),
+        )
+        assertEquals(
+            "the fourteenth of September",
+            TtsProsody.forPhonon("14 September"),
+        )
+    }
+
+    @Test
+    fun `slash dates expand`() {
+        assertEquals(
+            "the third of May",
+            TtsProsody.forPhonon("03/05"),
+        )
+        assertEquals(
+            "the fourteenth of November twenty twenty five",
+            TtsProsody.forPhonon("14/11/2025"),
+        )
+    }
+
+    @Test
+    fun `a year after a date is spoken`() {
+        assertEquals(
+            "the fourteenth of November twenty twenty five",
+            TtsProsody.forPhonon("14 Nov 2025"),
+        )
+        assertEquals(
+            "the fifth of June two thousand and five",
+            TtsProsody.forPhonon("5 Jun 2005"),
+        )
+    }
+
+    @Test
+    fun `standalone abbreviations and weekdays expand`() {
+        assertEquals("November", TtsProsody.forPhonon("Nov"))
+        assertEquals(
+            "Thursday the fourteenth of November",
+            TtsProsody.forPhonon("Thu 14 Nov"),
+        )
+        assertEquals(
+            "see you Monday",
+            TtsProsody.forPhonon("see you Mon"),
+        )
+    }
+
+    @Test
+    fun `full month names are left alone`() {
+        assertTrue(TtsProsody.forPhonon("14 November").contains("November"))
+        assertTrue(!TtsProsody.forPhonon("14 November").contains("Novemberber"))
+    }
 }
