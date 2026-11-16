@@ -50,14 +50,28 @@ class AssistantContext(
             appendLine("Clients: ${clients.take(30).joinToString { it.name }}.")
         }
 
-        val jobs = runCatching { repository.observeJobs().first() }.getOrDefault(emptyList())
+        val names = clients.associateBy { it.id }
+        val scheduled = runCatching { repository.observeJobs().first() }.getOrDefault(emptyList())
             .filter { it.status == "scheduled" }
             .mapNotNull { job -> parseTimestamp(job.startsAt)?.let { job to it } }
-            .filter { (_, starts) -> !starts.isBefore(now) }
             .sortedBy { (_, starts) -> starts }
-            .take(5)
+
+        // The slot the owner is standing in right now. Without this line a
+        // 9am job is invisible to the model all afternoon, which is exactly
+        // when "log four hours and mark it done" is said.
+        scheduled.firstOrNull { (job, starts) ->
+            !now.isBefore(starts) &&
+                now.isBefore(starts.plusSeconds(job.durationMinutes.coerceAtLeast(15) * 60L))
+        }?.let { (job, starts) ->
+            val name = names[job.clientId]?.name ?: "a client"
+            appendLine(
+                "On now: $name since ${starts.formatTime()}, " +
+                    "booked ${job.durationMinutes} minutes.",
+            )
+        }
+
+        val jobs = scheduled.filter { (_, starts) -> !starts.isBefore(now) }.take(5)
         if (jobs.isNotEmpty()) {
-            val names = clients.associateBy { it.id }
             appendLine(
                 "Next jobs: " + jobs.joinToString("; ") { (job, starts) ->
                     val name = names[job.clientId]?.name ?: "a client"

@@ -34,6 +34,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import uk.co.jwgardenservices.crm.MainActivity
 import uk.co.jwgardenservices.crm.R
 import uk.co.jwgardenservices.crm.core.CrashLog
+import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
 
 /**
  * Keeps the Assistant microphone alive as a foreground service.
@@ -99,6 +100,7 @@ class AssistantService : Service() {
     private var onlineVoice = false
     private var cloudVoice: CloudVoice? = null
     private val assistantContext = AssistantContext()
+    private val callBriefing = CallBriefing()
 
     private var voice = KokoroVoice.BmFable
     private var speed = AssistantPreferences.DEFAULT_SPEED
@@ -120,6 +122,9 @@ class AssistantService : Service() {
     private val ringback = VoiceRingback()
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
+
+    /** Re-routes the call when earphones or the van's head unit connect mid-call. */
+    private var deviceCallback: AudioManager.AudioDeviceCallback? = null
 
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
         // A call or another assistant taking over must win: stop whichever
@@ -218,6 +223,11 @@ class AssistantService : Service() {
         }
         _callActive.value = true
         callActiveNow = true
+        // Pick the hands-free microphone now: in the Vivaro this is the head
+        // unit's HFP mic, on site it is the earphones, and only when neither
+        // exists does the phone's own bottom mic stay in play.
+        routeCallAudio()
+        watchAudioDevices()
         startInForeground(if (fresh) CALLING_TEXT else LISTENING_TEXT)
         scope.launch { AssistantPreferences.markUsed(this@AssistantService) }
         // Rejoining an existing call just reopens the microphone.
@@ -250,8 +260,8 @@ class AssistantService : Service() {
     }
 
     /**
-     * Finish dialling: stop the ringback, answer with "Hello, how can I help?",
-     * then open the microphone.
+     * Finish dialling: stop the ringback, answer with today's schedule briefing
+     * (or the cached hello when there is no data), then open the microphone.
      *
      * The microphone is deliberately opened *after* the greeting. Starting
      * AudioRecord just before playback can duck or reroute the speaker on some
@@ -271,7 +281,11 @@ class AssistantService : Service() {
             AssistantPreferences.pickupFlow(this@AssistantService).first()
         }.getOrDefault(pickupGreeting)
         if (wantsGreeting && _callActive.value) {
-            val greeting = PICKUP_TEXT
+            // The briefing names today's first/active job, so the owner can
+            // answer "log four hours and mark it done" without a client name.
+            // It is read from Room only, and only after the models are warm.
+            val briefing = callBriefing.line()
+            val greeting = briefing ?: PICKUP_TEXT
             CrashLog.note(this, TAG, "pickup greeting: $greeting")
             val started = System.currentTimeMillis()
             // Show it in the conversation immediately, even if the speaker is
@@ -287,7 +301,14 @@ class AssistantService : Service() {
                 // Long enough for a Phonon hiccup and the local fallback to
                 // load; the drain in PhononSpeech caps its own wait.
                 withTimeoutOrNull(12_000) {
-                    speaker.speakPickup(speakerId, speed)
+                    if (briefing != null) {
+                        // Streamed sentence by sentence; the first words start
+                        // while the rest of the briefing is still generating.
+                        speaker.speakStreaming(greeting, speakerId, speed)
+                        true
+                    } else {
+                        speaker.speakPickup(speakerId, speed)
+                    }
                 } ?: false
             } catch (error: Exception) {
                 CrashLog.note(this, TAG, "pickup failed: ${error.message}")
@@ -374,6 +395,46 @@ class AssistantService : Service() {
         scope.launch { AssistantMemory.appendTurn(this@AssistantService, turn) }
     }
 
+    /**
+     * Turn a finished wrap-up into one draft invoice per client. The visits
+     * are already saved and unbilled, so an offline failure costs nothing:
+     * they stay in "ready to bill" and can be raised from the Invoices screen.
+     */
+    private fun raiseDraftInvoices() {
+        val billables = actions.takeWrapUpBillables()
+        if (billables.isEmpty()) return
+        scope.launch(Dispatchers.IO) {
+            // The invoice function bills real visit rows, so the outbox has
+            // to reach the server first. Offline this is a no-op and the
+            // visits wait in "ready to bill" on the Invoices screen.
+            val sync = runCatching { ServiceLocator.syncEngine.syncNow() }.getOrNull()
+            if (sync == null || sync.offline) {
+                CrashLog.note(
+                    this@AssistantService,
+                    TAG,
+                    "wrap-up invoices deferred: ${sync?.error ?: "offline"}",
+                )
+                setNotification("Visits logged — ready to invoice")
+                return@launch
+            }
+            val raised = runCatching { actions.raiseDraftInvoices(billables) }
+                .onFailure {
+                    CrashLog.note(this@AssistantService, TAG, "invoice attempt failed: ${it.message}")
+                }
+                .getOrDefault(0)
+            CrashLog.note(
+                this@AssistantService,
+                TAG,
+                "wrap-up invoices: $raised of ${billables.size} clients",
+            )
+            if (raised > 0) {
+                setNotification(
+                    if (raised == 1) "Draft invoice ready" else "$raised draft invoices ready",
+                )
+            }
+        }
+    }
+
     /** Close the microphone but keep the service (and the loaded model) alive. */
     fun pauseListening() {
         if (!speech.isListening()) return
@@ -394,6 +455,7 @@ class AssistantService : Service() {
         _dialling.value = false
         _connectedAt.value = 0
         _muted.value = false
+        actions.clearWrapUp()
         setSpeaker(false)
         ringback.stop()
         speaker.stopPlayback()
@@ -401,6 +463,7 @@ class AssistantService : Service() {
         _speaking.value = false
         speech.stopListening()
         abandonAudioFocus()
+        releaseCallAudio()
         runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
         foreground = false
         stopSelf()
@@ -421,23 +484,143 @@ class AssistantService : Service() {
     fun setSpeaker(on: Boolean) {
         if (_speakerOn.value == on) return
         _speakerOn.value = on
+        if (on) {
+            val manager = getSystemService(AudioManager::class.java) ?: return
+            runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val speaker = manager.availableCommunicationDevices.firstOrNull {
+                        it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+                    }
+                    if (speaker != null) manager.setCommunicationDevice(speaker)
+                } else {
+                    @Suppress("DEPRECATION")
+                    manager.setSpeakerphoneOn(on)
+                }
+            }
+        } else if (_callActive.value) {
+            // Back off the loudspeaker onto the best hands-free mic (van head
+            // unit, earphones) rather than the phone's bottom mic.
+            routeCallAudio()
+        } else {
+            // Call over: undo whatever the speakerphone toggle left behind.
+            releaseCallAudio()
+        }
+        CrashLog.note(this, TAG, "speakerphone=$on")
+    }
+
+    /**
+     * Send the call audio to a hands-free microphone, most specific first:
+     * a BLE headset (EarFun and the like), the van's classic Bluetooth HFP
+     * unit, USB, then a wired headset. Without this the VOICE_COMMUNICATION
+     * capture often stays on the bottom mic sitting in a pocket or cradle.
+     *
+     * Setting a Bluetooth device also opens the SCO link, which flips the
+     * head unit into two-way HFP mode so its dashboard end-call button works.
+     * Best effort throughout: with no headset attached the platform default
+     * (earpiece) is left alone.
+     */
+    private fun routeCallAudio() {
+        // The loudspeaker is an explicit user choice; it wins until toggled off.
+        if (_speakerOn.value) return
         val manager = getSystemService(AudioManager::class.java) ?: return
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val speaker = manager.availableCommunicationDevices.firstOrNull {
-                    it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
-                }
-                if (on && speaker != null) {
-                    manager.setCommunicationDevice(speaker)
-                } else {
+                val preferences = listOf(
+                    AudioDeviceInfo.TYPE_BLE_HEADSET,
+                    AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                    AudioDeviceInfo.TYPE_USB_HEADSET,
+                    AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                )
+                val device = manager.availableCommunicationDevices
+                    .firstOrNull { it.type in preferences }
+                if (device != null) {
+                    if (manager.communicationDevice?.type != device.type) {
+                        manager.setCommunicationDevice(device)
+                        CrashLog.note(this, TAG, "call audio → ${deviceLabel(device)}")
+                    }
+                } else if (manager.communicationDevice != null) {
+                    // A headset vanished mid-call: drop back to the default
+                    // route instead of holding a dead device.
                     manager.clearCommunicationDevice()
+                    CrashLog.note(this, TAG, "call audio → default (headset gone)")
                 }
             } else {
+                // Pre-S has no communication-device API. A wired headset is
+                // already preferred by the platform, so only Bluetooth needs
+                // forcing into two-way HFP mode.
+                val sco = manager.getDevices(AudioManager.GET_DEVICES_INPUTS).any {
+                    it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                }
                 @Suppress("DEPRECATION")
-                manager.setSpeakerphoneOn(on)
+                if (sco && !manager.isBluetoothScoOn) {
+                    manager.startBluetoothSco()
+                    manager.isBluetoothScoOn = true
+                    CrashLog.note(this, TAG, "call audio → bluetooth sco (legacy)")
+                }
+                // The legacy speakerphone flag must not outlive a handover
+                // back to a headset mic.
+                @Suppress("DEPRECATION")
+                manager.setSpeakerphoneOn(false)
+            }
+        }.onFailure { CrashLog.record(this, it, "routeCallAudio") }
+    }
+
+    /**
+     * Follow plug and pair events for the length of the call: climbing into
+     * the Vivaro, or taking the earphones out on site, re-routes without
+     * dropping the line.
+     */
+    private fun watchAudioDevices() {
+        if (deviceCallback != null) return
+        val manager = getSystemService(AudioManager::class.java) ?: return
+        val callback = object : AudioManager.AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
+                routeCallAudio()
+            }
+
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
+                routeCallAudio()
             }
         }
-        CrashLog.note(this, TAG, "speakerphone=$on")
+        runCatching {
+            manager.registerAudioDeviceCallback(callback, null)
+            deviceCallback = callback
+        }
+    }
+
+    /** Undo [routeCallAudio] and [watchAudioDevices] when the call is over. */
+    private fun releaseCallAudio() {
+        deviceCallback?.let { callback ->
+            runCatching { getSystemService(AudioManager::class.java)?.unregisterAudioDeviceCallback(callback) }
+        }
+        deviceCallback = null
+        val manager = getSystemService(AudioManager::class.java) ?: return
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                manager.clearCommunicationDevice()
+            } else {
+                @Suppress("DEPRECATION")
+                if (manager.isBluetoothScoOn) {
+                    manager.stopBluetoothSco()
+                    manager.isBluetoothScoOn = false
+                }
+                @Suppress("DEPRECATION")
+                manager.setSpeakerphoneOn(false)
+            }
+        }
+    }
+
+    /** Short human label for a routing log line. */
+    private fun deviceLabel(device: AudioDeviceInfo): String {
+        val kind = when (device.type) {
+            AudioDeviceInfo.TYPE_BLE_HEADSET -> "bluetooth le headset"
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "bluetooth headset"
+            AudioDeviceInfo.TYPE_USB_HEADSET -> "usb headset"
+            AudioDeviceInfo.TYPE_WIRED_HEADSET -> "wired headset"
+            else -> "type ${device.type}"
+        }
+        val name = device.productName?.toString()?.trim().orEmpty()
+        return if (name.isEmpty()) kind else "$kind ($name)"
     }
 
     /** True when the selected recogniser and the voice are already loaded. */
@@ -465,6 +648,11 @@ class AssistantService : Service() {
             }
             CrashLog.note(this, TAG, "transcript: ${text.take(120)}")
             addTurn(AssistantTurn(fromUser = true, text = text))
+            // The transcript keeps what was heard, but every rule and action
+            // sees the normalised form: digits instead of "three and a half",
+            // "£180" instead of "one hundred and eighty quid", no spoken
+            // lead-ins. This is the cheapest accuracy gain in the pipeline.
+            val heard = SpeechNormalizer.normalize(text)
             _thinking.value = true
             // Interlock starts before the filler: from here until Kokoro's
             // last sample the microphone frames are discarded, so neither the
@@ -477,34 +665,45 @@ class AssistantService : Service() {
                 // before "undo that" reverses the last logged visit or client
                 // note. Both run before memory and classification so a stray
                 // word cannot lose the pending action.
-                val confirmed = runCatching { actions.answerConfirmation(text) }
+                val confirmed = runCatching { actions.answerConfirmation(heard) }
                     .onFailure { CrashLog.note(this, TAG, "confirmation failed: ${it.message}") }
                     .getOrNull()
                 if (confirmed != null) {
                     sayAnswer(confirmed)
                     return@collect
                 }
-                if (undoRequested(text)) {
+                if (undoRequested(heard)) {
                     sayAnswer(actions.undoLast())
                     return@collect
                 }
-                val remembered = runCatching { memoryCommand(text) }
+                val remembered = runCatching { memoryCommand(heard) }
                     .onFailure { CrashLog.note(this, TAG, "memory command failed: ${it.message}") }
                     .getOrNull()
                 if (remembered != null) {
                     sayAnswer(remembered)
                     return@collect
                 }
+                // End-of-day wrap-up owns the conversation while it runs: an
+                // answer is hours, a yes, a skip or a stop, never a new command.
+                val wrapped = runCatching { actions.continueWrapUp(heard) }
+                    .onFailure { CrashLog.note(this, TAG, "wrap-up failed: ${it.message}") }
+                    .getOrNull()
+                if (wrapped != null) {
+                    CrashLog.note(this, TAG, "wrap-up reply: ${wrapped.take(120)}")
+                    if (!actions.wrapUpActive()) raiseDraftInvoices()
+                    sayAnswer(wrapped)
+                    return@collect
+                }
                 // A previous turn may have asked "How many hours?" — finish
                 // that before treating this sentence as a new command.
-                val followUp = runCatching { actions.continuePending(text) }
+                val followUp = runCatching { actions.continuePending(heard) }
                     .onFailure { CrashLog.note(this, TAG, "pending action failed: ${it.message}") }
                     .getOrNull()
                 if (followUp != null) {
                     CrashLog.note(this, TAG, "pending reply: ${followUp.take(120)}")
                     sayAnswer(followUp)
                 } else {
-                    answerTurn(text)
+                    answerTurn(heard)
                 }
             } catch (error: Exception) {
                 Log.w(TAG, "Kokoro playback failed", error)
@@ -555,6 +754,9 @@ class AssistantService : Service() {
             SpokenIntent.InvoiceStatus,
             SpokenIntent.NextJobForClient,
             SpokenIntent.TodayEarnings,
+            // "run through today's jobs" contains a date word but is always
+            // about today, so it must not be pushed to the cloud for it.
+            SpokenIntent.DayWrapUp,
         )
         val dateIndependent = quick.intent in dateIndependentIntents
         val localTemporal = dateIndependent && temporal
@@ -790,6 +992,7 @@ class AssistantService : Service() {
         _speakerOn.value = false
         ringback.stop()
         abandonAudioFocus()
+        releaseCallAudio()
         scope.cancel()
         speaker.stopPlayback()
         cloudVoice?.close()
@@ -908,7 +1111,8 @@ class AssistantService : Service() {
         const val LISTENING_TEXT = "Assistant is listening for your next command"
         const val CLOUD_TAG = "CloudRouter"
         const val HELP_TEXT = "I can log hours, check your diary, mark a job done, add a client " +
-            "note, read out invoices and takings, or say undo to reverse the last change."
+            "note, read out invoices and takings, say run through today's jobs to wrap up the " +
+            "day, or say undo to reverse the last change."
         val TEMPORAL_WORDS = listOf("week", "tomorrow", "month", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
         const val MAX_TURNS = 40
 
@@ -941,6 +1145,7 @@ private fun confirmationFor(intent: IntentResult): String {
         SpokenIntent.NextJobForClient ->
             if (topic.isEmpty()) "Checking that booking." else "Checking when $topic is next in."
         SpokenIntent.TodayEarnings -> "Checking today's takings."
+        SpokenIntent.DayWrapUp -> "Running through today's jobs."
         SpokenIntent.MarkJobDone ->
             if (topic.isEmpty()) "Marking that job done." else "Marking the job for $topic done."
         SpokenIntent.WhoOwesMe -> "Checking who owes you."

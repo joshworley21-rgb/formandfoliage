@@ -3,10 +3,12 @@ package uk.co.jwgardenservices.crm.voice
 import kotlinx.coroutines.flow.first
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.ClientDraft
+import uk.co.jwgardenservices.crm.data.model.NewInvoiceInput
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
 import uk.co.jwgardenservices.crm.data.model.VisitDraft
 import uk.co.jwgardenservices.crm.data.repository.CrmRepository
 import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
+import uk.co.jwgardenservices.crm.data.repository.createInvoice
 import uk.co.jwgardenservices.crm.domain.BillingSource
 import uk.co.jwgardenservices.crm.domain.formatDayMonth
 import uk.co.jwgardenservices.crm.domain.formatDayMonthYear
@@ -48,12 +50,17 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
 
     private var pending: PendingLog? = null
 
-    /** A destructive action waiting for a yes/no. */
+    /**
+     * A destructive action waiting for a yes/no. [visitId] is set when hours
+     * were already logged for this job, so confirming links that visit rather
+     * than creating a second one and billing the day twice.
+     */
     private data class ConfirmDone(
         val jobId: String,
         val clientName: String,
         val hours: Double,
         val description: String,
+        val visitId: String? = null,
     )
 
     private var confirmDone: ConfirmDone? = null
@@ -98,6 +105,7 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
             SpokenIntent.InvoiceStatus -> invoiceStatus(text)
             SpokenIntent.NextJobForClient -> nextJobForClient(text)
             SpokenIntent.TodayEarnings -> todayEarnings()
+            SpokenIntent.DayWrapUp -> startWrapUp()
             else -> null
         }
     }
@@ -130,13 +138,263 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
         return saveHours(client, hours, pending.date)
     }
 
+    // --- end-of-day wrap-up ----------------------------------------------
+    //
+    // One conversational loop over everything still scheduled today: ask how
+    // long each job took, log the visit, complete the job, and move straight
+    // to the next one. Answers may be hours ("three and a half"), a plain
+    // yes (booked duration), "as booked", or "skip"; "stop" ends the loop.
+    // The visits are collected per client so the service can raise one draft
+    // invoice each once the call is done.
+
+    private data class WrapUpItem(
+        val jobId: String,
+        val clientId: String,
+        val clientName: String,
+        val note: String?,
+        val bookedHours: Double,
+    )
+
+    private class WrapUp(val items: List<WrapUpItem>) {
+        var index = 0
+        var jobsLogged = 0
+        var skipped = 0
+        var hoursLogged = 0.0
+        var amountLogged = 0.0
+
+        fun current(): WrapUpItem = items[index]
+        fun hasNext(): Boolean = index + 1 < items.size
+    }
+
+    private var wrapUp: WrapUp? = null
+    private val wrapUpBillables = linkedMapOf<String, MutableList<String>>()
+
+    /** True while a wrap-up question is waiting for its answer. */
+    fun wrapUpActive(): Boolean = wrapUp != null
+
+    fun clearWrapUp() {
+        wrapUp = null
+        wrapUpBillables.clear()
+        // A half-finished "log hours" question must not outlive the call or
+        // hijack the first answer inside a new wrap-up.
+        pending = null
+        confirmDone = null
+    }
+
+    /** Hand the visits of a finished wrap-up to the caller for invoicing. */
+    fun takeWrapUpBillables(): Map<String, List<String>> {
+        val copy = wrapUpBillables.mapValues { (_, visits) -> visits.toList() }
+        wrapUpBillables.clear()
+        return copy
+    }
+
+    /** Ask for draft invoices per client; returns how many the server made. */
+    suspend fun raiseDraftInvoices(billables: Map<String, List<String>>): Int {
+        var raised = 0
+        for ((clientId, visitIds) in billables) {
+            val made = runCatching {
+                repository.createInvoice(NewInvoiceInput(clientId = clientId, visitIds = visitIds))
+            }.getOrNull()
+            if (made != null) raised++
+        }
+        return raised
+    }
+
+    /**
+     * Start the loop over today's unfinished jobs. Returns the first question
+     * (ending in "?"), or a one-line all-done answer.
+     */
+    suspend fun startWrapUp(): String {
+        clearWrapUp()
+        val now = Instant.now()
+        val today = now.localDate()
+        val clients = repository.observeClients().first().associateBy { it.id }
+        val items = scheduledJobs()
+            .filter { (_, starts) -> starts.localDate() == today }
+            .map { (job, _) ->
+                WrapUpItem(
+                    jobId = job.id,
+                    clientId = job.clientId,
+                    clientName = clients[job.clientId]?.name ?: "a client",
+                    note = job.notes?.trim()?.takeIf { it.isNotEmpty() }?.take(70),
+                    bookedHours = round2((job.durationMinutes / 60.0).coerceAtLeast(0.5)),
+                )
+            }
+        if (items.isEmpty()) {
+            return "Nothing left on today's schedule — everything is already marked done."
+        }
+        val state = WrapUp(items)
+        wrapUp = state
+        return prompt(state, first = true)
+    }
+
+    /**
+     * Answer a wrap-up question. Returns null when no wrap-up is running, so
+     * the caller can classify the sentence normally.
+     */
+    suspend fun continueWrapUp(transcript: String): String? {
+        val state = wrapUp ?: return null
+        val text = transcript.lowercase().trim()
+        if (text.isEmpty()) return null
+
+        if (isWrapUpStop(text)) {
+            wrapUp = null
+            return summary(state, stopped = true)
+        }
+        // "Run through today's jobs" again restarts from the freshest list,
+        // so a job added or removed mid-loop is picked up.
+        if (IntentRules.classify(transcript).intent == SpokenIntent.DayWrapUp) {
+            return startWrapUp()
+        }
+
+        val item = state.current()
+        val hours = wrapUpHours(text)
+        val asBooked = text.contains("as booked") || text.contains("same as booked")
+        val skip = hours == null && isWrapUpSkip(text)
+
+        return when {
+            hours != null -> {
+                val line = logWrapUpVisit(state, item, hours)
+                advance(state, line)
+            }
+            asBooked || isWrapUpYes(text) -> {
+                val line = logWrapUpVisit(state, item, item.bookedHours)
+                advance(state, line)
+            }
+            skip -> {
+                state.skipped++
+                advance(state, "Skipped ${item.clientName}.")
+            }
+            else -> "How many hours for ${item.clientName}? Or say skip."
+        }
+    }
+
+    private fun prompt(state: WrapUp, first: Boolean): String {
+        val item = state.current()
+        val lead = when {
+            first && state.items.size == 1 -> "Only one left"
+            first -> "First one"
+            !state.hasNext() -> "Last one"
+            else -> "Next"
+        }
+        val detail = item.note?.let { ", $it" }.orEmpty()
+        return "$lead: ${item.clientName}$detail. How long did that take?"
+    }
+
+    private fun advance(state: WrapUp, loggedLine: String): String {
+        if (!state.hasNext()) {
+            wrapUp = null
+            return "$loggedLine ${summary(state)}"
+        }
+        state.index++
+        return "$loggedLine ${prompt(state, first = false)}"
+    }
+
+    private suspend fun logWrapUpVisit(
+        state: WrapUp,
+        item: WrapUpItem,
+        hours: Double,
+    ): String {
+        val safeHours = round2(hours.coerceIn(0.25, 24.0))
+        val client = repository.observeClients().first().firstOrNull { it.id == item.clientId }
+        val amount = client?.let {
+            priceVisit(BillingSource(it.billingMode, it.hourlyRate, it.fixedPrice), safeHours, 0.0)
+        } ?: 0.0
+        val visit = VisitDraft(
+            clientId = item.clientId,
+            visitDate = LocalDate.now().toString(),
+            hours = safeHours,
+            materialsCost = 0.0,
+            description = item.note ?: "End of day wrap-up",
+            amount = round2(amount),
+            completesJobId = item.jobId,
+            jobOutcome = "done",
+        )
+        val visitId = repository.saveVisit(visit)
+        wrapUpBillables.getOrPut(item.clientId) { mutableListOf() } += visitId
+        lastUndo = Undo.Visit(visitId, item.clientName)
+        state.jobsLogged++
+        state.hoursLogged = round2(state.hoursLogged + safeHours)
+        state.amountLogged = round2(state.amountLogged + visit.amount)
+        return "Logged ${hoursLabel(safeHours)}, ${money(visit.amount)}."
+    }
+
+    private fun summary(state: WrapUp, stopped: Boolean = false): String {
+        if (state.jobsLogged == 0) {
+            val skipped = if (state.skipped > 0) " ${state.skipped} skipped." else ""
+            return "Nothing logged.$skipped"
+        }
+        val jobs = if (state.jobsLogged == 1) "one job" else "${state.jobsLogged} jobs"
+        val skipped = if (state.skipped > 0) ", ${state.skipped} skipped" else ""
+        val lead = if (stopped) "Stopped" else "That's the lot"
+        return "$lead — $jobs, ${hoursLabel(state.hoursLogged)}, " +
+            "${money(state.amountLogged)}$skipped."
+    }
+
+    /** Hours for a wrap-up answer: "3.5", "three and a half", "45 minutes". */
+    private fun wrapUpHours(text: String): Double? {
+        spokenHours(text)?.let { return it }
+        val cleaned = text.replace(Regex("[^a-z0-9.\\s]"), " ").trim()
+        if (cleaned == "half") return 0.5
+        if (cleaned == "quarter") return 0.25
+        Regex("^(\\d+(?:\\.\\d+)?)$").find(cleaned)?.let {
+            return it.groupValues[1].toDoubleOrNull()
+        }
+        Regex("([a-z0-9 ]+?)\\s*(?:minutes?|mins?)\\b").find(cleaned)?.let { match ->
+            parseSpokenNumber(match.groupValues[1].trim())?.let { minutes ->
+                return round2(minutes / 60.0)
+            }
+        }
+        val words = cleaned.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (words.isNotEmpty() && words.all { it in WRAP_UP_NUMBERS }) {
+            return parseSpokenNumber(words.joinToString(" "))
+        }
+        return null
+    }
+
+    private fun isWrapUpYes(text: String): Boolean {
+        val words = text.replace(Regex("[^a-z' ]"), " ")
+            .trim()
+            .split(Regex("\\s+"))
+            .filter { it.isNotBlank() }
+        return words.isNotEmpty() && words.size <= 4 && words.all { it in WRAP_UP_AFFIRM }
+    }
+
+    private fun isWrapUpSkip(text: String): Boolean {
+        val words = text.replace(Regex("[^a-z' ]"), " ")
+            .trim()
+            .split(Regex("\\s+"))
+            .filter { it.isNotBlank() }
+        return words.any { it in WRAP_UP_SKIP } ||
+            text.contains("didn't") ||
+            text.contains("did not") ||
+            text.contains("not done") ||
+            text.contains("no job")
+    }
+
+    private fun isWrapUpStop(text: String): Boolean {
+        val words = text.replace(Regex("[^a-z' ]"), " ")
+            .trim()
+            .split(Regex("\\s+"))
+            .filter { it.isNotBlank() }
+        return words.any { it in WRAP_UP_STOP } ||
+            text.contains("stop the wrap") ||
+            text.contains("cancel the wrap") ||
+            text.contains("that's enough") ||
+            text.contains("thats enough")
+    }
+
     // --- actions ----------------------------------------------------------
 
     private suspend fun logHours(text: String): String {
         val hours = spokenHours(text)
         val date = dateFor(text)
         val clients = repository.observeClients().first()
+        // No name spoken: the call briefing just said where the owner is, so
+        // use the job on the schedule right now. Today only — "log four hours
+        // yesterday" must not land on this afternoon's client.
         val client = clients.firstOrNull { matches(it.name, text) }
+            ?: if (date == LocalDate.now()) inferredClient(clients) else null
 
         if (hours == null && client == null) {
             return "How many hours, and for which client?"
@@ -265,20 +523,45 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
         val today = LocalDate.now()
         val target = when {
             named != null -> jobs.firstOrNull { (job, _) -> job.clientId == named.id }
-            else -> jobs.firstOrNull { (_, starts) -> starts.localDate() == today } ?: jobs.first()
+            // "Mark it done" straight after the briefing: finish the slot the
+            // owner is on, not whichever job happens to come first.
+            else -> activeJob() ?: jobs.firstOrNull { (_, starts) -> starts.localDate() == today }
+                ?: jobs.first()
         } ?: return "I couldn't find a job for ${named?.name ?: "that client"}."
 
         val job = target.first
         val client = clients.firstOrNull { it.id == job.clientId }
-        val hours = round2((job.durationMinutes / 60.0).coerceAtLeast(0.5))
         val name = client?.name ?: "the client"
-        confirmDone = ConfirmDone(job.id, name, hours, "Completed by voice")
-        return VoiceLines.pick(
-            "Mark the job for $name done, ${hoursLabel(hours)}? Say yes to confirm.",
-            "That's $name at ${hoursLabel(hours)} — shall I mark it done? Say yes to confirm.",
-            "About to mark $name's job done at ${hoursLabel(hours)}. Say yes to confirm, " +
-                "or no to leave it.",
+        // "Log four hours and mark it done": the visit is already saved, so
+        // confirm those hours and close the job against that visit. Summing
+        // them again would bill the day twice. The visit just logged wins —
+        // locally it has no createdAt yet, so server rows would outrank it.
+        val todaysVisits = repository.observeVisits().first()
+            .filter { it.clientId == job.clientId && !it.missed && parseDate(it.visitDate) == today }
+        val justLogged = (lastUndo as? Undo.Visit)
+            ?.takeIf { it.clientName == name }
+            ?.let { undo -> todaysVisits.firstOrNull { it.id == undo.id } }
+        val todaysVisit = justLogged ?: todaysVisits.maxByOrNull { it.createdAt ?: "" }
+        val hours = round2(
+            todaysVisit?.hours?.takeIf { it > 0.0 }
+                ?: (job.durationMinutes / 60.0).coerceAtLeast(0.5),
         )
+        confirmDone = ConfirmDone(job.id, name, hours, "Completed by voice", todaysVisit?.id)
+        return if (todaysVisit != null) {
+            VoiceLines.pick(
+                "Mark the job for $name done with the ${hoursLabel(hours)} already logged? " +
+                    "Say yes to confirm.",
+                "That's $name at ${hoursLabel(hours)}, already down. Mark it done? " +
+                    "Say yes to confirm.",
+            )
+        } else {
+            VoiceLines.pick(
+                "Mark the job for $name done, ${hoursLabel(hours)}? Say yes to confirm.",
+                "That's $name at ${hoursLabel(hours)} — shall I mark it done? Say yes to confirm.",
+                "About to mark $name's job done at ${hoursLabel(hours)}. Say yes to confirm, " +
+                    "or no to leave it.",
+            )
+        }
     }
 
     /**
@@ -315,7 +598,13 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
         val short = words.isNotEmpty() && words.size <= 4
         return when {
             short && words.all { it in AFFIRM_WORDS } -> {
-                repository.staffCompleteJob(waiting.jobId, waiting.hours, waiting.description)
+                val visitId = waiting.visitId
+                if (visitId != null) {
+                    // Close the job against hours that are already recorded.
+                    repository.completeJobWithVisit(waiting.jobId, visitId)
+                } else {
+                    repository.staffCompleteJob(waiting.jobId, waiting.hours, waiting.description)
+                }
                 VoiceLines.pick(
                     "Marked the job for ${waiting.clientName} done, ${hoursLabel(waiting.hours)}.",
                     "Done — ${waiting.clientName} is marked down at ${hoursLabel(waiting.hours)}.",
@@ -632,6 +921,31 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
             .mapNotNull { job -> parseTimestamp(job.startsAt)?.let { job to it } }
             .sortedBy { (_, starts) -> starts }
 
+    /**
+     * The job the owner is most likely standing in: the booked window
+     * covering this minute, else the latest that has already started today
+     * (a visit that overran still counts). Today only, and never a slot that
+     * has not begun yet — logging hours before a job starts is a mistake,
+     * not an inference.
+     */
+    private suspend fun activeJob(): Pair<ScheduledJob, Instant>? {
+        val now = Instant.now()
+        val today = now.localDate()
+        val todays = scheduledJobs().filter { (_, starts) -> starts.localDate() == today }
+        if (todays.isEmpty()) return null
+        todays.firstOrNull { (job, starts) ->
+            !now.isBefore(starts) &&
+                now.isBefore(starts.plusSeconds(job.durationMinutes.coerceAtLeast(15) * 60L))
+        }?.let { return it }
+        return todays.lastOrNull { (_, starts) -> !starts.isAfter(now) }
+    }
+
+    /** The client for the slot the owner is on, when one is booked today. */
+    private suspend fun inferredClient(clients: List<Client>): Client? {
+        val (job, _) = activeJob() ?: return null
+        return clients.firstOrNull { it.id == job.clientId }
+    }
+
     /** "eight hours", "8 hrs", "two and a half hours", "at eight hours". */
     private fun spokenHours(text: String): Double? {
         Regex("(\\d+(?:\\.\\d+)?)\\s*(?:hours?|hrs?)").find(text)?.let {
@@ -708,6 +1022,26 @@ class VoiceActionRunner(private val repository: CrmRepository = ServiceLocator.c
             "confirmed", "confirm", "agree", "accepted", "proper", "sorted",
             "sounds", "brilliant", "perfect", "cracking", "dead",
         )
+
+        /** The words an hours answer to a wrap-up question may contain. */
+        val WRAP_UP_NUMBERS = setOf(
+            "and", "a", "an", "half", "quarter", "quarters", "point",
+            "hour", "hours", "hrs", "minute", "minutes", "min", "mins",
+            "zero", "oh", "nought", "one", "two", "three", "four", "five",
+            "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+            "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
+            "eighteen", "nineteen", "twenty", "thirty", "forty", "fifty",
+            "sixty", "seventy", "eighty", "ninety", "hundred",
+        )
+
+        /** "Yeah, spot on", "did that", "went fine". */
+        val WRAP_UP_AFFIRM = AFFIRM_WORDS + setOf("did", "went", "all", "finished")
+
+        /** Ways to pass over a job without logging anything. */
+        val WRAP_UP_SKIP = setOf("skip", "skipped", "no", "nope", "nah", "missed")
+
+        /** Ways to end the loop early. */
+        val WRAP_UP_STOP = setOf("stop", "cancel", "exit", "quit", "enough")
 
         /** Natural ways to abandon a pending confirmation. */
         val CANCEL_WORDS = setOf(

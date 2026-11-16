@@ -62,6 +62,10 @@ class IntentRulesTest {
         Case("when is the Smiths next in", SpokenIntent.NextJobForClient),
         Case("what have I taken today", SpokenIntent.TodayEarnings),
 
+        Case("end of day wrap up", SpokenIntent.DayWrapUp),
+        Case("run through today's jobs", SpokenIntent.DayWrapUp),
+        Case("do my timesheets", SpokenIntent.DayWrapUp),
+
         Case("how much for forty square metres of turf", SpokenIntent.Quote, cloud = true),
         Case("price up a hedge trim for Mrs Jones", SpokenIntent.Quote, cloud = true),
         Case("what's the weather tomorrow", SpokenIntent.Other, cloud = true),

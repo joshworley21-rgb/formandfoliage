@@ -15,6 +15,27 @@ object IntentRules {
     fun classify(transcript: String): IntentResult {
         val text = transcript.lowercase()
         val kind = when {
+            // Deliberately narrow: "just wrapping up at the Smiths" is the
+            // answer to the call briefing, not a request to reconcile the day.
+            text.containsAny(
+                "end of day",
+                "end-of-day",
+                "wrap up today",
+                "wrap up the day",
+                "wrap today up",
+                "run through today",
+                "run through the day",
+                "run through my jobs",
+                "run through the jobs",
+                "go through today",
+                "go through the day",
+                "timesheet",
+                "log the day",
+                "log today's jobs",
+                "batch wrap",
+                "reconcile today",
+            ) -> SpokenIntent.DayWrapUp
+
             text.containsAny("note for", "add a note", "note that", "make a note") ->
                 SpokenIntent.AddNote
 
@@ -172,7 +193,8 @@ object IntentRules {
         SpokenIntent.ClientList,
         SpokenIntent.InvoiceStatus,
         SpokenIntent.NextJobForClient,
-        SpokenIntent.TodayEarnings -> true
+        SpokenIntent.TodayEarnings,
+        SpokenIntent.DayWrapUp -> true
 
         else -> false
     }

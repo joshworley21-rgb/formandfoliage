@@ -174,9 +174,11 @@ object AssistantPreferences {
     suspend fun setPiperVoice(context: Context, voice: PiperVoice?) = Unit
 
     /**
-     * Say a short "Hello?" when a fresh call connects. On by default: it is
-     * what makes the tab feel like ringing someone rather than opening a
-     * form. It is skipped when the caller has already started speaking.
+     * Open a fresh call with a short schedule briefing ("you've got Simon's
+     * estate first at nine…"). On by default: it is what makes the tab feel
+     * like ringing someone rather than opening a form, and it names the active
+     * client so the next sentence needs no name. It is skipped when the caller
+     * has already started speaking.
      */
     fun pickupFlow(context: Context): Flow<Boolean> = context.assistantDataStore.data.map { preferences ->
         preferences[PICKUP_KEY] ?: true

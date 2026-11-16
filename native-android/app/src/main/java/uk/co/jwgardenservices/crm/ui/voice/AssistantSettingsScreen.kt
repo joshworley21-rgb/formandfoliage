@@ -524,14 +524,15 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         },
                     )
                     Text(
-                        text = "Say \"Hello, how can I help?\" when a call connects",
+                        text = "Brief me on today's schedule when a call connects",
                         modifier = Modifier.padding(start = 8.dp),
                     )
                 }
                 Text(
-                    text = "A fresh call answers with a short greeting before the microphone " +
-                        "opens. The clip is prepared while the line rings, so it does not cost " +
-                        "the first reply. Turning it off makes the assistant listen immediately.",
+                    text = "A fresh call opens with the first job on today's schedule (or the " +
+                        "one you are on now) before the microphone opens, so \"log four hours " +
+                        "and mark it done\" already knows the client. Turning it off makes the " +
+                        "assistant listen immediately.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

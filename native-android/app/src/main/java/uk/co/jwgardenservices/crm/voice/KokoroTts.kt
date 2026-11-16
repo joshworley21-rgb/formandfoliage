@@ -37,7 +37,7 @@ import kotlin.math.abs
  * AudioTrack and returns once playback finishes, so callers can mute the mic
  * for the whole utterance.
  */
-/** Said once when a fresh call connects; also shown in the transcript. */
+/** Cached hello, used only when the call briefing cannot be built. */
 internal const val PICKUP_TEXT = "Hello, how can I help?"
 
 class KokoroTts(private val context: Context) : AutoCloseable {
