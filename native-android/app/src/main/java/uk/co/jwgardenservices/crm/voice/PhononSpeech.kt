@@ -40,15 +40,19 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
         withContext(Dispatchers.IO) { ensureEngine() }
     }
 
-    /** Speak [text] and return once its audio has played. */
-    suspend fun speak(text: String) {
+    /**
+     * Speak [text] and return once its audio has played. False means no audio
+     * was produced (not downloaded, engine failed to load, or already closed),
+     * so the caller can fall back to the local voice.
+     */
+    suspend fun speak(text: String): Boolean {
         val clean = text.trim()
-        if (closed || clean.isEmpty()) return
-        speakLock.withLock {
-            if (closed) return@withLock
-            val engine = ensureEngine() ?: return@withLock
+        if (closed || clean.isEmpty()) return false
+        return speakLock.withLock {
+            if (closed) return@withLock false
+            val engine = ensureEngine() ?: return@withLock false
             stopped = false
-            val player = withContext(Dispatchers.IO) { buildPlayer() } ?: return@withLock
+            val player = withContext(Dispatchers.IO) { buildPlayer() } ?: return@withLock false
             track = player
             try {
                 withContext(Dispatchers.IO) {
@@ -62,6 +66,7 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
                         }
                     }
                 }
+                true
             } finally {
                 runCatching { player.stop() }
                 runCatching { player.release() }

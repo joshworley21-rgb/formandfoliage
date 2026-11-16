@@ -79,7 +79,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         val clean = text.trim()
         if (closed || clean.isEmpty()) return
         if (phononActive()) {
-            val spoken = runCatching { phononSpeech().speak(clean) }.isSuccess
+            val spoken = runCatching { phononSpeech().speak(clean) }.getOrDefault(false)
             if (spoken) return
             CrashLog.note(context, TAG, "Phonon failed; falling back to the local voice")
         }
@@ -183,7 +183,9 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     ): Boolean {
         if (closed) return false
         if (phononActive()) {
-            return runCatching { phononSpeech().speak(PICKUP_TEXT) }.isSuccess
+            val spoken = runCatching { phononSpeech().speak(PICKUP_TEXT) }.getOrDefault(false)
+            if (spoken) return true
+            CrashLog.note(context, TAG, "Phonon pickup failed; falling back to the local voice")
         }
         return speakLock.withLock {
             if (closed) return@withLock false
