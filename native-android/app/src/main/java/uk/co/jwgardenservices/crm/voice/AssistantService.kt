@@ -121,6 +121,13 @@ class AssistantService : Service() {
     /** True while the battery is under 15% and unplugged: cloud features off. */
     @Volatile
     private var lowBattery = false
+
+    /** Dead-air watcher: nudges once or twice, never nags. */
+    private var silenceJob: kotlinx.coroutines.Job? = null
+    @Volatile
+    private var lastHeardAt = 0L
+    @Volatile
+    private var silencePrompts = 0
     private var cloudVoice: CloudVoice? = null
     // Lazy: the base context is only attached after construction, and the
     // profile asset is read once per process on first use.
@@ -286,6 +293,10 @@ class AssistantService : Service() {
         watchAudioDevices()
         startInForeground(if (fresh) CALLING_TEXT else LISTENING_TEXT)
         scope.launch { AssistantPreferences.markUsed(this@AssistantService) }
+        // A fresh call resets the dead-air clock; the watcher itself starts
+        // once the greeting is done and the microphone is open.
+        lastHeardAt = SystemClock.elapsedRealtime()
+        silencePrompts = 0
         // Rejoining an existing call just reopens the microphone.
         if (!fresh) scope.launch { ensureListening() }
         scope.launch(Dispatchers.Default) {
@@ -343,7 +354,11 @@ class AssistantService : Service() {
             // The briefing names today's first/active job, so the owner can
             // answer "log four hours and mark it done" without a client name.
             // It is read from Room only, and only after the models are warm.
-            val briefing = callBriefing.line()
+            // Greeting fatigue: first call of the day is briefed in full,
+            // later ones shrink to a line or a word.
+            val callNumber = runCatching { AssistantMemory.noteCall(this@AssistantService) }
+                .getOrDefault(1)
+            val briefing = callBriefing.line(callNumber)
             var greeting = briefing ?: PICKUP_TEXT
             if (lowBattery) {
                 // Warned once, up front: everything below is offline-only.
@@ -393,6 +408,49 @@ class AssistantService : Service() {
         if (!_callActive.value) return
         speech.startListening()
         setNotification(LISTENING_TEXT)
+        startSilenceWatch()
+    }
+
+    /**
+     * Six seconds of open microphone with no voice is a person thinking, not
+     * a fault. Say something light once, twice at most, and keep the line up.
+     * Paused while the assistant speaks, thinks, or a question is pending.
+     */
+    private fun startSilenceWatch() {
+        silenceJob?.cancel()
+        lastHeardAt = SystemClock.elapsedRealtime()
+        silencePrompts = 0
+        silenceJob = scope.launch {
+            while (_callActive.value) {
+                delay(1_000)
+                if (!_callActive.value) break
+                val now = SystemClock.elapsedRealtime()
+                val pending = actions.wrapUpActive() || actions.sendPending() ||
+                    actions.chasePending() || actions.clarificationPending() ||
+                    actions.readAllPending()
+                if (_speaking.value || _thinking.value || _dialling.value || pending ||
+                    !speech.isListening()
+                ) {
+                    lastHeardAt = now
+                    continue
+                }
+                val state = speech.state.value
+                if (state.level > 0.06f || state.partial.isNotBlank()) {
+                    // A voice, a cough, anything: the clock is theirs again.
+                    lastHeardAt = now
+                    silencePrompts = 0
+                    continue
+                }
+                if (now - lastHeardAt < SILENCE_PROMPT_MS) continue
+                if (silencePrompts >= SILENCE_PROMPTS.size) continue
+                val wasListening = speech.isListening()
+                if (wasListening) speech.pauseForSpeech()
+                say(SILENCE_PROMPTS[silencePrompts % SILENCE_PROMPTS.size])
+                silencePrompts++
+                if (wasListening) speech.resumeAfterSpeech()
+                lastHeardAt = SystemClock.elapsedRealtime()
+            }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
@@ -434,7 +492,10 @@ class AssistantService : Service() {
         val clarified = chased ?: runCatching { actions.continueClarification(heard) }
             .onFailure { CrashLog.note(this, TAG, "clarification failed: ${it.message}") }
             .getOrNull()
-        val reply = clarified ?: runCatching { actions.continueWrapUp(heard) }
+        val readAll = clarified ?: runCatching { actions.continueReadAll(heard) }
+            .onFailure { CrashLog.note(this, TAG, "read-all reply failed: ${it.message}") }
+            .getOrNull()
+        val reply = readAll ?: runCatching { actions.continueWrapUp(heard) }
             .onFailure { CrashLog.note(this, TAG, "wrap-up failed: ${it.message}") }
             .getOrNull()
         if (reply != null) {
@@ -574,7 +635,8 @@ class AssistantService : Service() {
         // recogniser to catch a spoken-over answer and skips the thinking
         // pause when it arrives.
         speech.captureInterjections = actions.wrapUpActive() || actions.sendPending() ||
-            actions.chasePending() || actions.clarificationPending()
+            actions.chasePending() || actions.clarificationPending() ||
+            actions.readAllPending()
         speech.fastPath = speech.captureInterjections
         AssistantMemory.lastSpokenReply = stripped
         _thinking.value = false
@@ -726,6 +788,8 @@ class AssistantService : Service() {
 
     fun endCall() {
         CrashLog.note(this, TAG, "call ended")
+        silenceJob?.cancel()
+        silenceJob = null
         _callActive.value = false
         callActiveNow = false
         mediaSession?.isActive = false
@@ -943,6 +1007,9 @@ class AssistantService : Service() {
                 _dialling.value = false
             }
             CrashLog.note(this, TAG, "transcript: ${text.take(120)}")
+            // Any voice at all resets the dead-air clock.
+            lastHeardAt = SystemClock.elapsedRealtime()
+            silencePrompts = 0
             addTurn(AssistantTurn(fromUser = true, text = text))
             // The transcript keeps what was heard, but every rule and action
             // sees the normalised form: digits instead of "three and a half",
@@ -955,7 +1022,8 @@ class AssistantService : Service() {
             // Coughs, "um", stray "the": silently dropped, microphone carries
             // on. Never while an answer is pending — "no" is a real answer.
             val pendingAnswer = actions.wrapUpActive() || actions.sendPending() ||
-                actions.chasePending() || actions.clarificationPending()
+                actions.chasePending() || actions.clarificationPending() ||
+                actions.readAllPending()
             if (!pendingAnswer && SpeechNormalizer.isNoise(heard)) {
                 CrashLog.note(this, TAG, "noise rejected: ${text.take(30)}")
                 return@collect
@@ -993,6 +1061,14 @@ class AssistantService : Service() {
                     .getOrNull()
                 if (clarified != null) {
                     sayAnswer(clarified)
+                    return@collect
+                }
+                // "Want me to read them all?"
+                val readAll = runCatching { actions.continueReadAll(heard) }
+                    .onFailure { CrashLog.note(this, TAG, "read-all reply failed: ${it.message}") }
+                    .getOrNull()
+                if (readAll != null) {
+                    sayAnswer(readAll)
                     return@collect
                 }
                 if (undoRequested(heard)) {
@@ -1496,6 +1572,13 @@ class AssistantService : Service() {
         const val CHANNEL_ID = "assistant_mic"
         const val NOTIFICATION_ID = 41
         const val CALL_BUTTON_DOUBLE_MS = 900L
+
+        /** Six seconds of silence earns one light nudge, twice at most. */
+        const val SILENCE_PROMPT_MS = 6_000L
+        val SILENCE_PROMPTS = arrayOf(
+            "Take your time…",
+            "No rush — just shout when you're ready.",
+        )
         const val CHECKING_ONLINE = "Checking online rates."
         const val CALLING_TEXT = "Assistant is dialling…"
         const val LISTENING_TEXT = "Assistant is listening for your next command"

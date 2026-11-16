@@ -108,6 +108,37 @@ class VoiceActionRunner(
 
     private var lastVoiceVisit: VoiceVisit? = null
 
+    /** A list answer offered in full, waiting for "read them all". */
+    private var pendingReadAll: List<String>? = null
+
+    private fun tokenWords(lower: String): List<String> = lower
+        .replace(Regex("[^a-z' ]"), " ")
+        .trim()
+        .split(Regex("\\s+"))
+        .filter { it.isNotBlank() }
+
+    /** "Read them all" / "No thanks" for a chunked list. */
+    suspend fun continueReadAll(transcript: String): String? {
+        val items = pendingReadAll ?: return null
+        val words = tokenWords(transcript.lowercase())
+        val yes = words.any { it in SEND_YES } && words.none { it in SEND_NO }
+        val no = words.any { it in SEND_NO }
+        return when {
+            yes -> {
+                pendingReadAll = null
+                slow("Right — ${items.joinToString("; ")}.")
+            }
+            no -> {
+                pendingReadAll = null
+                fast("No problem.")
+            }
+            else -> {
+                pendingReadAll = null
+                null
+            }
+        }
+    }
+
     /** A draft invoice waiting for "send it" or "leave it". */
     private data class PendingSend(
         val invoiceId: String,
@@ -251,6 +282,9 @@ class VoiceActionRunner(
 
     fun clarificationPending(): Boolean = pendingClarification != null
 
+    /** True while a chunked list is waiting for "read them all". */
+    fun readAllPending(): Boolean = pendingReadAll != null
+
     fun clearWrapUp() {
         wrapUp = null
         wrapUpBillables.clear()
@@ -262,6 +296,7 @@ class VoiceActionRunner(
         pendingSend = null
         pendingChase = null
         pendingClarification = null
+        pendingReadAll = null
         resolvedClientId = null
         lastVoiceVisit = null
     }
@@ -594,7 +629,7 @@ class VoiceActionRunner(
         if (jobs.isEmpty()) return "Nothing booked ${range.label}."
 
         val clients = repository.observeClients().first()
-        val names = jobs.take(6).joinToString("; ") { (job, starts) ->
+        val items = jobs.map { (job, starts) ->
             val name = clients.firstOrNull { it.id == job.clientId }?.name ?: "a client"
             when {
                 range.from == range.to -> "${starts.formatTime()} $name"
@@ -602,9 +637,8 @@ class VoiceActionRunner(
                     "at ${starts.formatTime()} $name"
             }
         }
-        val more = if (jobs.size > 6) ", and ${jobs.size - 6} more" else ""
         val count = if (jobs.size == 1) "job" else "jobs"
-        return "You have ${jobs.size} $count ${range.label}: $names$more."
+        return slow(chunkedList("You have ${jobs.size} $count ${range.label}:", items))
     }
 
     private data class DateRange(val from: LocalDate, val to: LocalDate, val label: String)
@@ -1192,6 +1226,20 @@ class VoiceActionRunner(
     private fun format(value: Double): String =
         if (value % 1.0 == 0.0) value.toInt().toString() else value.toString()
 
+    /**
+     * A list read-back never reads more than two items before offering the
+     * rest. "Read them all" then speaks the remainder once.
+     */
+    private fun chunkedList(
+        lead: String,
+        items: List<String>,
+    ): String {
+        if (items.size <= 3) return "$lead ${items.joinToString("; ")}."
+        pendingReadAll = items
+        return "$lead Starting with ${items[0]} and ${items[1]}, plus " +
+            "${items.size - 2} others. Want me to read them all?"
+    }
+
     private suspend fun unbilled(): String {
         val clients = repository.observeClients().first()
         val groups = repository.observeVisits().first()
@@ -1200,12 +1248,11 @@ class VoiceActionRunner(
             .map { (id, rows) -> Triple(id, rows.size, rows.sumOf { it.amount }) }
             .sortedByDescending { it.third }
         if (groups.isEmpty()) return "Nothing is waiting to be invoiced."
-        val names = groups.take(3).joinToString { (id, count, total) ->
+        val rows = groups.map { (id, count, total) ->
             val name = clients.firstOrNull { it.id == id }?.name ?: "a client"
             "$name ${money(total)} ($count ${if (count == 1) "visit" else "visits"})"
         }
-        val more = if (groups.size > 3) ", and ${groups.size - 3} more" else ""
-        return "${groups.size} clients with unbilled work: $names$more."
+        return slow(chunkedList("${groups.size} clients with unbilled work:", rows))
     }
 
     private suspend fun clientList(): String {
@@ -1213,9 +1260,7 @@ class VoiceActionRunner(
             .filter { it.active }
             .sortedBy { it.name }
         if (clients.isEmpty()) return "No clients yet."
-        val names = clients.take(12).joinToString { it.name }
-        val more = if (clients.size > 12) ", and ${clients.size - 12} more" else ""
-        return "${clients.size} clients: $names$more."
+        return slow(chunkedList("You've got ${clients.size} clients:", clients.map { it.name }))
     }
 
     private suspend fun invoiceStatus(text: String): String {
@@ -1294,13 +1339,10 @@ class VoiceActionRunner(
         if (total <= 0.0) {
             return "Nobody owes you anything, and nothing is waiting to be billed."
         }
-        val names = owed.entries.sortedByDescending { it.value }
-            .take(3)
-            .joinToString(", ") { (id, amount) ->
-                "${clients[id]?.name ?: "a client"} owes ${money(round2(amount))}"
-            }
-        val more = if (owed.size > 3) ", and ${owed.size - 3} more" else ""
-        return slow("You've got ${money(total)} outstanding. $names$more.")
+        val rows = owed.entries.sortedByDescending { it.value }.map { (id, amount) ->
+            "${clients[id]?.name ?: "a client"} owes ${money(round2(amount))}"
+        }
+        return slow(chunkedList("You've got ${money(total)} outstanding.", rows))
     }
 
     private suspend fun nextJobAddress(): String {

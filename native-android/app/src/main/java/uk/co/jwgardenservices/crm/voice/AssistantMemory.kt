@@ -3,6 +3,7 @@ package uk.co.jwgardenservices.crm.voice
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -52,6 +53,25 @@ object AssistantMemory {
     private val FACTS = stringPreferencesKey("facts")
     private val TURNS = stringPreferencesKey("turns")
     private val CLOUD_CONVERSATION = booleanPreferencesKey("cloud_conversation")
+    private val CALL_COUNT = intPreferencesKey("call_count")
+    private val CALL_DAY = stringPreferencesKey("call_day")
+
+    /**
+     * How many calls today, 1-based, resetting when the calendar day rolls
+     * over. The briefing shortens itself as the day goes on: full context
+     * once, then "what are we logging?", then a word.
+     */
+    suspend fun noteCall(context: Context): Int {
+        val today = java.time.LocalDate.now().toString()
+        var count = 1
+        context.assistantMemoryStore.edit { preferences ->
+            val sameDay = preferences[CALL_DAY] == today
+            count = (if (sameDay) preferences[CALL_COUNT] ?: 0 else 0) + 1
+            preferences[CALL_COUNT] = count
+            preferences[CALL_DAY] = today
+        }
+        return count
+    }
 
     private val json = Json { ignoreUnknownKeys = true }
 

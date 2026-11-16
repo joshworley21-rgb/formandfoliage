@@ -34,8 +34,33 @@ class CallBriefing(
     private val clock: () -> Instant = Instant::now,
 ) {
 
-    /** Null only when the snapshot could not be read at all. */
-    suspend fun line(): String? = runCatching { build() }.getOrNull()
+    /**
+     * Null only when the snapshot could not be read at all.
+     *
+     * [callCount] is today's 1-based call number: the first call gets the
+     * full contextual briefing, calls two and three a one-liner, and every
+     * call after that a word. Later calls skip the database entirely.
+     */
+    suspend fun line(callCount: Int = 1): String? = runCatching {
+        when {
+            callCount >= 4 -> microGreeting(callCount)
+            callCount in 2..3 -> shortGreeting(callCount)
+            else -> build()
+        }
+    }.getOrNull()
+
+    private fun microGreeting(callCount: Int): String {
+        val options = arrayOf("Yep?", "Go ahead.", "Ready.")
+        return options[(callCount - 4) % options.size]
+    }
+
+    private fun shortGreeting(callCount: Int): String {
+        if (callCount == 2) return "Hey — what are we logging?"
+        val now = clock()
+        val zone = ZoneId.systemDefault()
+        return greetingFor(now.atZone(zone).toLocalTime().hour, now.localDate(zone).month) +
+            " — what are we logging?"
+    }
 
     private suspend fun build(): String {
         val now = clock()
