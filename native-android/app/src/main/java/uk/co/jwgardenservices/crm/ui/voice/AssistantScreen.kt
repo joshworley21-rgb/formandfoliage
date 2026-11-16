@@ -209,6 +209,24 @@ fun AssistantScreen() {
             ),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        if (callActive) {
+            // In a call the whole sheet is the dashboard: status, one big
+            // visualiser, the half-heard words, and the end button.
+            CallScreen(
+                dialling = dialling,
+                connectedAt = connectedAt,
+                speaking = busy,
+                level = if (connected) state.level else 0f,
+                partial = state.partial,
+                muted = muted,
+                speakerOn = speakerOn,
+                onToggleMute = { service?.setMuted(!muted) },
+                onToggleSpeaker = { service?.setSpeaker(!speakerOn) },
+                onEnd = { service?.endCall() },
+                compact = compact,
+            )
+            return@Column
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -302,64 +320,19 @@ fun AssistantScreen() {
 
         Spacer(Modifier.height(14.dp))
 
-        if (callActive) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                RoundControl(
-                    label = if (muted) "Unmute" else "Mute",
-                    container = if (muted) Color(0xFF5C1F1F) else ControlBg,
-                    content = if (muted) Color(0xFFFF8A80) else CallOn,
-                    onClick = { service?.setMuted(!muted) },
-                ) {
-                    Icon(
-                        imageVector = if (muted) Icons.Filled.MicOff else Icons.Filled.Mic,
-                        contentDescription = if (muted) "Unmute" else "Mute",
-                        modifier = Modifier.size(26.dp),
-                    )
-                }
-                RoundControl(
-                    label = "Speaker",
-                    container = if (speakerOn) Color(0xFF1F3A5C) else ControlBg,
-                    content = if (speakerOn) Color(0xFF8AC6FF) else CallOn,
-                    onClick = { service?.setSpeaker(!speakerOn) },
-                ) {
-                    Icon(
-                        imageVector = if (speakerOn) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
-                        contentDescription = "Toggle speaker",
-                        modifier = Modifier.size(26.dp),
-                    )
-                }
-                RoundControl(
-                    label = "End",
-                    container = Color(0xFFC33B3B),
-                    content = Color.White,
-                    onClick = { service?.endCall() },
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.CallEnd,
-                        contentDescription = "End call",
-                        modifier = Modifier.size(28.dp),
-                    )
-                }
-            }
-        } else {
-            CallButton(
-                label = if (granted) "Call" else "Allow microphone",
-                container = CallGreen,
-                content = Color.White,
-                onClick = {
-                    if (granted) startCall(context) else permission.launch(Manifest.permission.RECORD_AUDIO)
-                },
-            ) {
-                Icon(
-                    Icons.Filled.Call,
-                    contentDescription = "Call the assistant",
-                    modifier = Modifier.size(28.dp),
-                )
-            }
+        CallButton(
+            label = if (granted) "Call" else "Allow microphone",
+            container = CallGreen,
+            content = Color.White,
+            onClick = {
+                if (granted) startCall(context) else permission.launch(Manifest.permission.RECORD_AUDIO)
+            },
+        ) {
+            Icon(
+                Icons.Filled.Call,
+                contentDescription = "Call the assistant",
+                modifier = Modifier.size(28.dp),
+            )
         }
 
         if (!callActive && ledger.isNotEmpty()) {

@@ -16,6 +16,9 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.support.v4.media.session.MediaSessionCompat
 import android.util.Base64
 import android.util.Log
@@ -133,7 +136,7 @@ class AssistantService : Service() {
     private var heardInCall = false
 
     /** Ringback while the recogniser and voice warm up. */
-    private val ringback = VoiceRingback()
+    private val ringback by lazy { RingbackPlayer(this) }
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
 
@@ -314,8 +317,11 @@ class AssistantService : Service() {
             _dialling.value = false
             return
         }
+        // The models are ready: kill the ringback, buzz the pocket, and
+        // speak — no gap between the tone dying and the first word.
         ringback.stop()
         _dialling.value = false
+        buzzConnected()
 
         val wantsGreeting = runCatching {
             AssistantPreferences.pickupFlow(this@AssistantService).first()
@@ -413,6 +419,21 @@ class AssistantService : Service() {
         } else {
             // Something else entirely — treat it as a fresh command.
             answerTurn(heard)
+        }
+    }
+
+    /** One short buzz: the line is live, pocket-friendly confirmation. */
+    private fun buzzConnected() {
+        runCatching {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                getSystemService(VibratorManager::class.java)?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Vibrator::class.java)
+            }
+            vibrator?.vibrate(
+                VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE),
+            )
         }
     }
 
