@@ -128,6 +128,8 @@ object PiperVoiceDownloader {
         }
         // The removed local LLM left a ~500 MB GGUF behind here.
         File(context.filesDir, "models").deleteRecursively()
+        // The removed Parakeet experiment left a ~630 MB model folder.
+        File(context.filesDir, "parakeet-tdt-0.6b-v2-en").deleteRecursively()
     }
 
     /** How much of an interrupted download is already on disk. */

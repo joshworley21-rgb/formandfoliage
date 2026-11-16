@@ -218,14 +218,6 @@ deliberately left on the web for now. The smaller known gaps:
   phone audio, while this one still emits live partial words like a phone
   call. Builds are arm64-v8a only. Nothing is downloaded at runtime, so the
   tab works offline.
-- **Parakeet ASR (experimental)**: Settings → Assistant settings →
-  Parakeet ASR downloads NVIDIA Parakeet TDT 0.6B v2 (English, CC BY 4.0,
-  about 630 MB) from the sherpa-onnx export on Hugging Face. It is an
-  **offline** transducer, so it has no live partial words: the app buffers
-  one utterance (with a 0.4 s pre-roll), decodes it after the VAD endpoint,
-  and logs the decode time and text. The streaming Zipformer stays the
-  default and Parakeet is never preloaded at app launch. 630 MB stays in
-  memory while selected, so switch back to Zipformer after comparing.
 - **Not in git**: the AAR, the Zipformer model and the Kokoro voice model are
   ~390 MB of binaries; the 640 KB Silero VAD model is checked in so no build
   depends on fetching it. The Phonon runtime is compiled by the APK workflow
