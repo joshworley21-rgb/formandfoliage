@@ -46,7 +46,6 @@ enum class PhononVoice(val label: String, val voiceId: String) {
     Freya("Freya — young British female (Gradium demo)", "GgfEkEJtxZR7gnpy"),
     Alfie("Alfie — British male", "X6NceqF285Gr04gb"),
     Hugh("Hugh — British male", "YyKcxPG7iIgS3jsK"),
-
 }
 
 object PhononDownloader {
@@ -120,7 +119,7 @@ object PhononDownloader {
                     .connectTimeout(30, TimeUnit.SECONDS)
                     .readTimeout(60, TimeUnit.SECONDS)
                     .build()
-                val request = Request.Builder().url("$VOICE_BASE$id.safetensors").build()
+                val request = Request.Builder().url("$VOICE_BASE${voice.voiceId}.safetensors").build()
                 client.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) error("HTTP ${response.code}")
                     val body = response.body ?: error("empty response")
