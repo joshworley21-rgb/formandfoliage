@@ -255,7 +255,9 @@ class AssistantService : Service() {
                 // Let the ringback track release and the route settle before
                 // the first syllable.
                 delay(150)
-                withTimeoutOrNull(6_000) {
+                // Long enough for a Phonon hiccup and the local fallback to
+                // load; the drain in PhononSpeech caps its own wait.
+                withTimeoutOrNull(12_000) {
                     speaker.speakPickup(speakerId, speed)
                 } ?: false
             } catch (error: Exception) {

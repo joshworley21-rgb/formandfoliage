@@ -635,10 +635,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     ) { Text("Remove Moonshine model") }
                 } else if (working == null) {
                     OutlinedButton(
-                        onClick = {
-                            if (!unmetered) return@OutlinedButton
-                            MoonshineDownloader.start(context)
-                        },
+                        onClick = { MoonshineDownloader.start(context) },
                     ) {
                         Text(
                             if (moonshineSaved > 0) {
@@ -650,9 +647,9 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     }
                 }
 
-                if (!unmetered && working == null && !moonshineInstalled) {
+                if (working == null && !moonshineInstalled) {
                     Text(
-                        text = "Connect to Wi-Fi to download the model.",
+                        text = "Downloads on Wi-Fi or mobile data. About 135 MB.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

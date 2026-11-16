@@ -59,6 +59,7 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
             val player = withContext(Dispatchers.IO) { buildPlayer() } ?: return@withLock false
             track = player
             val samples = AtomicInteger()
+            val playStartedAt = SystemClock.elapsedRealtime()
             try {
                 withContext(Dispatchers.IO) {
                     player.play()
@@ -81,7 +82,12 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
                 // short greeting or the end of a long reply.
                 if (!stopped && !closed) {
                     val total = samples.get()
-                    val deadline = SystemClock.elapsedRealtime() + 30_000
+                    // Head position is the accurate way to wait, but some
+                    // devices report it lazily. Cap the wait at the clip's
+                    // duration plus a small tail so a stuck counter cannot
+                    // hold the line (and the greeting) for seconds.
+                    val audioMs = total * 1000L / SAMPLE_RATE
+                    val deadline = playStartedAt + audioMs + 1_500
                     while (!stopped && !closed &&
                         player.playbackHeadPosition < total &&
                         SystemClock.elapsedRealtime() < deadline

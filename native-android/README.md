@@ -227,7 +227,8 @@ deliberately left on the web for now. The smaller known gaps:
   canonical name (one edit for five-letter names, two for nine or more). The
   correction also applies to Moonshine. Both layers are logged.
 - **Moonshine v2 (experimental)**: Settings → Assistant settings →
-  Moonshine ASR downloads the 135 MB base English model (MIT) on Wi-Fi. It is
+  Moonshine ASR downloads the 135 MB base English model (MIT) over Wi-Fi or
+  mobile data. It is
   offline, so it has no live partial words; the call buffers one utterance
   and decodes it after the VAD endpoint. The Zipformer remains the default
   because it streams and carries the hotwords. Moonshine is loaded during
