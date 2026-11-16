@@ -51,3 +51,4 @@ apikeys.properties
 
 # Local scratch space (large model archives fetched by scripts).
 .cache/
+website-raw.txt
