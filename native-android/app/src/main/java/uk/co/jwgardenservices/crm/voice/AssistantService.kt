@@ -210,9 +210,13 @@ class AssistantService : Service() {
     }
 
     /**
-     * Finish dialling: stop the ringback, open the line and answer with the
-     * cached "Hello?". Waiting for [SherpaSpeechService.Phase.Listening]
-     * keeps the greeting out of the recogniser.
+     * Finish dialling: stop the ringback, answer with "Hello, how can I help?",
+     * then open the microphone.
+     *
+     * The microphone is deliberately opened *after* the greeting. Starting
+     * AudioRecord just before playback can duck or reroute the speaker on some
+     * phones, which is why a greeting that reported as spoken could be
+     * inaudible. Greeting first also means the assistant cannot hear itself.
      */
     private suspend fun connectCall(speakerId: Int, speed: Float) {
         if (!_callActive.value) {
@@ -220,63 +224,48 @@ class AssistantService : Service() {
             _dialling.value = false
             return
         }
-        // Both models are warm by now. Ring off, then open the microphone.
         ringback.stop()
-        speech.startListening()
-        if (!_callActive.value) {
-            speech.stopListening()
-            _dialling.value = false
-            return
-        }
-        val connected = withTimeoutOrNull(8_000) {
-            speech.state.first {
-                it.phase == SherpaSpeechService.Phase.Listening ||
-                    it.phase == SherpaSpeechService.Phase.Error
-            }
-            speech.isListening()
-        } ?: false
-        setNotification(LISTENING_TEXT)
         _dialling.value = false
-        if (!connected || !_callActive.value) {
-            CrashLog.note(this, TAG, "pickup skipped: line not connected")
-            return
-        }
-        if (heardInCall || _thinking.value || _speaking.value) {
-            CrashLog.note(this, TAG, "pickup skipped: caller already speaking")
-            return
-        }
-        if (speech.state.value.partial.isNotBlank()) {
-            CrashLog.note(this, TAG, "pickup skipped: partial speech")
-            return
-        }
+
         val wantsGreeting = runCatching {
             AssistantPreferences.pickupFlow(this@AssistantService).first()
         }.getOrDefault(pickupGreeting)
-        if (!wantsGreeting) {
+        if (wantsGreeting && _callActive.value) {
+            val greeting = PICKUP_TEXT
+            CrashLog.note(this, TAG, "pickup greeting: $greeting")
+            val started = System.currentTimeMillis()
+            // Show it in the conversation immediately, even if the speaker is
+            // muted or the clip fails.
+            _turns.value = (_turns.value + AssistantTurn(fromUser = false, text = greeting))
+                .takeLast(MAX_TURNS)
+            _speaking.value = true
+            val focused = requestAudioFocus()
+            val spoken = try {
+                // Let the ringback track release and the route settle before
+                // the first syllable.
+                delay(150)
+                withTimeoutOrNull(6_000) {
+                    speaker.speakPickup(speakerId, speed)
+                } ?: false
+            } catch (error: Exception) {
+                CrashLog.note(this, TAG, "pickup failed: ${error.message}")
+                false
+            } finally {
+                if (focused) abandonAudioFocus()
+                _speaking.value = false
+            }
+            CrashLog.note(
+                this,
+                TAG,
+                "pickup spoken=$spoken in ${System.currentTimeMillis() - started}ms",
+            )
+        } else {
             CrashLog.note(this, TAG, "pickup skipped: greeting is off")
-            return
         }
-        val greeting = PICKUP_TEXT
-        CrashLog.note(this, TAG, "pickup greeting: $greeting")
-        val started = System.currentTimeMillis()
-        speech.pauseForSpeech()
-        _speaking.value = true
-        // Show the greeting in the conversation immediately, even if the
-        // speaker is muted or the clip fails.
-        _turns.value = (_turns.value + AssistantTurn(fromUser = false, text = greeting))
-            .takeLast(MAX_TURNS)
-        val focused = requestAudioFocus()
-        try {
-            // Let the ringback AudioTrack release and the route settle before
-            // the first syllable, otherwise the greeting can start clipped.
-            delay(120)
-            val spoken = speaker.speakPickup(speakerId, speed)
-            CrashLog.note(this, TAG, "pickup spoken=$spoken in ${System.currentTimeMillis() - started}ms")
-        } finally {
-            if (focused) abandonAudioFocus()
-            _speaking.value = false
-            speech.resumeAfterSpeech()
-        }
+
+        if (!_callActive.value) return
+        speech.startListening()
+        setNotification(LISTENING_TEXT)
     }
 
     override fun onBind(intent: Intent?): IBinder = binder

@@ -6,6 +6,7 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import android.system.Os
 import android.util.Log
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -54,6 +55,7 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
             stopped = false
             val player = withContext(Dispatchers.IO) { buildPlayer() } ?: return@withLock false
             track = player
+            val samples = AtomicInteger()
             try {
                 withContext(Dispatchers.IO) {
                     player.play()
@@ -61,10 +63,14 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
                         if (stopped || closed) {
                             false
                         } else {
+                            samples.addAndGet(pcm.size)
                             player.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING)
                             true
                         }
                     }
+                }
+                if (samples.get() == 0) {
+                    CrashLog.note(context, TAG, "no audio for: ${clean.take(40)}")
                 }
                 true
             } finally {
