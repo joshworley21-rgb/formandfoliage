@@ -99,7 +99,11 @@ class AssistantService : Service() {
     private var cloudConversation = true
     private var onlineVoice = false
     private var cloudVoice: CloudVoice? = null
-    private val assistantContext = AssistantContext()
+    // Lazy: the base context is only attached after construction, and the
+    // profile asset is read once per process on first use.
+    private val assistantContext by lazy {
+        AssistantContext(businessProfile = BusinessBrain.load(this))
+    }
     private val callBriefing = CallBriefing()
 
     private var voice = KokoroVoice.BmFable

@@ -22,6 +22,8 @@ import java.time.LocalDate
  */
 class AssistantContext(
     private val repository: CrmRepository = ServiceLocator.crmRepository,
+    /** Distilled website profile, bundled as an asset. Null when unreadable. */
+    private val businessProfile: String? = null,
 ) {
     suspend fun snapshot(memories: List<String>, turns: List<AssistantTurn>): String = buildString {
         val settings = runCatching { repository.getSettings() }.getOrNull()
@@ -37,6 +39,13 @@ class AssistantContext(
             settings.paymentTerms?.takeIf { it.isNotBlank() }?.let {
                 appendLine("Payment terms: ${it.trim().take(120)}.")
             }
+        }
+        // Services, patch and credentials from the website, so answers about
+        // what the business offers or where it covers come from the source of
+        // truth rather than a language model's guess.
+        businessProfile?.takeIf { it.isNotBlank() }?.let { profile ->
+            appendLine("About the business:")
+            appendLine(profile)
         }
 
         val now = Instant.now()
