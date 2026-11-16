@@ -48,15 +48,18 @@ import uk.co.jwgardenservices.crm.ui.common.SectionCard
 import uk.co.jwgardenservices.crm.ui.common.ShareText
 import uk.co.jwgardenservices.crm.voice.AssistantContext
 import uk.co.jwgardenservices.crm.voice.AssistantMemory
+import uk.co.jwgardenservices.crm.voice.AsrEngine
 import uk.co.jwgardenservices.crm.voice.AssistantPreferences
 import uk.co.jwgardenservices.crm.voice.KokoroHqDownloader
 import uk.co.jwgardenservices.crm.voice.KokoroEngine
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
+import uk.co.jwgardenservices.crm.voice.ParakeetDownloader
 import uk.co.jwgardenservices.crm.voice.MicSource
 import uk.co.jwgardenservices.crm.voice.PhononDownloader
 import uk.co.jwgardenservices.crm.voice.PhononVoice
 import uk.co.jwgardenservices.crm.voice.PiperVoice
 import uk.co.jwgardenservices.crm.voice.PiperVoiceDownloader
+import uk.co.jwgardenservices.crm.voice.SpeechEngine
 
 /**
  * The offline assistant's own settings: Kokoro voice profile and the contents
@@ -99,6 +102,11 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = PhononVoice.Default)
     var voiceDownloading by remember { mutableStateOf(false) }
     var voiceError by remember { mutableStateOf<String?>(null) }
+    val parakeetState by ParakeetDownloader.state.collectAsStateWithLifecycle()
+    var parakeetInstalled by remember { mutableStateOf(ParakeetDownloader.isInstalled(context)) }
+    var parakeetSaved by remember { mutableLongStateOf(ParakeetDownloader.savedBytes(context)) }
+    val asrEngine by AssistantPreferences.asrEngineFlow(context)
+        .collectAsStateWithLifecycle(initialValue = AsrEngine.Zipformer)
 
     LaunchedEffect(phononState) {
         when (val snapshot = phononState) {
@@ -111,6 +119,17 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
             is PhononDownloader.State.Working -> Unit
             else -> phononSaved = PhononDownloader.savedBytes(context)
+        }
+    }
+    LaunchedEffect(parakeetState) {
+        when (val snapshot = parakeetState) {
+            is ParakeetDownloader.State.Done -> {
+                parakeetInstalled = true
+                parakeetSaved = 0
+                ParakeetDownloader.clearResult()
+            }
+            is ParakeetDownloader.State.Working -> Unit
+            else -> parakeetSaved = ParakeetDownloader.savedBytes(context)
         }
     }
     LaunchedEffect(hqState) {
@@ -530,6 +549,107 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 }
 
                 if (!unmetered && working == null && !phononInstalled) {
+                    Text(
+                        text = "Connect to Wi-Fi to download the model.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                failure?.let { error ->
+                    Text(
+                        text = error.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+
+        SectionCard(title = "Parakeet ASR (experimental)") {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "NVIDIA Parakeet TDT 0.6B v2, CC BY 4.0. About 630 MB, English-only, " +
+                        "and offline. It is a non-streaming model: there are no live partial " +
+                        "words, just a transcript when you stop speaking. The streaming Zipformer " +
+                        "remains the default; switch below to compare accuracy and latency.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                val working = parakeetState as? ParakeetDownloader.State.Working
+                val failure = parakeetState as? ParakeetDownloader.State.Failed
+                if (working != null) {
+                    LinearProgressIndicator(
+                        progress = { working.progress },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "Downloading… ${working.done / MEGABYTE} of " +
+                            "${working.total / MEGABYTE} MB",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = { ParakeetDownloader.cancel() }) { Text("Cancel") }
+                }
+
+                if (parakeetInstalled) {
+                    Text(
+                        text = "Speech engine",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    OptionPicker(
+                        options = AsrEngine.entries,
+                        selected = asrEngine,
+                        label = { it?.label ?: AsrEngine.Zipformer.label },
+                        onSelect = { engine ->
+                            scope.launch {
+                                AssistantPreferences.setAsrEngine(context, engine)
+                                if (engine == AsrEngine.Zipformer) {
+                                    SpeechEngine.get(context).releaseParakeet()
+                                } else {
+                                    SpeechEngine.get(context).releaseOnline()
+                                }
+                            }
+                        },
+                    )
+                    Text(
+                        text = "Takes effect on the next call. Parakeet keeps about 630 MB in " +
+                            "memory while selected, so switch back to Zipformer after testing.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                ParakeetDownloader.remove(context)
+                                AssistantPreferences.setAsrEngine(context, AsrEngine.Zipformer)
+                                SpeechEngine.get(context).releaseParakeet()
+                                parakeetInstalled = false
+                                parakeetSaved = 0
+                            }
+                        },
+                    ) { Text("Remove Parakeet model") }
+                } else if (working == null) {
+                    OutlinedButton(
+                        onClick = {
+                            if (!unmetered) return@OutlinedButton
+                            ParakeetDownloader.start(context)
+                        },
+                    ) {
+                        Text(
+                            if (parakeetSaved > 0) {
+                                "Resume Parakeet download (${parakeetSaved / MEGABYTE} MB saved)"
+                            } else {
+                                "Download Parakeet (630 MB)"
+                            },
+                        )
+                    }
+                }
+
+                if (!unmetered && working == null && !parakeetInstalled) {
                     Text(
                         text = "Connect to Wi-Fi to download the model.",
                         style = MaterialTheme.typography.bodySmall,

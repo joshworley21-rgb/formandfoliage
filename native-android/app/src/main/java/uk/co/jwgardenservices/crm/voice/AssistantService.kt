@@ -200,7 +200,7 @@ class AssistantService : Service() {
             // microphone stays closed while the ringback plays, so it cannot
             // hear the tones as a command.
             coroutineScope {
-                launch { runCatching { speech.prepare() } }
+                launch { runCatching { speech.prepare(forCall = true) } }
                 speaker.warmUp()
                 runCatching { speaker.prepareFiller(callVoice.speakerId, callSpeed) }
             }
