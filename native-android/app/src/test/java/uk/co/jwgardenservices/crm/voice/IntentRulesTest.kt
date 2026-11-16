@@ -68,6 +68,9 @@ class IntentRulesTest {
         Case("remind me to get compost for the next visit to the Smiths", SpokenIntent.NextVisitNote),
         Case("what's for the Smiths' next visit", SpokenIntent.NextVisitNote),
         Case("clear the next visit note for the Smiths", SpokenIntent.NextVisitNote),
+        Case("say again", SpokenIntent.SayAgain),
+        Case("repeat that", SpokenIntent.SayAgain),
+        Case("what was that", SpokenIntent.SayAgain),
         Case("when is the Smiths next in", SpokenIntent.NextJobForClient),
         Case("what have I taken today", SpokenIntent.TodayEarnings),
 

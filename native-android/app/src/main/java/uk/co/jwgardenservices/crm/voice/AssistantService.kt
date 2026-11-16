@@ -5,13 +5,16 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioDeviceCallback
 import android.media.AudioFocusRequest
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.os.BatteryManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
@@ -21,6 +24,9 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.support.v4.media.session.MediaSessionCompat
 import android.util.Base64
+import android.telephony.PhoneStateListener
+import android.telephony.TelephonyCallback
+import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -111,6 +117,10 @@ class AssistantService : Service() {
     private var foreground = false
     private var cloudConversation = true
     private var onlineVoice = false
+
+    /** True while the battery is under 15% and unplugged: cloud features off. */
+    @Volatile
+    private var lowBattery = false
     private var cloudVoice: CloudVoice? = null
     // Lazy: the base context is only attached after construction, and the
     // profile asset is read once per process on first use.
@@ -219,6 +229,7 @@ class AssistantService : Service() {
             val saved = AssistantMemory.turns(this@AssistantService)
             if (saved.isNotEmpty() && _turns.value.isEmpty()) _turns.value = saved
         }
+        registerTelephonyDefense()
         scope.launch {
             AssistantMemory.cloudConversationFlow(this@AssistantService).collect { cloudConversation = it }
         }
@@ -251,6 +262,8 @@ class AssistantService : Service() {
             heardInCall = false
             // The summary card is about this call only.
             CallLedger.clear()
+            // Checked per call: unplugging between calls re-enables the cloud.
+            checkBattery()
             // A new call must not inherit a reply from the last one.
             speaker.stopPlayback()
             cloudVoice?.stop()
@@ -331,7 +344,12 @@ class AssistantService : Service() {
             // answer "log four hours and mark it done" without a client name.
             // It is read from Room only, and only after the models are warm.
             val briefing = callBriefing.line()
-            val greeting = briefing ?: PICKUP_TEXT
+            var greeting = briefing ?: PICKUP_TEXT
+            if (lowBattery) {
+                // Warned once, up front: everything below is offline-only.
+                greeting = "$greeting Battery's running low, so I'm on offline mode only."
+            }
+            AssistantMemory.lastSpokenReply = greeting
             CrashLog.note(this, TAG, "pickup greeting: $greeting")
             val started = System.currentTimeMillis()
             // Show it in the conversation immediately, even if the speaker is
@@ -422,6 +440,22 @@ class AssistantService : Service() {
         }
     }
 
+    // --- battery-aware routing --------------------------------------------
+
+    /**
+     * Under 15% and unplugged, the cellular radio is the biggest drain left:
+     * switch to offline-only for this call and say so in the greeting.
+     */
+    private fun checkBattery() {
+        lowBattery = runCatching {
+            val battery = getSystemService(BatteryManager::class.java)
+                ?: return@runCatching false
+            val level = battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            !battery.isCharging && level in 1..14
+        }.getOrDefault(false)
+        CrashLog.note(this, TAG, "battery saver=$lowBattery")
+    }
+
     /** One short buzz: the line is live, pocket-friendly confirmation. */
     private fun buzzConnected() {
         runCatching {
@@ -437,6 +471,93 @@ class AssistantService : Service() {
         }
     }
 
+    /** Two short pulses: the audio route moved under your feet. */
+    private fun buzzAudioChanged() {
+        runCatching {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                getSystemService(VibratorManager::class.java)?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Vibrator::class.java)
+            }
+            vibrator?.vibrate(
+                VibrationEffect.createWaveform(longArrayOf(0, 70, 90, 70), -1),
+            )
+        }
+    }
+
+    // --- GSM telephony defence --------------------------------------------
+
+    private var telephonyCallback: Any? = null
+    private var phoneStateListener: Any? = null
+
+    /**
+     * A real phone call outranks the assistant every time. When a GSM call
+     * starts ringing or goes off-hook, stand the assistant down at once:
+     * kill the voice, free the microphone, flush anything pending into the
+     * CRM, and end the AI call so the phone's own UI has the road.
+     *
+     * Needs READ_PHONE_STATE; without it the defence is simply inactive and
+     * the app behaves exactly as before.
+     */
+    private fun registerTelephonyDefense() {
+        val granted = runCatching {
+            checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE)
+        }.getOrDefault(PackageManager.PERMISSION_DENIED) == PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            CrashLog.note(this, TAG, "telephony defence inactive: READ_PHONE_STATE not granted")
+            return
+        }
+        val telephony = getSystemService(TelephonyManager::class.java) ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val callback = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
+                override fun onCallStateChanged(state: Int) {
+                    onGsmCallStateChanged(state)
+                }
+            }
+            runCatching { telephony.registerTelephonyCallback(mainExecutor, callback) }
+                .onSuccess { telephonyCallback = callback }
+        } else {
+            @Suppress("DEPRECATION")
+            val listener = object : PhoneStateListener() {
+                override fun onCallStateChanged(state: Int, phoneNumber: String?) {
+                    onGsmCallStateChanged(state)
+                }
+            }
+            runCatching { telephony.listen(listener, PhoneStateListener.LISTEN_CALL_STATE) }
+                .onSuccess { phoneStateListener = listener }
+        }
+    }
+
+    private fun unregisterTelephonyDefense() {
+        val telephony = getSystemService(TelephonyManager::class.java) ?: return
+        (telephonyCallback as? TelephonyCallback)?.let {
+            runCatching { telephony.unregisterTelephonyCallback(it) }
+        }
+        telephonyCallback = null
+        phoneStateListener?.let { listener ->
+            @Suppress("DEPRECATION")
+            runCatching { telephony.listen(listener as PhoneStateListener, PhoneStateListener.LISTEN_NONE) }
+        }
+        phoneStateListener = null
+    }
+
+    private fun onGsmCallStateChanged(state: Int) {
+        if (state != TelephonyManager.CALL_STATE_RINGING &&
+            state != TelephonyManager.CALL_STATE_OFFHOOK
+        ) {
+            return
+        }
+        if (!callActiveNow) return
+        CrashLog.note(this, TAG, "GSM call state=$state — standing the assistant down")
+        scope.launch {
+            // Money first: anything the wrap-up logged goes out as drafts.
+            raiseDraftInvoices()
+            actions.clearWrapUp()
+            endCall()
+        }
+    }
+
     private suspend fun say(text: String) {
         if (!_callActive.value) return
         // The pace marker is runner-internal: keep it for the TTS layer,
@@ -448,6 +569,7 @@ class AssistantService : Service() {
         // pause when it arrives.
         speech.captureInterjections = actions.wrapUpActive() || actions.sendPending()
         speech.fastPath = speech.captureInterjections
+        AssistantMemory.lastSpokenReply = stripped
         _thinking.value = false
         addTurn(AssistantTurn(fromUser = false, text = stripped))
         // Hold audio focus only for the utterance: the call itself can stay
@@ -457,7 +579,7 @@ class AssistantService : Service() {
             CrashLog.note(this, TAG, "reply voice=${if (onlineVoice) "online" else "device"}")
             // The natural online voice is optional; any failure falls back to
             // Kokoro rather than leaving the assistant silent.
-            val spokenOnline = onlineVoice &&
+            val spokenOnline = onlineVoice && !lowBattery &&
                 runCatching { onlineSpeaker().speak(stripped) }.getOrDefault(false)
             if (!spokenOnline) speaker.speakStreaming(text.trim(), voice.speakerId, speed)
         } finally {
@@ -681,16 +803,28 @@ class AssistantService : Service() {
                 )
                 val device = manager.availableCommunicationDevices
                     .firstOrNull { it.type in preferences }
+                val current = manager.communicationDevice
                 if (device != null) {
-                    if (manager.communicationDevice?.type != device.type) {
+                    if (current?.type != device.type) {
                         manager.setCommunicationDevice(device)
                         CrashLog.note(this, TAG, "call audio → ${deviceLabel(device)}")
                     }
-                } else if (manager.communicationDevice != null) {
-                    // A headset vanished mid-call: drop back to the default
-                    // route instead of holding a dead device.
-                    manager.clearCommunicationDevice()
-                    CrashLog.note(this, TAG, "call audio → default (headset gone)")
+                } else if (
+                    current != null &&
+                    current.type in preferences
+                ) {
+                    // The routed headset vanished mid-call: fall back to the
+                    // loudspeaker — still audible on the drive — and buzz so
+                    // the owner knows the output moved. Guarded by the stale
+                    // route so repeated device events cannot re-buzz.
+                    val speaker = manager.availableCommunicationDevices.firstOrNull {
+                        it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+                    }
+                    if (speaker != null) manager.setCommunicationDevice(speaker) else {
+                        manager.clearCommunicationDevice()
+                    }
+                    buzzAudioChanged()
+                    CrashLog.note(this, TAG, "headset gone; call audio → loudspeaker")
                 }
             } else {
                 // Pre-S has no communication-device API. A wired headset is
@@ -704,11 +838,18 @@ class AssistantService : Service() {
                     manager.startBluetoothSco()
                     manager.isBluetoothScoOn = true
                     CrashLog.note(this, TAG, "call audio → bluetooth sco (legacy)")
+                } else if (!sco && manager.isBluetoothScoOn) {
+                    // The headset dropped: loudspeaker, same as the S+ path.
+                    manager.stopBluetoothSco()
+                    manager.isBluetoothScoOn = false
+                    manager.setSpeakerphoneOn(true)
+                    buzzAudioChanged()
+                    CrashLog.note(this, TAG, "headset gone; call audio → loudspeaker (legacy)")
                 }
                 // The legacy speakerphone flag must not outlive a handover
                 // back to a headset mic.
                 @Suppress("DEPRECATION")
-                manager.setSpeakerphoneOn(false)
+                if (sco) manager.setSpeakerphoneOn(false)
             }
         }.onFailure { CrashLog.record(this, it, "routeCallAudio") }
     }
@@ -840,6 +981,13 @@ class AssistantService : Service() {
                     sayAnswer(remembered)
                     return@collect
                 }
+                // "Say again": replay the last spoken sentence verbatim, with
+                // no database work and no thinking pause.
+                if (repeatRequested(heard)) {
+                    val last = AssistantMemory.lastSpokenReply
+                    say(last ?: "I haven't said anything yet.")
+                    return@collect
+                }
                 // End-of-day wrap-up owns the conversation while it runs: an
                 // answer is hours, a yes, a skip or a stop, never a new command.
                 val wrapped = runCatching { actions.continueWrapUp(heard) }
@@ -955,7 +1103,8 @@ class AssistantService : Service() {
         // 2. Exactly one optional cloud call. The business snapshot is built
         //    only now, and only when a cloud call is actually allowed: a local
         //    answer never pays for the Room/DataStore reads.
-        if (cloudConversation) {
+        val cloudAllowed = cloudConversation && !lowBattery
+        if (cloudAllowed) {
             val context = businessContext()
             // The function classifies and, for conversational turns, produces
             // the answer in the same response — so a sentence never costs two
@@ -1034,6 +1183,8 @@ class AssistantService : Service() {
             quick.requiresCloud -> say(
                 when {
                     memo != null -> savedMemoLine(memo.clientName)
+                    lowBattery ->
+                        "Battery's running low, so I'm offline only. I can't look that up."
                     cloudConversation ->
                         "I couldn't reach the online assistant. Try again when you have signal."
                     else -> "Online answers are switched off in settings."
@@ -1045,6 +1196,8 @@ class AssistantService : Service() {
                     when {
                         chatter != null -> chatter
                         memo != null -> savedMemoLine(memo.clientName)
+                        lowBattery ->
+                            "Battery's running low, so I'm on the local answers only."
                         cloudConversation ->
                             "I couldn't reach the online assistant. Try again when you have signal."
                         else -> HELP_TEXT
@@ -1108,6 +1261,16 @@ class AssistantService : Service() {
     private fun undoRequested(text: String): Boolean =
         Regex("^(undo|undo that|undo the last one|scratch that|revert that)[.!]?$")
             .matches(text.lowercase().trim())
+
+    /** "Say again", "repeat that", "pardon": replay the last sentence. */
+    private fun repeatRequested(text: String): Boolean {
+        val lower = text.lowercase().trim().trimEnd('.', '!', '?', ',')
+        return lower in setOf(
+            "say again", "say that again", "repeat that", "repeat it", "repeat",
+            "what was that", "didn't catch that", "didnt catch that", "come again",
+            "pardon", "say that again please",
+        ) || lower.contains("didn't catch") || lower.contains("didnt catch")
+    }
 
     /** A few free replies so greetings are not answered with a help list. */
     private fun smallTalk(text: String): String? {
@@ -1180,6 +1343,7 @@ class AssistantService : Service() {
     }
 
     override fun onDestroy() {
+        unregisterTelephonyDefense()
         CrashLog.note(this, TAG, "service destroyed")
         _callActive.value = false
         callActiveNow = false
@@ -1351,6 +1515,7 @@ private fun confirmationFor(intent: IntentResult): String {
         SpokenIntent.AdjustCharge -> "Adjusting that visit."
         SpokenIntent.AddExpense -> "Adding that to the account."
         SpokenIntent.NextVisitNote -> "Making a note of that."
+        SpokenIntent.SayAgain -> "Repeating that."
         SpokenIntent.MarkJobDone ->
             if (topic.isEmpty()) "Marking that job done." else "Marking the job for $topic done."
         SpokenIntent.CheckDebtors -> "Checking who owes you."

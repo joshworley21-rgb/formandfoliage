@@ -84,7 +84,17 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
                             false
                         } else {
                             samples.addAndGet(pcm.size)
-                            player.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING)
+                            // Environmental gain: boost over a lawnmower,
+                            // leave a quiet garden alone.
+                            val gain = TtsGain.current
+                            if (gain != 1f) {
+                                val scaled = FloatArray(pcm.size) {
+                                    (pcm[it] * gain).coerceIn(-1f, 1f)
+                                }
+                                player.write(scaled, 0, scaled.size, AudioTrack.WRITE_BLOCKING)
+                            } else {
+                                player.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING)
+                            }
                             true
                         }
                     }

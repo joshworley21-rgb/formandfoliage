@@ -1,6 +1,7 @@
 package uk.co.jwgardenservices.crm.voice
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -78,6 +79,35 @@ class SpeechNormalizerTest {
     @Test
     fun `a trailing correction phrase does not eat the sentence`() {
         assertEquals("log 2 hours actually", normalized("log two hours actually"))
+    }
+
+    @Test
+    fun `relative dates resolve to concrete days`() {
+        val monday = java.time.LocalDate.of(2026, 11, 16) // a Monday
+        assertEquals(monday, SpeechNormalizer.relativeDate("what's on today", monday))
+        assertEquals(
+            monday.plusDays(1),
+            SpeechNormalizer.relativeDate("what have I got tomorrow", monday),
+        )
+        assertEquals(
+            monday.plusDays(2),
+            SpeechNormalizer.relativeDate("the day after tomorrow", monday),
+        )
+        // "next Monday" said on a Monday means the Monday after this one.
+        assertEquals(
+            monday.plusWeeks(1),
+            SpeechNormalizer.relativeDate("next Monday", monday),
+        )
+        // A bare weekday is the nearest one, today included.
+        assertEquals(
+            monday,
+            SpeechNormalizer.relativeDate("anything on Monday", monday),
+        )
+        assertEquals(
+            monday.plusDays(4),
+            SpeechNormalizer.relativeDate("who's in on Friday", monday),
+        )
+        assertNull(SpeechNormalizer.relativeDate("who owes me money", monday))
     }
 
     @Test

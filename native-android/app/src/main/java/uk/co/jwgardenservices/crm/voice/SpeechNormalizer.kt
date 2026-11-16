@@ -1,5 +1,7 @@
 package uk.co.jwgardenservices.crm.voice
 
+import java.time.DayOfWeek
+import java.time.LocalDate
 import java.util.Locale
 
 /**
@@ -201,6 +203,58 @@ object SpeechNormalizer {
 
     private fun format(value: Double): String =
         if (value % 1.0 == 0.0) value.toInt().toString() else value.toString()
+
+    private val weekdayWords = mapOf(
+        "monday" to DayOfWeek.MONDAY,
+        "tuesday" to DayOfWeek.TUESDAY,
+        "wednesday" to DayOfWeek.WEDNESDAY,
+        "thursday" to DayOfWeek.THURSDAY,
+        "friday" to DayOfWeek.FRIDAY,
+        "saturday" to DayOfWeek.SATURDAY,
+        "sunday" to DayOfWeek.SUNDAY,
+    )
+
+    private val nextWeekday = Regex(
+        "\\bnext\\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\\b",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private val bareWeekday = Regex(
+        "\\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\\b",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /**
+     * Resolve a relative spoken phrase to the concrete day it means, so the
+     * Room query runs on a date rather than a string:
+     *
+     *   "today" / "tonight" -> today
+     *   "tomorrow" -> today + 1
+     *   "next Monday" -> the coming Monday, always strictly in the future
+     *   "Friday" -> the nearest Friday (today counts when it is Friday)
+     *
+     * Null when the sentence names no relative date.
+     */
+    fun relativeDate(text: String, today: LocalDate = LocalDate.now()): LocalDate? {
+        val lower = text.lowercase()
+        return when {
+            "day after tomorrow" in lower -> today.plusDays(2)
+            "tomorrow" in lower -> today.plusDays(1)
+            "today" in lower || "tonight" in lower -> today
+            nextWeekday.containsMatchIn(lower) -> {
+                val name = nextWeekday.find(lower)?.groupValues?.get(1).orEmpty()
+                val day = weekdayWords[name] ?: return null
+                val candidate = today.with(java.time.temporal.TemporalAdjusters.nextOrSame(day))
+                if (candidate == today) candidate.plusWeeks(1) else candidate
+            }
+            bareWeekday.containsMatchIn(lower) -> {
+                val name = bareWeekday.find(lower)?.groupValues?.get(1).orEmpty()
+                val day = weekdayWords[name] ?: return null
+                today.with(java.time.temporal.TemporalAdjusters.nextOrSame(day))
+            }
+            else -> null
+        }
+    }
 
     /** Filler that is never an instruction on its own. */
     private val NON_WORDS = setOf(

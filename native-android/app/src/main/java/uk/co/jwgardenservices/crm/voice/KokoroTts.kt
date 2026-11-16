@@ -600,8 +600,10 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             CrashLog.note(context, TAG, "empty audio returned by Kokoro")
             return false
         }
+        // Environmental gain: louder over engine noise, normal when quiet.
+        val gain = TtsGain.current
         val pcm = ShortArray(samples.size) { index ->
-            (samples[index].coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt().toShort()
+            ((samples[index] * gain).coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt().toShort()
         }
         val player = AudioTrack.Builder()
             .setAudioAttributes(

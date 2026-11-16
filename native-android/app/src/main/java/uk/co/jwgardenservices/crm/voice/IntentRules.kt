@@ -15,6 +15,13 @@ object IntentRules {
     fun classify(transcript: String): IntentResult {
         val text = transcript.lowercase()
         val kind = when {
+            // "Say again" must win over every schedule/word match below.
+            text.containsAny(
+                "say again", "say that again", "repeat that", "repeat it",
+                "what was that", "didn't catch", "didnt catch", "come again",
+                "pardon",
+            ) -> SpokenIntent.SayAgain
+
             // Deliberately narrow: "just wrapping up at the Smiths" is the
             // answer to the call briefing, not a request to reconcile the day.
             text.containsAny(
@@ -231,7 +238,8 @@ object IntentRules {
         SpokenIntent.RaiseInvoice,
         SpokenIntent.AdjustCharge,
         SpokenIntent.AddExpense,
-        SpokenIntent.NextVisitNote -> true
+        SpokenIntent.NextVisitNote,
+        SpokenIntent.SayAgain -> true
 
         else -> false
     }

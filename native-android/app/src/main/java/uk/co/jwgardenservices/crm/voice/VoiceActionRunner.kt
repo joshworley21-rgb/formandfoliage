@@ -510,7 +510,26 @@ class VoiceActionRunner(
 
     /** Answer "what have I got on" for today, tomorrow, a weekday or next week. */
     private suspend fun scheduleFor(text: String): String {
-        val range = rangeFor(text)
+        // Simple relative days resolve through the normaliser into a concrete
+        // LocalDate first, so the Room filter runs on a date, not a string.
+        // Week/month phrases keep the wider range logic below.
+        val today = LocalDate.now()
+        val relative = if (text.contains("week") || text.contains("month")) {
+            null
+        } else {
+            SpeechNormalizer.relativeDate(text, today)
+        }
+        val range = if (relative != null) {
+            val label = when (relative) {
+                today -> "today"
+                today.plusDays(1) -> "tomorrow"
+                else -> "on " + relative.dayOfWeek.name.lowercase()
+                    .replaceFirstChar { it.uppercase() }
+            }
+            DateRange(relative, relative, label)
+        } else {
+            rangeFor(text)
+        }
         val jobs = scheduledJobs().filter { (_, starts) ->
             val day = starts.localDate()
             !day.isBefore(range.from) && !day.isAfter(range.to)

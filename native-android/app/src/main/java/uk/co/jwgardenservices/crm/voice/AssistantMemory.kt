@@ -41,6 +41,14 @@ object AssistantMemory {
     const val MAX_TURNS = 24
     const val MAX_FACTS = 50
 
+    /**
+     * The last sentence the assistant actually spoke, so "say again" can
+     * replay it without re-running database logic. Deliberately in memory:
+     * it only makes sense within the current call.
+     */
+    @Volatile
+    var lastSpokenReply: String? = null
+
     private val FACTS = stringPreferencesKey("facts")
     private val TURNS = stringPreferencesKey("turns")
     private val CLOUD_CONVERSATION = booleanPreferencesKey("cloud_conversation")

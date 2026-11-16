@@ -182,6 +182,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @Volatile
     private var bargeFrames = 0
 
+    /** Rolling ambient microphone level, for the adaptive TTS gain. */
+    @Volatile
+    private var ambientLevel = 0f
+
     /**
      * Load the recogniser without opening the microphone.
      *
@@ -390,6 +394,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         // A few megabytes that only matter while a call is up; it reloads
         // from disk on the next one.
         Punctuator.release()
+        TtsGain.reset()
     }
 
     /** Warm checks so a returning caller can skip the dial tone. */
@@ -802,6 +807,11 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         var energy = 0.0
         for (sample in samples) energy += sample * sample
         val level = (sqrt(energy / samples.size) * 8).toFloat().coerceIn(0f, 1f)
+
+        // Slow EMA of the ambient level (~5 s at 10 frames/s) drives the TTS
+        // gain: louder over road noise, normal in a quiet garden.
+        ambientLevel = ambientLevel * 0.98f + level * 0.02f
+        TtsGain.updateFromAmbient(ambientLevel)
 
         stream.acceptWaveform(samples, SAMPLE_RATE)
         while (engine.isReady(stream)) engine.decode(stream)
