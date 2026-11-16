@@ -17,6 +17,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -62,6 +63,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -177,11 +179,23 @@ fun AssistantScreen() {
     }
     val busy = speaking || thinking
 
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(CallBg),
+    ) {
+        // Short screens (small phones, split screen) get a smaller orb and
+        // tighter spacing so the controls and transcript always fit.
+        val compact = maxHeight < 640.dp
+        val orbSize = if (compact) 132.dp else 168.dp
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(CallBg)
-            .padding(horizontal = 24.dp, vertical = 14.dp),
+            .padding(
+                horizontal = if (compact) 16.dp else 24.dp,
+                vertical = if (compact) 8.dp else 14.dp,
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Row(
@@ -206,20 +220,20 @@ fun AssistantScreen() {
             }
         }
 
-        Spacer(Modifier.weight(1.1f))
+        Spacer(Modifier.weight(if (compact) 0.45f else 1.1f))
 
         CallOrb(
             active = callActive,
             speaking = busy,
             loading = dialling,
-            level = if (connected) state.level else 0f,
+            size = orbSize,
         )
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(if (compact) 10.dp else 18.dp))
 
         Text(
             text = "J W Assistant",
-            style = MaterialTheme.typography.headlineSmall,
+            style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
             color = if (callActive) CallOn else CallDim,
         )
@@ -227,7 +241,7 @@ fun AssistantScreen() {
         // The familiar ticking call timer; runs while the call is connected.
         CallTimer(startedAt = connectedAt, running = callActive && connectedAt > 0L)
 
-        Spacer(Modifier.weight(0.7f))
+        Spacer(Modifier.weight(if (compact) 0.3f else 0.7f))
 
         SpeakingBars(
             active = callActive,
@@ -339,6 +353,7 @@ fun AssistantScreen() {
 
         Spacer(Modifier.height(6.dp))
     }
+    }
 }
 
 /** Phone-call colours, independent of the app theme. */
@@ -353,7 +368,12 @@ private val CallGreen = Color(0xFF1B8F3A)
 
 /** Glowing orb at the centre of the call sheet. */
 @Composable
-private fun CallOrb(active: Boolean, speaking: Boolean, loading: Boolean, level: Float) {
+private fun CallOrb(
+    active: Boolean,
+    speaking: Boolean,
+    loading: Boolean,
+    size: Dp,
+) {
     val halo = rememberInfiniteTransition(label = "halo")
     val glow by halo.animateFloat(
         initialValue = 0.25f,
@@ -369,20 +389,20 @@ private fun CallOrb(active: Boolean, speaking: Boolean, loading: Boolean, level:
     )
 
     Box(
-        modifier = Modifier.size(196.dp),
+        modifier = Modifier.size(size),
         contentAlignment = Alignment.Center,
     ) {
         // Soft halo behind the orb, breathing only while the call is live.
         Box(
             modifier = Modifier
-                .size(196.dp)
+                .size(size)
                 .clip(CircleShape)
                 .background(if (active) BarGreen else Color(0xFF3A3F3A))
                 .alpha(if (active) glow * 0.35f else 0.06f),
         )
         Box(
             modifier = Modifier
-                .size((136 * pulse).dp)
+                .size(size * 0.7f * pulse)
                 .clip(CircleShape)
                 .background(
                     when {
@@ -404,7 +424,7 @@ private fun CallOrb(active: Boolean, speaking: Boolean, loading: Boolean, level:
                     imageVector = Icons.Filled.Mic,
                     contentDescription = null,
                     tint = if (active) Color(0xFFE9F7DC) else CallDim,
-                    modifier = Modifier.size(54.dp),
+                    modifier = Modifier.size(size * 0.28f),
                 )
             }
         }
