@@ -54,13 +54,25 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
      * so the caller can fall back to the local voice.
      */
     suspend fun speak(text: String): Boolean {
-        val clean = TtsProsody.smooth(text)
+        // Phonon-only shaping: em-dash breaths and money said like a
+        // tradesperson says it. The pace marker decides the playback rate.
+        val (pace, stripped) = TtsProsody.extract(text)
+        val clean = TtsProsody.forPhonon(stripped)
         if (closed || clean.isEmpty()) return false
         return speakLock.withLock {
             if (closed) return@withLock false
             val engine = ensureEngine() ?: return@withLock false
             stopped = false
             val player = withContext(Dispatchers.IO) { buildPlayer() } ?: return@withLock false
+            if (pace != 1f) {
+                // Zero-compute pacing: the sink plays the same samples at a
+                // different rate, which lifts or drops the pitch a shade —
+                // brisker for action confirmations, calmer for totals.
+                runCatching {
+                    player.playbackRate = (SAMPLE_RATE * pace).toInt()
+                        .coerceIn(SAMPLE_RATE / 2, SAMPLE_RATE * 2)
+                }
+            }
             track = player
             val samples = AtomicInteger()
             val playStartedAt = SystemClock.elapsedRealtime()

@@ -76,7 +76,8 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         speakerId: Int = KokoroVoice.BmFable.speakerId,
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
     ) {
-        val clean = TtsProsody.smooth(text)
+        val (pace, stripped) = TtsProsody.extract(text)
+        val clean = TtsProsody.smooth(stripped)
         if (closed || clean.isEmpty()) return
         if (phononActive()) {
             val spoken = runCatching { phononSpeech().speak(clean) }.getOrDefault(false)
@@ -92,7 +93,11 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             // speaker id to a VITS model can index past its table.
             val sid = speakerFor(engine, speakerId)
             val audio = withContext(Dispatchers.Default) {
-                engine.generate(clean, sid, speed.coerceIn(AssistantPreferences.MIN_SPEED, AssistantPreferences.MAX_SPEED))
+                engine.generate(
+                    clean,
+                    sid,
+                    (speed * pace).coerceIn(AssistantPreferences.MIN_SPEED, AssistantPreferences.MAX_SPEED),
+                )
             }
             if (!closed) play(audio)
         }
@@ -263,7 +268,8 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         speakerId: Int = KokoroVoice.BmFable.speakerId,
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
     ) {
-        val clean = TtsProsody.smooth(text)
+        val (pace, stripped) = TtsProsody.extract(text)
+        val clean = TtsProsody.smooth(stripped)
         if (closed || clean.isEmpty()) return
         if (phononActive()) {
             speak(clean, speakerId, speed)
@@ -286,7 +292,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                     try {
                         for (chunk in chunks) {
                             if (stopRequested || closed) break
-                            audio.send(engine.generate(chunk, sid, speed))
+                            audio.send(engine.generate(chunk, sid, speed * pace))
                         }
                     } finally {
                         audio.close()

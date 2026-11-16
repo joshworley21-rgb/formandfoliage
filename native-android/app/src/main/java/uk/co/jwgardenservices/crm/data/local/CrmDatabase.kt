@@ -7,6 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.room.RoomDatabase
 import uk.co.jwgardenservices.crm.data.model.Client
+import uk.co.jwgardenservices.crm.data.model.ClientVisitNote
 import uk.co.jwgardenservices.crm.data.model.Enquiry
 import uk.co.jwgardenservices.crm.data.model.Invoice
 import uk.co.jwgardenservices.crm.data.model.InvoiceEmailEvent
@@ -38,8 +39,9 @@ import uk.co.jwgardenservices.crm.data.model.Visit
         OutboxEntry::class,
         PendingVoiceCommand::class,
         VoiceAlias::class,
+        ClientVisitNote::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = true,
 )
 abstract class CrmDatabase : RoomDatabase() {
@@ -57,6 +59,7 @@ abstract class CrmDatabase : RoomDatabase() {
     abstract fun teamMemberDao(): TeamMemberDao
     abstract fun pendingVoiceDao(): PendingVoiceDao
     abstract fun voiceAliasDao(): VoiceAliasDao
+    abstract fun clientVisitNoteDao(): ClientVisitNoteDao
     abstract fun outboxDao(): OutboxDao
 }
 
@@ -101,6 +104,19 @@ private val MIGRATION_12_13 = object : Migration(12, 13) {
     }
 }
 
+/** Additive: the reminder the owner wants raised at a client's next visit. */
+private val MIGRATION_13_14 = object : Migration(13, 14) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `client_visit_notes` (" +
+                "`clientId` TEXT NOT NULL, " +
+                "`note` TEXT NOT NULL, " +
+                "`updatedAt` TEXT NOT NULL, " +
+                "PRIMARY KEY(`clientId`))",
+        )
+    }
+}
+
 object DatabaseProvider {
     @Volatile
     private var instance: CrmDatabase? = null
@@ -112,7 +128,7 @@ object DatabaseProvider {
                 CrmDatabase::class.java,
                 "jw-crm.db",
             )
-                .addMigrations(MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+                .addMigrations(MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                 // Only reached for versions older than 10, which never held
                 // unsynced work from a shipped build. From 11 onward every
                 // schema change needs a real migration so the outbox survives.

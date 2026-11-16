@@ -28,6 +28,8 @@ import uk.co.jwgardenservices.crm.domain.round2
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.YearMonth
 import java.time.temporal.TemporalAdjusters
 import kotlin.math.abs
@@ -58,21 +60,6 @@ class VoiceActionRunner(
 
     private var pending: PendingLog? = null
 
-    /**
-     * A destructive action waiting for a yes/no. [visitId] is set when hours
-     * were already logged for this job, so confirming links that visit rather
-     * than creating a second one and billing the day twice.
-     */
-    private data class ConfirmDone(
-        val jobId: String,
-        val clientName: String,
-        val hours: Double,
-        val description: String,
-        val visitId: String? = null,
-    )
-
-    private var confirmDone: ConfirmDone? = null
-
     /** The last change that can be reversed with "undo". */
     private sealed interface Undo {
         data class Visit(val id: String, val clientName: String) : Undo
@@ -99,6 +86,11 @@ class VoiceActionRunner(
     )
 
     private var pendingSend: PendingSend? = null
+
+    /** Pace markers — the runner knows the kind of reply; TTS honours it. */
+    private fun fast(text: String): String = "${TtsProsody.FAST}$text"
+
+    private fun slow(text: String): String = "${TtsProsody.SLOW}$text"
 
     fun hasPending(): Boolean = pending != null
 
@@ -136,6 +128,7 @@ class VoiceActionRunner(
             SpokenIntent.RaiseInvoice -> raiseInvoice(text)
             SpokenIntent.AdjustCharge -> adjustCharge(text)
             SpokenIntent.AddExpense -> addExpense(text)
+            SpokenIntent.NextVisitNote -> nextVisitNote(text)
             else -> null
         }
     }
@@ -202,13 +195,15 @@ class VoiceActionRunner(
     /** True while a wrap-up question is waiting for its answer. */
     fun wrapUpActive(): Boolean = wrapUp != null
 
+    /** True while a draft invoice is waiting for "send it" or "leave it". */
+    fun sendPending(): Boolean = pendingSend != null
+
     fun clearWrapUp() {
         wrapUp = null
         wrapUpBillables.clear()
         // A half-finished "log hours" question must not outlive the call or
         // hijack the first answer inside a new wrap-up.
         pending = null
-        confirmDone = null
         // Corrections and "send it" only apply inside the call that raised
         // them; never let a visit from last week be adjusted by accident.
         pendingSend = null
@@ -273,7 +268,7 @@ class VoiceActionRunner(
 
         if (isWrapUpStop(text)) {
             wrapUp = null
-            return summary(state, stopped = true)
+            return slow(summary(state, stopped = true))
         }
         // "Run through today's jobs" again restarts from the freshest list,
         // so a job added or removed mid-loop is picked up.
@@ -318,10 +313,10 @@ class VoiceActionRunner(
     private fun advance(state: WrapUp, loggedLine: String): String {
         if (!state.hasNext()) {
             wrapUp = null
-            return "$loggedLine ${summary(state)}"
+            return slow("$loggedLine ${summary(state)}")
         }
         state.index++
-        return "$loggedLine ${prompt(state, first = false)}"
+        return slow("$loggedLine ${prompt(state, first = false)}")
     }
 
     private suspend fun logWrapUpVisit(
@@ -358,11 +353,13 @@ class VoiceActionRunner(
         state.amountLogged = round2(state.amountLogged + visit.amount)
         // Ultra-short cadence: inside a rapid loop a full read-back on every
         // job feels like a machine; the totals come once at the end.
-        return VoiceLines.pick(
-            "Logged ${hoursLabel(safeHours)}, ${money(visit.amount)}.",
-            "${hoursLabel(safeHours)} down, ${money(visit.amount)}.",
-            "Done, ${hoursLabel(safeHours)}, ${money(visit.amount)}.",
-            "That's in, ${hoursLabel(safeHours)}.",
+        return fast(
+            VoiceLines.pick(
+                "Logged ${hoursLabel(safeHours)}, ${money(visit.amount)}.",
+                "${hoursLabel(safeHours)} down, ${money(visit.amount)}.",
+                "Done, ${hoursLabel(safeHours)}, ${money(visit.amount)}.",
+                "That's in, ${hoursLabel(safeHours)}.",
+            ),
         )
     }
 
@@ -489,15 +486,26 @@ class VoiceActionRunner(
             "Removed that visit."
         }
         val whenText = if (date == LocalDate.now()) "" else " for ${date.dayOfMonth}/${date.monthValue}"
-        return VoiceLines.pick(
-            "Logged ${hoursLabel(hours)} for ${client.name}$whenText, ${money(draft.amount)}.",
-            "Sorted — ${hoursLabel(hours)} down for ${client.name}$whenText, " +
-                "${money(draft.amount)}.",
-            "All logged. ${hoursLabel(hours)} at ${client.name}$whenText, " +
-                "that's ${money(draft.amount)}.",
-            "Done — ${hoursLabel(hours)} for ${client.name}$whenText goes on at " +
-                "${money(draft.amount)}.",
-        )
+        // Time-of-day empathy, checked with two LocalDateTime reads — no
+        // model, no I/O. A question ending also suppresses "anything else?".
+        val now = LocalDateTime.now()
+        val reply = when {
+            now.dayOfWeek == DayOfWeek.FRIDAY && now.toLocalTime() >= LocalTime.of(15, 0) ->
+                "Logged ${hoursLabel(hours)} at ${client.name}. " +
+                    "Last one of the week, or keeping going?"
+            now.toLocalTime() < LocalTime.of(9, 30) ->
+                "Morning! Logged ${hoursLabel(hours)} at ${client.name}$whenText."
+            else -> VoiceLines.pick(
+                "Logged ${hoursLabel(hours)} for ${client.name}$whenText, ${money(draft.amount)}.",
+                "Sorted — ${hoursLabel(hours)} down for ${client.name}$whenText, " +
+                    "${money(draft.amount)}.",
+                "All logged. ${hoursLabel(hours)} at ${client.name}$whenText, " +
+                    "that's ${money(draft.amount)}.",
+                "Done — ${hoursLabel(hours)} for ${client.name}$whenText goes on at " +
+                    "${money(draft.amount)}.",
+            )
+        }
+        return fast(reply)
     }
 
     /** Answer "what have I got on" for today, tomorrow, a weekday or next week. */
@@ -603,89 +611,54 @@ class VoiceActionRunner(
             ?.takeIf { it.clientName == name }
             ?.let { undo -> todaysVisits.firstOrNull { it.id == undo.id } }
         val todaysVisit = justLogged ?: todaysVisits.maxByOrNull { it.createdAt ?: "" }
-        val hours = round2(
-            todaysVisit?.hours?.takeIf { it > 0.0 }
-                ?: (job.durationMinutes / 60.0).coerceAtLeast(0.5),
-        )
-        confirmDone = ConfirmDone(job.id, name, hours, "Completed by voice", todaysVisit?.id)
+        // Committed straight away — no "say yes to confirm". Corrections ride
+        // on "undo that" and the post-call summary, which are faster than a
+        // confirmation round-trip with greased gloves on.
         return if (todaysVisit != null) {
-            VoiceLines.pick(
-                "Mark the job for $name done with the ${hoursLabel(hours)} already logged? " +
-                    "Say yes to confirm.",
-                "That's $name at ${hoursLabel(hours)}, already down. Mark it done? " +
-                    "Say yes to confirm.",
+            repository.completeJobWithVisit(job.id, todaysVisit.id)
+            CallLedger.record("Marked the job for $name done") {
+                repository.reopenJob(job.id)
+                "That job is back on the schedule."
+            }
+            fast(
+                VoiceLines.pick(
+                    "Right, marked that done for $name.",
+                    "Done — $name's job is closed off.",
+                    "Sorted, $name is marked down.",
+                ),
             )
         } else {
-            VoiceLines.pick(
-                "Mark the job for $name done, ${hoursLabel(hours)}? Say yes to confirm.",
-                "That's $name at ${hoursLabel(hours)} — shall I mark it done? Say yes to confirm.",
-                "About to mark $name's job done at ${hoursLabel(hours)}. Say yes to confirm, " +
-                    "or no to leave it.",
+            val hours = round2((job.durationMinutes / 60.0).coerceAtLeast(0.5))
+            val amount = client?.let {
+                round2(priceVisit(BillingSource(it.billingMode, it.hourlyRate, it.fixedPrice), hours, 0.0))
+            } ?: 0.0
+            // One transaction logs the visit and completes the job, so the
+            // undo can put both sides back.
+            val visitId = repository.saveVisit(
+                VisitDraft(
+                    clientId = job.clientId,
+                    visitDate = today.toString(),
+                    hours = hours,
+                    materialsCost = 0.0,
+                    description = "Completed by voice",
+                    amount = amount,
+                    completesJobId = job.id,
+                    jobOutcome = "done",
+                ),
             )
-        }
-    }
-
-    /**
-     * Answer a pending "are you sure?". Returns null when the sentence is not
-     * a yes/no, in which case it has been cleared and the service treats the
-     * sentence as a new command.
-     */
-    suspend fun answerConfirmation(transcript: String): String? {
-        val waiting = confirmDone ?: return null
-        val lower = transcript.lowercase().trim()
-
-        // "No, four hours" / "actually make it four" adjusts the pending
-        // confirmation instead of cancelling it, then asks again.
-        val changed = spokenHours(lower)
-            ?: Regex("\\bmake it ([a-z0-9]+)\\b").find(lower)
-                ?.groupValues?.get(1)
-                ?.let { parseSpokenNumber(it) }
-        if (changed != null && changed > 0.0) {
-            val updated = waiting.copy(hours = round2(changed))
-            confirmDone = updated
-            return VoiceLines.pick(
-                "${hoursLabel(updated.hours)} for ${updated.clientName} then — say yes to confirm.",
-                "I'll make it ${hoursLabel(updated.hours)} for ${updated.clientName}. " +
-                    "Say yes to confirm.",
-            )
-        }
-
-        confirmDone = null
-        val words = lower
-            .replace(Regex("[^a-z' ]"), " ")
-            .trim()
-            .split(Regex("\\s+"))
-            .filter { it.isNotBlank() }
-        val short = words.isNotEmpty() && words.size <= 4
-        return when {
-            short && words.all { it in AFFIRM_WORDS } -> {
-                val visitId = waiting.visitId
-                if (visitId != null) {
-                    // Close the job against hours that are already recorded.
-                    repository.completeJobWithVisit(waiting.jobId, visitId)
-                } else {
-                    // The RPC creates its visit server-side; the local undo
-                    // can only reopen the job.
-                    repository.staffCompleteJob(waiting.jobId, waiting.hours, waiting.description)
-                }
-                CallLedger.record("Marked the job for ${waiting.clientName} done") {
-                    repository.reopenJob(waiting.jobId)
-                    "That job is back on the schedule."
-                }
-                VoiceLines.pick(
-                    "Marked the job for ${waiting.clientName} done, ${hoursLabel(waiting.hours)}.",
-                    "Done — ${waiting.clientName} is marked down at ${hoursLabel(waiting.hours)}.",
-                    "${waiting.clientName}'s job is closed off, ${hoursLabel(waiting.hours)}.",
-                )
+            lastUndo = Undo.Visit(visitId, name)
+            lastVoiceVisit = VoiceVisit(visitId, job.clientId, name, materials = 0.0)
+            CallLedger.record("Marked the job for $name done, ${hoursLabel(hours)}") {
+                runCatching { repository.deleteVoiceVisit(visitId) }
+                if (visitId == lastVoiceVisit?.id) lastVoiceVisit = null
+                "Back on the schedule, and the visit is gone."
             }
-
-            short && words.all { it in CANCEL_WORDS } -> VoiceLines.pick(
-                "Cancelled.",
-                "Right, I've left it alone.",
-                "No problem, cancelled.",
+            fast(
+                VoiceLines.pick(
+                    "Right, marked that done for $name — ${hoursLabel(hours)}.",
+                    "All sorted — stuck ${hoursLabel(hours)} down for $name and closed the job.",
+                ),
             )
-
-            else -> null
         }
     }
 
@@ -838,12 +811,94 @@ class VoiceActionRunner(
             if (visitId == lastVoiceVisit?.id) lastVoiceVisit = null
             "Removed the materials."
         }
-        return VoiceLines.pick(
-            "£${format(amount)} of $note down for ${client.name} — " +
-                "it'll be on their next invoice.",
-            "Sorted, £${format(amount)} of $note on ${client.name}'s account. " +
-                "Next invoice picks it up.",
+        return fast(
+            VoiceLines.pick(
+                "£${format(amount)} of $note down for ${client.name} — " +
+                    "it'll be on their next invoice.",
+                "Sorted, £${format(amount)} of $note on ${client.name}'s account. " +
+                    "Next invoice picks it up.",
+            ),
         )
+    }
+
+    /**
+     * "Remind me to get compost for the next visit to the Smiths" — one
+     * standing reminder per client, spoken back in the call briefing and
+     * editable in the client editor. Store, read ("what's for the Smiths'
+     * next visit?") and clear all live behind the one trigger phrase.
+     */
+    private suspend fun nextVisitNote(text: String): String {
+        val clients = repository.observeClients().first()
+        val client = clientFor(clients, text)
+        val lower = text.lowercase()
+        return when {
+            lower.startsWith("what") || lower.contains("what's for") ||
+                lower.contains("whats for") -> {
+                val target = client ?: inferredClient(clients)
+                    ?: return "Whose next visit shall I look up?"
+                val note = runCatching { repository.nextVisitNoteFor(target.id) }.getOrNull()
+                if (note == null) {
+                    "Nothing saved for ${target.name}'s next visit."
+                } else {
+                    fast("For ${target.name}'s next visit: $note.")
+                }
+            }
+            lower.startsWith("clear") || lower.contains("remove the") ||
+                lower.contains("cancel the") -> {
+                val target = client ?: inferredClient(clients)
+                    ?: return "Whose next-visit note shall I clear?"
+                repository.saveNextVisitNote(target.id, "")
+                "Cleared the next-visit note for ${target.name}."
+            }
+            else -> {
+                val target = client ?: return "Which client is that for?"
+                val note = extractVisitNote(text, target)
+                if (note.isBlank()) return "What should I remind you about?"
+                repository.saveNextVisitNote(target.id, note)
+                CallLedger.record("Next-visit note for ${target.name}") {
+                    repository.saveNextVisitNote(target.id, "")
+                    "Taken that reminder off."
+                }
+                fast(
+                    VoiceLines.pick(
+                        "Right — $note for ${target.name}'s next visit.",
+                        "Noted. $note, next time you're at ${target.name}.",
+                    ),
+                )
+            }
+        }
+    }
+
+    /** Strip the command words, leaving what the owner actually wants done. */
+    private suspend fun extractVisitNote(text: String, client: Client): String {
+        var note = text
+            .replaceFirst(
+                Regex(
+                    "^\\s*(?:please\\s+)?(?:can you\\s+)?(?:don't forget to\\s+|dont forget to\\s+)?" +
+                        "remind me to\\s+",
+                    RegexOption.IGNORE_CASE,
+                ),
+                "",
+            )
+            .replaceFirst(Regex("^\\s*(?:can you\\s+)?remind me\\s+"), "")
+        if (note.contains(':')) note = note.substringAfter(':')
+        // Drop everything from the client reference onwards; the note itself
+        // always comes before "for the next visit to …".
+        note = note.replaceFirst(
+            Regex("\\b(?:for|at|on)\\s+the\\s+next\\s+visit\\b.*$", RegexOption.IGNORE_CASE),
+            "",
+        )
+        note = note.replaceFirst(
+            Regex("\\bnext\\s+visit\\b.*$", RegexOption.IGNORE_CASE),
+            "",
+        )
+        note = note.replace(Regex(Regex.escape(client.name), RegexOption.IGNORE_CASE), " ")
+        runCatching { repository.allVoiceAliases() }.getOrDefault(emptyList())
+            .filter { it.first == client.id }
+            .forEach { note = note.replace(Regex(Regex.escape(it.second), RegexOption.IGNORE_CASE), " ") }
+        return note
+            .replace(Regex("\\s+"), " ")
+            .trim(' ', ',', '-', '\u2014')
     }
 
     private suspend fun raiseInvoice(text: String): String {
@@ -880,13 +935,15 @@ class VoiceActionRunner(
             pendingSend = null
             "That draft invoice is gone."
         }
-        return VoiceLines.pick(
-            "Draft invoice for ${client.name} — $visitsText, ${money(totalValue)}. " +
-                "Send it, or leave it in drafts?",
-            "That's a draft for ${client.name}, $visitsText, ${money(totalValue)}. " +
-                "Send it now, or leave it?",
-            "In drafts: ${client.name}, $visitsText, ${money(totalValue)}. " +
-                "Send it, or leave it there?",
+        return slow(
+            VoiceLines.pick(
+                "Draft invoice for ${client.name} — $visitsText, ${money(totalValue)}. " +
+                    "Send it, or leave it in drafts?",
+                "That's a draft for ${client.name}, $visitsText, ${money(totalValue)}. " +
+                    "Send it now, or leave it?",
+                "In drafts: ${client.name}, $visitsText, ${money(totalValue)}. " +
+                    "Send it, or leave it there?",
+            ),
         )
     }
 
@@ -913,7 +970,7 @@ class VoiceActionRunner(
             }
             no -> {
                 pendingSend = null
-                "Left it in drafts — ${pending.clientName}, ${money(pending.total)}."
+                slow("Left it in drafts — ${pending.clientName}, ${money(pending.total)}.")
             }
             else -> {
                 pendingSend = null
@@ -1405,11 +1462,5 @@ class VoiceActionRunner(
             "the", "to", "on", "of", "for", "that", "it", "this", "visit", "invoice", "and",
         )
 
-        /** Natural ways to abandon a pending confirmation. */
-        val CANCEL_WORDS = setOf(
-            "no", "nope", "nah", "cancel", "stop", "leave", "it", "don't", "dont",
-            "do", "not", "forget", "scratch", "that", "never", "mind", "bother",
-            "wait", "hold", "scrap", "actually", "wrong", "rubbish",
-        )
     }
 }

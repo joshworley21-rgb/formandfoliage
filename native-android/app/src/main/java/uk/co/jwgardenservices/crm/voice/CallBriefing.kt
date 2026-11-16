@@ -82,16 +82,23 @@ class CallBriefing(
                 val start = spokenTime(starts.atZone(zone).toLocalTime())
                 val after = todayJobs.count { (_, other) -> other.isAfter(starts) }
                 val firstOfDay = todayJobs.first() == (job to starts)
+                // The standing reminder the owner asked to hear at this
+                // client's next visit.
+                val reminder = job.clientId.let { id ->
+                    runCatching { repository.nextVisitNoteFor(id) }.getOrNull()
+                        ?.takeIf { it.isNotBlank() }
+                }?.let { " Remember: $it." } ?: ""
                 return if (firstOfDay && time.hour < 12) {
                     val tail = when (after) {
-                        0 -> "and nothing else today"
-                        1 -> "and one more today"
-                        else -> "and $after more today"
+                        0 -> "Nothing else today."
+                        1 -> "And one more today."
+                        else -> "And $after more today."
                     }
-                    "$greeting — you've got $name first at $start, $tail. " +
+                    "$greeting — you've got $name first at $start.$reminder $tail " +
                         "What are we logging?"
                 } else {
-                    "$greeting — next up is $name at $start. What are we logging?"
+                    "$greeting — next up is $name at $start.$reminder " +
+                        "What are we logging?"
                 }
             }
 

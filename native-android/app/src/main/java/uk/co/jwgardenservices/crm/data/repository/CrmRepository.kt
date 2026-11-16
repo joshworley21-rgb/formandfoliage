@@ -38,6 +38,7 @@ import uk.co.jwgardenservices.crm.data.local.OutboxEntry
 import uk.co.jwgardenservices.crm.data.local.QueuedOpDto
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.ClientDraft
+import uk.co.jwgardenservices.crm.data.model.ClientVisitNote
 import uk.co.jwgardenservices.crm.data.model.CreateInvoiceResult
 import uk.co.jwgardenservices.crm.data.model.Enquiry
 import uk.co.jwgardenservices.crm.data.model.Invoice
@@ -444,6 +445,27 @@ class CrmRepository(
             .take(12)
             .map { VoiceAlias(id = UUID.randomUUID().toString(), clientId = clientId, alias = it) }
         if (rows.isNotEmpty()) dao.upsertAll(rows)
+    }
+
+    /** The reminder the owner wants raised at this client's next visit. */
+    suspend fun nextVisitNoteFor(clientId: String): String? =
+        database.clientVisitNoteDao().forClient(clientId)?.note
+
+    /** One note per client; a new one replaces the old. Blank clears it. */
+    suspend fun saveNextVisitNote(clientId: String, note: String) {
+        val dao = database.clientVisitNoteDao()
+        val clean = note.trim()
+        if (clean.isEmpty()) {
+            dao.deleteForClient(clientId)
+        } else {
+            dao.upsert(
+                ClientVisitNote(
+                    clientId = clientId,
+                    note = clean.take(200),
+                    updatedAt = Instant.now().toString(),
+                ),
+            )
+        }
     }
 
     /**

@@ -36,6 +36,11 @@ object IntentRules {
                 "reconcile today",
             ) -> SpokenIntent.DayWrapUp
 
+            // "Remind me to get compost for the next visit to the Smiths" —
+            // must be checked before AddNote, whose "note for" keywords it
+            // also contains.
+            text.containsAny("next visit") -> SpokenIntent.NextVisitNote
+
             text.containsAny("note for", "add a note", "note that", "make a note") ->
                 SpokenIntent.AddNote
 
@@ -225,7 +230,8 @@ object IntentRules {
         SpokenIntent.DayWrapUp,
         SpokenIntent.RaiseInvoice,
         SpokenIntent.AdjustCharge,
-        SpokenIntent.AddExpense -> true
+        SpokenIntent.AddExpense,
+        SpokenIntent.NextVisitNote -> true
 
         else -> false
     }

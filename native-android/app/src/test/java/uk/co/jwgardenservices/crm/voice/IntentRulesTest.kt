@@ -65,6 +65,9 @@ class IntentRulesTest {
         Case("change the rate to £45 an hour", SpokenIntent.AdjustCharge),
         Case("stick £30 of materials onto the Smiths", SpokenIntent.AddExpense),
         Case("log £25 materials for the pub", SpokenIntent.AddExpense),
+        Case("remind me to get compost for the next visit to the Smiths", SpokenIntent.NextVisitNote),
+        Case("what's for the Smiths' next visit", SpokenIntent.NextVisitNote),
+        Case("clear the next visit note for the Smiths", SpokenIntent.NextVisitNote),
         Case("when is the Smiths next in", SpokenIntent.NextJobForClient),
         Case("what have I taken today", SpokenIntent.TodayEarnings),
 

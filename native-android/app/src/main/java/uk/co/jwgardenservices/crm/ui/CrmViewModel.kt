@@ -185,6 +185,14 @@ class CrmViewModel(
         withSaving { repository.saveVoiceAliases(clientId, aliases) }
     }
 
+    /** The reminder spoken at this client's next visit; local to this phone. */
+    suspend fun nextVisitNote(clientId: String): String? =
+        repository.nextVisitNoteFor(clientId)
+
+    suspend fun saveNextVisitNote(clientId: String, note: String) {
+        withSaving { repository.saveNextVisitNote(clientId, note) }
+    }
+
     suspend fun deleteClient(id: String) {
         withSaving { repository.deleteClient(id) }
     }

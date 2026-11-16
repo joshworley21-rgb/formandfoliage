@@ -168,6 +168,12 @@ class AssistantService : Service() {
             speaker.stopPlayback()
             cloudVoice?.stop()
         }
+        // The answer to a question the assistant was still asking: kill the
+        // audio, take the word as the answer, speak the next item straight
+        // away — no thinking pause, no filler.
+        speech.onInterjection = { text ->
+            scope.launch { handleInterjection(text) }
+        }
         speaker = KokoroEngine.get(this)
         // A call is "media" to the platform's button router. Activated only
         // while a call is up, so it never steals play/pause from music; the
@@ -381,12 +387,48 @@ class AssistantService : Service() {
     }
 
     /** Speak a reply and add it to the rolling transcript. */
+    /**
+     * The fast path for an interjection: the audio is already dead, the word
+     * is the answer, and the next reply starts immediately.
+     */
+    private suspend fun handleInterjection(text: String) {
+        CrashLog.note(this, TAG, "interjection handled: ${text.take(60)}")
+        _dialling.value = false
+        speaker.stopPlayback()
+        cloudVoice?.stop()
+        _speaking.value = false
+        _thinking.value = false
+        if (!_callActive.value) return
+        addTurn(AssistantTurn(fromUser = true, text = text))
+        val heard = SpeechNormalizer.normalize(text)
+        val sent = runCatching { actions.continueSend(heard) }
+            .onFailure { CrashLog.note(this, TAG, "send reply failed: ${it.message}") }
+            .getOrNull()
+        val reply = sent ?: runCatching { actions.continueWrapUp(heard) }
+            .onFailure { CrashLog.note(this, TAG, "wrap-up failed: ${it.message}") }
+            .getOrNull()
+        if (reply != null) {
+            if (!actions.wrapUpActive()) raiseDraftInvoices()
+            sayAnswer(reply)
+        } else {
+            // Something else entirely — treat it as a fresh command.
+            answerTurn(heard)
+        }
+    }
+
     private suspend fun say(text: String) {
         if (!_callActive.value) return
-        val clean = text.trim()
-        if (clean.isEmpty()) return
+        // The pace marker is runner-internal: keep it for the TTS layer,
+        // strip it before anything user-visible.
+        val stripped = TtsProsody.extract(text).second.trim()
+        if (stripped.isEmpty()) return
+        // A question with an answer pending (wrap-up, "send it") arms the
+        // recogniser to catch a spoken-over answer and skips the thinking
+        // pause when it arrives.
+        speech.captureInterjections = actions.wrapUpActive() || actions.sendPending()
+        speech.fastPath = speech.captureInterjections
         _thinking.value = false
-        addTurn(AssistantTurn(fromUser = false, text = clean))
+        addTurn(AssistantTurn(fromUser = false, text = stripped))
         // Hold audio focus only for the utterance: the call itself can stay
         // connected across tabs without pausing the van's music all day.
         val focused = requestAudioFocus()
@@ -395,8 +437,8 @@ class AssistantService : Service() {
             // The natural online voice is optional; any failure falls back to
             // Kokoro rather than leaving the assistant silent.
             val spokenOnline = onlineVoice &&
-                runCatching { onlineSpeaker().speak(clean) }.getOrDefault(false)
-            if (!spokenOnline) speaker.speakStreaming(clean, voice.speakerId, speed)
+                runCatching { onlineSpeaker().speak(stripped) }.getOrDefault(false)
+            if (!spokenOnline) speaker.speakStreaming(text.trim(), voice.speakerId, speed)
         } finally {
             if (focused) abandonAudioFocus()
         }
@@ -738,7 +780,9 @@ class AssistantService : Service() {
             // "£180" instead of "one hundred and eighty quid", no spoken
             // lead-ins. This is the cheapest accuracy gain in the pipeline.
             val heard = SpeechNormalizer.normalize(text)
-            _thinking.value = true
+            // A pending answer ("Yep", "Next", "send it") skips the thinking
+            // pause: the reply goes straight to the already-warm voice.
+            if (!speech.fastPath) _thinking.value = true
             // Interlock starts before the filler: from here until Kokoro's
             // last sample the microphone frames are discarded, so neither the
             // filler nor the confirmation can feed back into the recognizer.
@@ -746,17 +790,9 @@ class AssistantService : Service() {
             if (wasListening) speech.pauseForSpeech()
             _speaking.value = true
             try {
-                // A yes/no finishes an "are you sure?" from the last turn
-                // before "undo that" reverses the last logged visit or client
-                // note. Both run before memory and classification so a stray
-                // word cannot lose the pending action.
-                val confirmed = runCatching { actions.answerConfirmation(heard) }
-                    .onFailure { CrashLog.note(this, TAG, "confirmation failed: ${it.message}") }
-                    .getOrNull()
-                if (confirmed != null) {
-                    sayAnswer(confirmed)
-                    return@collect
-                }
+                // Mark-done now commits immediately (the summary card and
+                // "undo that" are the safety net), so there is no pending
+                // confirmation to answer.
                 // "Say send it" — the second half of raising a draft invoice.
                 val sent = runCatching { actions.continueSend(heard) }
                     .onFailure { CrashLog.note(this, TAG, "send reply failed: ${it.message}") }
@@ -1286,6 +1322,7 @@ private fun confirmationFor(intent: IntentResult): String {
         SpokenIntent.RaiseInvoice -> "Drafting that invoice."
         SpokenIntent.AdjustCharge -> "Adjusting that visit."
         SpokenIntent.AddExpense -> "Adding that to the account."
+        SpokenIntent.NextVisitNote -> "Making a note of that."
         SpokenIntent.MarkJobDone ->
             if (topic.isEmpty()) "Marking that job done." else "Marking the job for $topic done."
         SpokenIntent.WhoOwesMe -> "Checking who owes you."

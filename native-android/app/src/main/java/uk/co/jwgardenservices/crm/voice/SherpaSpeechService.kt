@@ -141,6 +141,34 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @Volatile
     var onBargeIn: (() -> Unit)? = null
 
+    /**
+     * Armed while a spoken question is waiting for an answer (a wrap-up
+     * prompt, a "send it?"). A barge-in then replays the frames heard before
+     * the interruption into the recogniser, so a one-word answer like "Yep"
+     * decodes whole instead of losing its first syllable to the dropped
+     * frames.
+     */
+    @Volatile
+    var captureInterjections = false
+
+    /** True while the last prompt was a question with an answer pending. */
+    @Volatile
+    var fastPath = false
+
+    /**
+     * Called with the finalised interjection instead of the transcript queue,
+     * so the answer to a question the assistant was still asking skips the
+     * processing pause entirely. Fired from the recognition thread.
+     */
+    @Volatile
+    var onInterjection: ((String) -> Unit)? = null
+
+    /** Frames kept from just before a barge-in while paused (about 2 s). */
+    private val pausePreRoll = ArrayDeque<Short>()
+
+    @Volatile
+    private var interjectionArmed = false
+
     private var echoCanceller: AcousticEchoCanceler? = null
     private var gainController: AutomaticGainControl? = null
 
@@ -531,8 +559,27 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                         hasSpeech = false
                         vad?.reset()
                         pausedClean = true
+                        pausePreRoll.clear()
                     }
-                    maybeBargeIn(buffer, read)
+                    // Keep the last couple of seconds rolling so a barge-in
+                    // can replay the start of the interjection.
+                    for (index in 0 until read) {
+                        pausePreRoll.addLast(buffer[index])
+                    }
+                    while (pausePreRoll.size > PAUSE_PRE_ROLL_SAMPLES) pausePreRoll.removeFirst()
+                    if (maybeBargeIn(buffer, read)) {
+                        // The interjection began before the RMS trigger: feed
+                        // what was buffered, then the live loop takes over.
+                        val replay = pausePreRoll.toShortArray()
+                        pausePreRoll.clear()
+                        if (replay.isNotEmpty()) {
+                            feed(
+                                engine,
+                                stream,
+                                FloatArray(replay.size) { replay[it] / 32768.0f },
+                            )
+                        }
+                    }
                     continue
                 }
                 pausedClean = false
@@ -615,8 +662,24 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                         utterance.clear()
                         preRoll.clear()
                         pausedClean = true
+                        pausePreRoll.clear()
                     }
-                    maybeBargeIn(buffer, read)
+                    for (index in 0 until read) {
+                        pausePreRoll.addLast(buffer[index])
+                    }
+                    while (pausePreRoll.size > PAUSE_PRE_ROLL_SAMPLES) pausePreRoll.removeFirst()
+                    if (maybeBargeIn(buffer, read)) {
+                        // The offline path buffers a whole utterance anyway:
+                        // seed it with the pre-roll (oldest first) so "Yep"
+                        // decodes whole.
+                        for (sample in pausePreRoll) utterance.add(sample / 32768.0f)
+                        for (index in 0 until read) {
+                            utterance.add(buffer[index] / 32768.0f)
+                        }
+                        pausePreRoll.clear()
+                        hasSpeech = true
+                        lastVoiceAt = SystemClock.elapsedRealtime()
+                    }
                     continue
                 }
                 pausedClean = false
@@ -710,9 +773,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
      * the normal loop resumes. Echo cancellation comes from VOICE_COMMUNICATION
      * and AcousticEchoCanceler, so the assistant does not trigger itself.
      */
-    private fun maybeBargeIn(buffer: ShortArray, length: Int) {
-        if (!bargeEnabled || length <= 0) return
-        if (SystemClock.elapsedRealtime() - pausedAt < BARGE_GRACE_MS) return
+    private fun maybeBargeIn(buffer: ShortArray, length: Int): Boolean {
+        if (!bargeEnabled || length <= 0) return false
+        if (SystemClock.elapsedRealtime() - pausedAt < BARGE_GRACE_MS) return false
         var energy = 0.0
         for (index in 0 until length) {
             val sample = buffer[index] / 32768.0
@@ -724,12 +787,15 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 bargeFrames = 0
                 paused = false
                 resumeAfterPause = false
+                if (captureInterjections) interjectionArmed = true
                 CrashLog.note(context, TAG, "barge-in (rms=$rms)")
                 onBargeIn?.invoke()
+                return true
             }
         } else {
             bargeFrames = 0
         }
+        return false
     }
 
     private fun feed(engine: OnlineRecognizer, stream: OnlineStream, samples: FloatArray): String {
@@ -808,12 +874,24 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     private fun publish(text: String) {
         val corrected = AsrHotwords.correct(text, hotwordNames)
-        if (corrected == lastResult) return
         // Punctuation and truecase on the finished sentence only: it makes a
         // dictated note read like English and gives the multi-command
         // splitter real sentence boundaries. Off unless the model is
         // installed, and failure falls back to the raw transcript.
         val punctuated = Punctuator.punctuate(context, corrected)
+        if (interjectionArmed) {
+            // The answer to a question the assistant was still asking: it
+            // takes the fast path in the service instead of the transcript
+            // queue, and the flag is spent so nothing leaks onward.
+            interjectionArmed = false
+            captureInterjections = false
+            lastResult = punctuated
+            _state.update { it.copy(finalText = punctuated, partial = "") }
+            CrashLog.note(context, TAG, "interjection: ${punctuated.take(60)}")
+            onInterjection?.invoke(punctuated)
+            return
+        }
+        if (punctuated == lastResult) return
         lastResult = punctuated
         _state.update { it.copy(finalText = punctuated, partial = "") }
         _transcripts.tryEmit(punctuated)
@@ -902,6 +980,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
         /** Audio kept before VAD reports speech, so the first word is not clipped. */
         const val PRE_ROLL_SAMPLES = SAMPLE_RATE * 4 / 10
+
+        /** How much pre-barge audio is replayed into the recogniser. */
+        const val PAUSE_PRE_ROLL_SAMPLES = SAMPLE_RATE * 2
 
         /** Decode a very long turn rather than buffering forever. */
         const val MAX_UTTERANCE_SAMPLES = SAMPLE_RATE * 20

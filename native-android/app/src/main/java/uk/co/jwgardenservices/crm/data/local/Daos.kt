@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 import uk.co.jwgardenservices.crm.data.model.Client
+import uk.co.jwgardenservices.crm.data.model.ClientVisitNote
 import uk.co.jwgardenservices.crm.data.model.Enquiry
 import uk.co.jwgardenservices.crm.data.model.Invoice
 import uk.co.jwgardenservices.crm.data.model.InvoiceEmailEvent
@@ -297,6 +298,18 @@ interface JobTaskDao {
 
     @Query("DELETE FROM job_tasks")
     suspend fun clear()
+}
+
+@Dao
+interface ClientVisitNoteDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(note: ClientVisitNote)
+
+    @Query("SELECT * FROM client_visit_notes WHERE clientId = :clientId")
+    suspend fun forClient(clientId: String): ClientVisitNote?
+
+    @Query("DELETE FROM client_visit_notes WHERE clientId = :clientId")
+    suspend fun deleteForClient(clientId: String)
 }
 
 @Dao

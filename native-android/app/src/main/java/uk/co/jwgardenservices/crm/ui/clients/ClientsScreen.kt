@@ -206,7 +206,8 @@ fun ClientsScreen(viewModel: CrmViewModel, isStaff: Boolean) {
                 }
             },
             loadAliases = { id -> viewModel.voiceAliases(id) },
-            onSave = { draft, aliasText ->
+            loadVisitNote = { id -> viewModel.nextVisitNote(id) },
+            onSave = { draft, aliasText, visitNoteText ->
                 val target = editing
                 scope.launch {
                     saveError = null
@@ -219,6 +220,7 @@ fun ClientsScreen(viewModel: CrmViewModel, isStaff: Boolean) {
                             if (aliases.isNotEmpty() || aliasText.isNotBlank()) {
                                 viewModel.saveVoiceAliases(target.id, aliases)
                             }
+                            viewModel.saveNextVisitNote(target.id, visitNoteText.trim())
                         }
                         creating = false
                         editing = null
@@ -320,8 +322,9 @@ private fun ClientEditorDialog(
     errorMessage: String?,
     onDismiss: () -> Unit,
     loadAliases: suspend (String) -> List<String>,
-    onSave: (ClientDraft, String) -> Unit,
+    onSave: (ClientDraft, String, String) -> Unit,
     onDelete: (() -> Unit)?,
+    loadVisitNote: suspend (String) -> String? = { null },
 ) {
     var name by remember(existing?.id) { mutableStateOf(existing?.name.orEmpty()) }
     var address by remember(existing?.id) { mutableStateOf(existing?.address.orEmpty()) }
@@ -329,10 +332,12 @@ private fun ClientEditorDialog(
     var email by remember(existing?.id) { mutableStateOf(existing?.email.orEmpty()) }
     var notes by remember(existing?.id) { mutableStateOf(existing?.notes.orEmpty()) }
     var aliases by remember(existing?.id) { mutableStateOf("") }
+    var visitNote by remember(existing?.id) { mutableStateOf("") }
     var loadedAliases by remember(existing?.id) { mutableStateOf(false) }
     LaunchedEffect(existing?.id) {
         val id = existing?.id ?: return@LaunchedEffect
         aliases = runCatching { loadAliases(id) }.getOrDefault(emptyList()).joinToString(", ")
+        visitNote = runCatching { loadVisitNote(id) }.getOrNull().orEmpty()
         loadedAliases = true
     }
     var billingMode by remember(existing?.id) { mutableStateOf(existing?.billingMode ?: "hourly") }
@@ -411,6 +416,15 @@ private fun ClientEditorDialog(
                         label = { Text("Spoken nicknames") },
                         placeholder = { Text("the rectory, Smiths…") },
                         supportingText = { Text("What you actually call them on a call.") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = visitNote,
+                        onValueChange = { visitNote = it },
+                        label = { Text("Note for next visit") },
+                        placeholder = { Text("Get compost, check the fence post…") },
+                        supportingText = { Text("Spoken back at the start of the next call.") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -502,6 +516,7 @@ private fun ClientEditorDialog(
                                     paymentReminders = reminders,
                                 ),
                                 aliases,
+                                visitNote,
                             )
                         },
                     ) {
