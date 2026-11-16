@@ -18,6 +18,7 @@ import uk.co.jwgardenservices.crm.data.model.ScheduledJob
 import uk.co.jwgardenservices.crm.data.model.Settings
 import uk.co.jwgardenservices.crm.data.model.TeamMember
 import uk.co.jwgardenservices.crm.data.model.Visit
+import uk.co.jwgardenservices.crm.data.model.VoiceAlias
 
 @Dao
 interface ClientDao {
@@ -295,6 +296,24 @@ interface JobTaskDao {
     suspend fun deleteById(id: String)
 
     @Query("DELETE FROM job_tasks")
+    suspend fun clear()
+}
+
+@Dao
+interface VoiceAliasDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(items: List<VoiceAlias>)
+
+    @Query("SELECT * FROM voice_aliases")
+    suspend fun all(): List<VoiceAlias>
+
+    @Query("SELECT * FROM voice_aliases WHERE clientId = :clientId ORDER BY alias")
+    suspend fun forClient(clientId: String): List<VoiceAlias>
+
+    @Query("DELETE FROM voice_aliases WHERE clientId = :clientId")
+    suspend fun deleteForClient(clientId: String)
+
+    @Query("DELETE FROM voice_aliases")
     suspend fun clear()
 }
 

@@ -63,6 +63,7 @@ import uk.co.jwgardenservices.crm.data.model.SettingsDraft
 import uk.co.jwgardenservices.crm.data.model.TeamMember
 import uk.co.jwgardenservices.crm.data.model.Visit
 import uk.co.jwgardenservices.crm.data.model.VisitDraft
+import uk.co.jwgardenservices.crm.data.model.VoiceAlias
 import uk.co.jwgardenservices.crm.data.model.WorkspaceRow
 import uk.co.jwgardenservices.crm.domain.atTime
 import uk.co.jwgardenservices.crm.domain.Frequency
@@ -422,6 +423,68 @@ class CrmRepository(
     suspend fun client(id: String): Client? = clients.findById(id)
 
     suspend fun getSettings(): Settings? = settings.get()
+
+    // --- voice aliases (local only, never synced) -------------------------
+
+    suspend fun voiceAliasesFor(clientId: String): List<String> =
+        database.voiceAliasDao().forClient(clientId).map { it.alias }
+
+    /** All aliases with the client they belong to, for recogniser biasing. */
+    suspend fun allVoiceAliases(): List<Pair<String, String>> =
+        database.voiceAliasDao().all().map { it.clientId to it.alias }
+
+    /** Replace a client's nicknames wholesale; the editor sends the full set. */
+    suspend fun saveVoiceAliases(clientId: String, aliases: List<String>) {
+        val dao = database.voiceAliasDao()
+        dao.deleteForClient(clientId)
+        val rows = aliases
+            .map { it.trim().lowercase() }
+            .filter { it.length >= 3 }
+            .distinct()
+            .take(12)
+            .map { VoiceAlias(id = UUID.randomUUID().toString(), clientId = clientId, alias = it) }
+        if (rows.isNotEmpty()) dao.upsertAll(rows)
+    }
+
+    /**
+     * Undo a voice "mark done": the job goes back to scheduled with its
+     * visit link cleared. Any hours already logged stay as unbilled work.
+     */
+    suspend fun reopenJob(jobId: String) {
+        val job = jobs.findById(jobId) ?: return
+        val updated = job.copy(status = "scheduled", visitId = null, updatedAt = null)
+        database.withTransaction {
+            jobs.upsert(updated)
+            enqueue(
+                label = "Job reopened",
+                ops = listOf(
+                    QueuedOpDto(
+                        kind = QueuedOpDto.UPDATE,
+                        table = "scheduled_jobs",
+                        payload = OfflineJson.encodeToJsonElement(
+                            ScheduledJob.serializer(),
+                            updated.copy(createdAt = null, updatedAt = null),
+                        ).jsonObject,
+                        match = idMatch(jobId),
+                    ),
+                ),
+            )
+        }
+        onQueued()
+    }
+
+    /**
+     * The voice undo for a logged visit: remove it, and reopen whichever job
+     * it completed, so "log two hours and mark it done" followed by "undo"
+     * restores both sides instead of leaving a done job with a dead link.
+     */
+    suspend fun deleteVoiceVisit(id: String) {
+        val completedJob = observeJobs().first().firstOrNull { it.visitId == id }
+        deleteVisit(id)
+        if (completedJob != null && completedJob.status != "scheduled") {
+            reopenJob(completedJob.id)
+        }
+    }
 
     /**
      * Invoices need the Edge Function for server-side numbering and line

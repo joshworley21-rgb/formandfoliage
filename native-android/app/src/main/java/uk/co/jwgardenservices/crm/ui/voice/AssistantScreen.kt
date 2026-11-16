@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -41,11 +42,14 @@ import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Undo
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -53,6 +57,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,10 +74,13 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.widget.Toast
 import uk.co.jwgardenservices.crm.voice.AssistantService
 import uk.co.jwgardenservices.crm.voice.AssistantTurn
+import uk.co.jwgardenservices.crm.voice.CallLedger
 import uk.co.jwgardenservices.crm.voice.SherpaSpeechService
 
 /**
@@ -94,6 +102,7 @@ fun AssistantScreen() {
     var state by remember { mutableStateOf(SherpaSpeechService.UiState()) }
     var speaking by remember { mutableStateOf(false) }
     var thinking by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     var callActive by remember { mutableStateOf(false) }
     var dialling by remember { mutableStateOf(false) }
     var muted by remember { mutableStateOf(false) }
@@ -163,6 +172,8 @@ fun AssistantScreen() {
         launch { bound.connectedAt.collect { connectedAt = it } }
         launch { bound.turns.collect { turns = it } }
     }
+    // The ledger is process-wide, so the card outlives the service.
+    val ledger by CallLedger.actions.collectAsStateWithLifecycle()
 
     val connected = callActive && !dialling &&
         state.phase == SherpaSpeechService.Phase.Listening && !speaking
@@ -334,6 +345,19 @@ fun AssistantScreen() {
                     )
                 }
             }
+        } else if (ledger.isNotEmpty()) {
+            PostCallSummary(
+                entries = ledger,
+                onUndo = { entry ->
+                    scope.launch {
+                        val reply = CallLedger.undo(entry.id)
+                        if (reply != null) {
+                            Toast.makeText(context, reply, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+                onDismiss = { CallLedger.clear() },
+            )
         } else {
             CallButton(
                 label = if (granted) "Call" else "Allow microphone",
@@ -531,6 +555,62 @@ private fun Transcript(
                         Bubble(text = partial, fromUser = true, pending = true)
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Everything the last call changed, one row per action, each with its own
+ * undo — the two-second check on the drive before trusting the paperwork.
+ */
+@Composable
+private fun PostCallSummary(
+    entries: List<CallLedger.Entry>,
+    onUndo: (CallLedger.Entry) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFF1E2A1C),
+        contentColor = CallOn,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Text(
+                text = "This call",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(6.dp))
+            entries.forEach { entry ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Undo,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(14.dp)
+                            .alpha(if (entry.undo != null) 1f else 0.25f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = entry.label,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (entry.undo != null) {
+                        TextButton(
+                            onClick = { onUndo(entry) },
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                        ) { Text("Undo") }
+                    }
+                }
+            }
+            TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) {
+                Text("Dismiss", style = MaterialTheme.typography.labelSmall)
             }
         }
     }

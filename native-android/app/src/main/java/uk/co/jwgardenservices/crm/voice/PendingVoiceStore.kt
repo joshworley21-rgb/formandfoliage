@@ -56,6 +56,12 @@ object PendingVoiceStore {
         val lower = text.lowercase()
         clients.firstOrNull { it.name.isNotBlank() && lower.contains(it.name.lowercase()) }
             ?.let { return it }
+        // A nickname counts too: "a note for the rectory" belongs to whoever
+        // the rectory is.
+        runCatching { repository.allVoiceAliases() }.getOrDefault(emptyList())
+            .firstOrNull { (_, alias) -> alias.isNotBlank() && lower.contains(alias) }
+            ?.let { (clientId, _) -> clients.firstOrNull { it.id == clientId } }
+            ?.let { return it }
 
         val now = Instant.now()
         val today = now.localDate()

@@ -131,6 +131,12 @@ object IntentRules {
                 Regex("\\brate\\s+(?:to|of|at)\\s*£?\\d").containsMatchIn(text) ->
                 SpokenIntent.AdjustCharge
 
+            // Trade-counter receipt: money plus the materials word, before
+            // the "log" catch-all turns it into an hours command.
+            text.containsAny("materials", "receipt", "parts") &&
+                Regex("£\\s*\\d|\\b\\d+(?:\\.\\d+)?\\b").containsMatchIn(text) ->
+                SpokenIntent.AddExpense
+
             text.containsAny("owe me", "owes", "owed", "unpaid", "outstanding", "invoice") ->
                 SpokenIntent.WhoOwesMe
             text.containsAny("earn", "earned", "earnings", "takings", "taken this week", "made this week", "make this week", "income") ->
@@ -218,7 +224,8 @@ object IntentRules {
         SpokenIntent.TodayEarnings,
         SpokenIntent.DayWrapUp,
         SpokenIntent.RaiseInvoice,
-        SpokenIntent.AdjustCharge -> true
+        SpokenIntent.AdjustCharge,
+        SpokenIntent.AddExpense -> true
 
         else -> false
     }

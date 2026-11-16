@@ -134,6 +134,7 @@ class VoiceActionRunner(
             SpokenIntent.DayWrapUp -> startWrapUp()
             SpokenIntent.RaiseInvoice -> raiseInvoice(text)
             SpokenIntent.AdjustCharge -> adjustCharge(text)
+            SpokenIntent.AddExpense -> addExpense(text)
             else -> null
         }
     }
@@ -148,7 +149,7 @@ class VoiceActionRunner(
         val text = transcript.lowercase()
         val hours = spokenHours(text) ?: pending.hours
         val clients = repository.observeClients().first()
-        val client = pending.client ?: clients.firstOrNull { matches(it.name, text) }
+        val client = pending.client ?: clientFor(clients, text)
 
         if (hours == null && client == null) {
             this.pending = null
@@ -346,6 +347,11 @@ class VoiceActionRunner(
         wrapUpBillables.getOrPut(item.clientId) { mutableListOf() } += visitId
         lastUndo = Undo.Visit(visitId, item.clientName)
         lastVoiceVisit = VoiceVisit(visitId, item.clientId, item.clientName, materials = 0.0)
+        CallLedger.record("Logged ${hoursLabel(safeHours)} for ${item.clientName}") {
+            runCatching { repository.deleteVoiceVisit(visitId) }
+            if (visitId == lastVoiceVisit?.id) lastVoiceVisit = null
+            "Removed that visit."
+        }
         state.jobsLogged++
         state.hoursLogged = round2(state.hoursLogged + safeHours)
         state.amountLogged = round2(state.amountLogged + visit.amount)
@@ -433,7 +439,7 @@ class VoiceActionRunner(
         // No name spoken: the call briefing just said where the owner is, so
         // use the job on the schedule right now. Today only — "log four hours
         // yesterday" must not land on this afternoon's client.
-        val client = clients.firstOrNull { matches(it.name, text) }
+        val client = clientFor(clients, text)
             ?: if (date == LocalDate.now()) inferredClient(clients) else null
 
         if (hours == null && client == null) {
@@ -476,6 +482,11 @@ class VoiceActionRunner(
         val visitId = repository.saveVisit(draft)
         lastUndo = Undo.Visit(visitId, client.name)
         lastVoiceVisit = VoiceVisit(visitId, client.id, client.name, materials = 0.0)
+        CallLedger.record("Logged ${hoursLabel(hours)} for ${client.name}") {
+            runCatching { repository.deleteVoiceVisit(visitId) }
+            if (visitId == lastVoiceVisit?.id) lastVoiceVisit = null
+            "Removed that visit."
+        }
         val whenText = if (date == LocalDate.now()) "" else " for ${date.dayOfMonth}/${date.monthValue}"
         return VoiceLines.pick(
             "Logged ${hoursLabel(hours)} for ${client.name}$whenText, ${money(draft.amount)}.",
@@ -568,7 +579,7 @@ class VoiceActionRunner(
         val jobs = scheduledJobs()
         if (jobs.isEmpty()) return "There is no scheduled job to mark done."
 
-        val named = clients.firstOrNull { matches(it.name, text) }
+        val named = clientFor(clients, text)
         val today = LocalDate.now()
         val target = when {
             named != null -> jobs.firstOrNull { (job, _) -> job.clientId == named.id }
@@ -652,7 +663,13 @@ class VoiceActionRunner(
                     // Close the job against hours that are already recorded.
                     repository.completeJobWithVisit(waiting.jobId, visitId)
                 } else {
+                    // The RPC creates its visit server-side; the local undo
+                    // can only reopen the job.
                     repository.staffCompleteJob(waiting.jobId, waiting.hours, waiting.description)
+                }
+                CallLedger.record("Marked the job for ${waiting.clientName} done") {
+                    repository.reopenJob(waiting.jobId)
+                    "That job is back on the schedule."
                 }
                 VoiceLines.pick(
                     "Marked the job for ${waiting.clientName} done, ${hoursLabel(waiting.hours)}.",
@@ -677,8 +694,9 @@ class VoiceActionRunner(
         lastUndo = null
         return when (action) {
             is Undo.Visit -> {
-                runCatching { repository.deleteVisit(action.id) }
+                runCatching { repository.deleteVoiceVisit(action.id) }
                     .getOrElse { return "I couldn't remove that visit." }
+                if (action.id == lastVoiceVisit?.id) lastVoiceVisit = null
                 VoiceLines.pick(
                     "Removed the visit for ${action.clientName}.",
                     "Taken off — the visit for ${action.clientName} is gone.",
@@ -706,7 +724,7 @@ class VoiceActionRunner(
             RegexOption.IGNORE_CASE,
         ).find(transcript) ?: return "What should I note?"
         val body = match.groupValues[1]
-        val client = clients.firstOrNull { matches(it.name, body.lowercase()) }
+        val client = clientFor(clients, body.lowercase())
             ?: return "Which client is that note for?"
         // "note for the Smiths: gate sticks" keeps the colon body; otherwise
         // strip the client's own name so it is not read back as the note.
@@ -731,6 +749,15 @@ class VoiceActionRunner(
         }
         repository.updateClient(client, clientDraft(client, combined))
         lastUndo = Undo.Note(client.id, previous, client.name)
+        CallLedger.record("Note added for ${client.name}") {
+            val current = repository.observeClients().first().firstOrNull { it.id == client.id }
+            if (current != null) {
+                repository.updateClient(current, clientDraft(current, previous))
+                "Taken that note back off."
+            } else {
+                "That client is already gone."
+            }
+        }
         return VoiceLines.pick(
             "Noted for ${client.name}.",
             "Got it — that's on ${client.name}'s notes.",
@@ -756,9 +783,65 @@ class VoiceActionRunner(
      * owner has seen the line items, and a misheard sentence cannot email a
      * client.
      */
+    /**
+     * Trade-counter receipt: "stick £40 of materials onto the Smiths". The
+     * materials-only visit is unbilled, so it flows into ready-to-bill and
+     * onto the next draft invoice without another word. Deliberately not
+     * [priceVisit]d: that would add a fixed-price client's whole fixed price
+     * on top of the receipt.
+     */
+    private suspend fun addExpense(text: String): String {
+        val amount = Regex("£?(\\d+(?:\\.\\d+)?)").find(text)
+            ?.groupValues?.get(1)?.toDoubleOrNull()
+            ?: return "How much was it?"
+        if (amount <= 0.0 || amount > 100_000.0) return "That amount doesn't look right."
+
+        val clients = repository.observeClients().first()
+        val client = clientFor(clients, text)
+        if (client == null) {
+            // "add £10 of materials" straight after logging a visit belongs
+            // to that visit, not to nobody.
+            return if (lastVoiceVisit != null) adjustCharge(text) else "Which client was that for?"
+        }
+
+        val note = text
+            .substringAfter(Regex("£[\\d.]+").find(text)?.value ?: "", text)
+            .replaceFirst(Regex("^(?:\\s*(?:of|for)\\s+)(.*)$"), "$1")
+            .substringBefore(Regex("\\s+(?:onto|on|for|at)\\s+"))
+            .replace(Regex("\\b(?:materials?|parts)\\b"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .removeSuffix(".")
+            .ifBlank { "materials" }
+        val lineItem = TradeTerms.lineItemFor(note) ?: "Materials — $note"
+
+        val draft = VisitDraft(
+            clientId = client.id,
+            visitDate = LocalDate.now().toString(),
+            hours = 0.0,
+            materialsCost = round2(amount),
+            description = lineItem,
+            amount = round2(amount),
+        )
+        val visitId = repository.saveVisit(draft)
+        lastUndo = Undo.Visit(visitId, client.name)
+        lastVoiceVisit = VoiceVisit(visitId, client.id, client.name, materials = round2(amount))
+        CallLedger.record("£${format(amount)} materials for ${client.name}") {
+            runCatching { repository.deleteVoiceVisit(visitId) }
+            if (visitId == lastVoiceVisit?.id) lastVoiceVisit = null
+            "Removed the materials."
+        }
+        return VoiceLines.pick(
+            "£${format(amount)} of $note down for ${client.name} — " +
+                "it'll be on their next invoice.",
+            "Sorted, £${format(amount)} of $note on ${client.name}'s account. " +
+                "Next invoice picks it up.",
+        )
+    }
+
     private suspend fun raiseInvoice(text: String): String {
         val clients = repository.observeClients().first()
-        val client = clients.firstOrNull { matches(it.name, text) } ?: inferredClient(clients)
+        val client = clientFor(clients, text) ?: inferredClient(clients)
             ?: return "Which client is the invoice for?"
 
         val visits = repository.observeVisits().first()
@@ -785,6 +868,11 @@ class VoiceActionRunner(
         val visitsText = if (visits.size == 1) "one visit" else "${visits.size} visits"
         val totalValue = if (made.total > 0.0) made.total else expected
         pendingSend = PendingSend(made.invoiceId, client.name, totalValue)
+        CallLedger.record("Draft invoice for ${client.name}, ${money(totalValue)}") {
+            runCatching { repository.deleteInvoice(made.invoiceId) }
+            pendingSend = null
+            "That draft invoice is gone."
+        }
         return VoiceLines.pick(
             "Draft invoice for ${client.name} — $visitsText, ${money(totalValue)}. " +
                 "Send it, or leave it in drafts?",
@@ -909,7 +997,27 @@ class VoiceActionRunner(
                 missed = current.missed,
             ),
         )
+        val before = current
         lastVoiceVisit = last.copy(materials = safeMaterials)
+        CallLedger.record(
+            "Visit for ${last.clientName} adjusted to ${money(amount)}",
+        ) {
+            repository.saveVisit(
+                VisitDraft(
+                    id = before.id,
+                    clientId = before.clientId,
+                    visitDate = before.visitDate,
+                    hours = before.hours,
+                    materialsCost = before.materialsCost,
+                    materialsNote = before.materialsNote,
+                    description = before.description,
+                    amount = before.amount,
+                    missed = before.missed,
+                ),
+            )
+            lastVoiceVisit = last.copy(materials = before.materialsCost)
+            "Put that visit back to ${money(before.amount)}."
+        }
         val extra = note?.takeIf { it.isNotBlank() }?.let { " with $it" }.orEmpty()
         return VoiceLines.pick(
             "Sorted — that visit is ${money(amount)} now$extra.",
@@ -947,8 +1055,7 @@ class VoiceActionRunner(
     }
 
     private suspend fun invoiceStatus(text: String): String {
-        val client = repository.observeClients().first()
-            .firstOrNull { matches(it.name, text) }
+        val client = clientFor(repository.observeClients().first(), text)
             ?: return "Which client's invoice?"
         val latest = repository.observeInvoices().first()
             .filter { it.clientId == client.id }
@@ -969,8 +1076,7 @@ class VoiceActionRunner(
     }
 
     private suspend fun nextJobForClient(text: String): String {
-        val client = repository.observeClients().first()
-            .firstOrNull { matches(it.name, text) }
+        val client = clientFor(repository.observeClients().first(), text)
             ?: return "Which client?"
         val now = Instant.now()
         val next = scheduledJobs()
@@ -996,7 +1102,7 @@ class VoiceActionRunner(
 
     private suspend fun whoOwesMe(text: String): String {
         val clients = repository.observeClients().first()
-        val named = clients.firstOrNull { matches(it.name, text) }
+        val named = clientFor(clients, text)
         val outstanding = repository.observeInvoices().first()
             .filter { it.status != "paid" && it.status != "draft" && it.total > 0 }
             .filter { named == null || it.clientId == named.id }
@@ -1079,8 +1185,7 @@ class VoiceActionRunner(
     }
 
     private suspend fun clientInfo(text: String): String {
-        val client = repository.observeClients().first()
-            .firstOrNull { matches(it.name, text) }
+        val client = clientFor(repository.observeClients().first(), text)
             ?: return "I couldn't match a client in that."
         val details = listOfNotNull(
             client.phone?.takeIf { it.isNotBlank() }?.let { "phone $it" },
@@ -1095,8 +1200,7 @@ class VoiceActionRunner(
     }
 
     private suspend fun lastVisit(text: String): String {
-        val client = repository.observeClients().first()
-            .firstOrNull { matches(it.name, text) }
+        val client = clientFor(repository.observeClients().first(), text)
             ?: return "I couldn't match a client in that."
         val last = repository.observeVisits().first()
             .filter { it.clientId == client.id && !it.missed }
@@ -1139,6 +1243,22 @@ class VoiceActionRunner(
             .filter { it.status == "scheduled" }
             .mapNotNull { job -> parseTimestamp(job.startsAt)?.let { job to it } }
             .sortedBy { (_, starts) -> starts }
+
+    /**
+     * Match a spoken sentence against a client's name or any of the
+     * nicknames the owner saved for it ("the rectory", "Smiths"). The alias
+     * map is read once per sentence, not per client.
+     */
+    private suspend fun clientFor(clients: List<Client>, text: String): Client? {
+        val lower = text.lowercase()
+        val aliases = runCatching { repository.allVoiceAliases() }.getOrDefault(emptyList())
+        val byClient = aliases.groupBy({ it.first }, { it.second })
+        val named = clients.firstOrNull { matches(it.name, lower) }
+        if (named != null) return named
+        return clients.firstOrNull { client ->
+            byClient[client.id]?.any { alias -> matches(alias, lower) } == true
+        }
+    }
 
     /**
      * The job the owner is most likely standing in: the booked window

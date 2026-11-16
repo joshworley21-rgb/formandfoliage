@@ -177,6 +177,14 @@ class CrmViewModel(
         }
     }
 
+    /** Nicknames the voice assistant answers to; local to this phone. */
+    suspend fun voiceAliases(clientId: String): List<String> =
+        repository.voiceAliasesFor(clientId)
+
+    suspend fun saveVoiceAliases(clientId: String, aliases: List<String>) {
+        withSaving { repository.saveVoiceAliases(clientId, aliases) }
+    }
+
     suspend fun deleteClient(id: String) {
         withSaving { repository.deleteClient(id) }
     }

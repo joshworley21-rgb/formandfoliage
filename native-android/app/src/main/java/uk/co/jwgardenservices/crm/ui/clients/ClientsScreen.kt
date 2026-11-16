@@ -205,11 +205,20 @@ fun ClientsScreen(viewModel: CrmViewModel, isStaff: Boolean) {
                     saveError = null
                 }
             },
-            onSave = { draft ->
+            loadAliases = { id -> viewModel.voiceAliases(id) },
+            onSave = { draft, aliasText ->
                 scope.launch {
                     saveError = null
                     try {
                         viewModel.saveClient(draft, editing)
+                        if (editing != null) {
+                            val aliases = aliasText.split(',')
+                                .map { it.trim() }
+                                .filter { it.isNotEmpty() }
+                            if (aliases.isNotEmpty() || aliasText.isNotBlank()) {
+                                viewModel.saveVoiceAliases(editing.id, aliases)
+                            }
+                        }
                         creating = false
                         editing = null
                     } catch (error: Exception) {
@@ -309,7 +318,8 @@ private fun ClientEditorDialog(
     saving: Boolean,
     errorMessage: String?,
     onDismiss: () -> Unit,
-    onSave: (ClientDraft) -> Unit,
+    loadAliases: suspend (String) -> List<String>,
+    onSave: (ClientDraft, String) -> Unit,
     onDelete: (() -> Unit)?,
 ) {
     var name by remember(existing?.id) { mutableStateOf(existing?.name.orEmpty()) }
@@ -317,6 +327,13 @@ private fun ClientEditorDialog(
     var phone by remember(existing?.id) { mutableStateOf(existing?.phone.orEmpty()) }
     var email by remember(existing?.id) { mutableStateOf(existing?.email.orEmpty()) }
     var notes by remember(existing?.id) { mutableStateOf(existing?.notes.orEmpty()) }
+    var aliases by remember(existing?.id) { mutableStateOf("") }
+    var loadedAliases by remember(existing?.id) { mutableStateOf(false) }
+    LaunchedEffect(existing?.id) {
+        val id = existing?.id ?: return@LaunchedEffect
+        aliases = runCatching { loadAliases(id) }.getOrDefault(emptyList()).joinToString(", ")
+        loadedAliases = true
+    }
     var billingMode by remember(existing?.id) { mutableStateOf(existing?.billingMode ?: "hourly") }
     var hourlyRate by remember(existing?.id) {
         mutableStateOf(existing?.hourlyRate?.let { if (it == 0.0) "" else it.toString() } ?: "")
@@ -385,6 +402,18 @@ private fun ClientEditorDialog(
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2,
                 )
+
+                if (loadedAliases) {
+                    OutlinedTextField(
+                        value = aliases,
+                        onValueChange = { aliases = it },
+                        label = { Text("Spoken nicknames") },
+                        placeholder = { Text("the rectory, Smiths…") },
+                        supportingText = { Text("What you actually call them on a call.") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
 
                 Text("How this client is charged", style = MaterialTheme.typography.titleSmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -471,6 +500,7 @@ private fun ClientEditorDialog(
                                     fixedPrice = fixedPrice.toDoubleOrNull() ?: 0.0,
                                     paymentReminders = reminders,
                                 ),
+                                aliases,
                             )
                         },
                     ) {

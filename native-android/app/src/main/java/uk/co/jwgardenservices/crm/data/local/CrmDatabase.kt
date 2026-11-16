@@ -14,6 +14,7 @@ import uk.co.jwgardenservices.crm.data.model.InvoiceItem
 import uk.co.jwgardenservices.crm.data.model.JobTask
 import uk.co.jwgardenservices.crm.data.model.PendingVoiceCommand
 import uk.co.jwgardenservices.crm.data.model.Quote
+import uk.co.jwgardenservices.crm.data.model.VoiceAlias
 import uk.co.jwgardenservices.crm.data.model.QuoteItem
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
 import uk.co.jwgardenservices.crm.data.model.Settings
@@ -36,8 +37,9 @@ import uk.co.jwgardenservices.crm.data.model.Visit
         TeamMember::class,
         OutboxEntry::class,
         PendingVoiceCommand::class,
+        VoiceAlias::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = true,
 )
 abstract class CrmDatabase : RoomDatabase() {
@@ -54,6 +56,7 @@ abstract class CrmDatabase : RoomDatabase() {
     abstract fun settingsDao(): SettingsDao
     abstract fun teamMemberDao(): TeamMemberDao
     abstract fun pendingVoiceDao(): PendingVoiceDao
+    abstract fun voiceAliasDao(): VoiceAliasDao
     abstract fun outboxDao(): OutboxDao
 }
 
@@ -80,6 +83,24 @@ private val MIGRATION_11_12 = object : Migration(11, 12) {
     }
 }
 
+/**
+ * Additive: nicknames the owner says for clients ("the rectory"). Local
+ * only — never synced — so the outbox payloads stay unchanged.
+ */
+private val MIGRATION_12_13 = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `voice_aliases` (" +
+                "`id` TEXT NOT NULL, " +
+                "`clientId` TEXT NOT NULL, " +
+                "`alias` TEXT NOT NULL, " +
+                "PRIMARY KEY(`id`))",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_voice_aliases_clientId` ON `voice_aliases` (`clientId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_voice_aliases_alias` ON `voice_aliases` (`alias`)")
+    }
+}
+
 object DatabaseProvider {
     @Volatile
     private var instance: CrmDatabase? = null
@@ -91,7 +112,7 @@ object DatabaseProvider {
                 CrmDatabase::class.java,
                 "jw-crm.db",
             )
-                .addMigrations(MIGRATION_10_11, MIGRATION_11_12)
+                .addMigrations(MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
                 // Only reached for versions older than 10, which never held
                 // unsynced work from a shipped build. From 11 onward every
                 // schema change needs a real migration so the outbox survives.

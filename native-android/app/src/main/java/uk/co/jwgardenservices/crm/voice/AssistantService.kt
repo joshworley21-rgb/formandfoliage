@@ -238,6 +238,8 @@ class AssistantService : Service() {
         CrashLog.note(this, TAG, if (fresh) "call starting" else "call resuming")
         if (fresh) {
             heardInCall = false
+            // The summary card is about this call only.
+            CallLedger.clear()
             // A new call must not inherit a reply from the last one.
             speaker.stopPlayback()
             cloudVoice?.stop()
@@ -491,6 +493,8 @@ class AssistantService : Service() {
         }
         val result = repository.sendInvoice(invoiceId, base64)
         if (result.sent) {
+            // Sent money cannot be un-sent; the card row stays, undoless.
+            CallLedger.record("Invoice emailed to ${result.to ?: client.name}")
             "Sent to ${result.to ?: client.name}."
         } else {
             result.reason ?: "Email isn't set up yet, so it's still in drafts."
