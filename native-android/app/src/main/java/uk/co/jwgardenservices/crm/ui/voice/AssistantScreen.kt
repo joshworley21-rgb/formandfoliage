@@ -9,6 +9,11 @@ import android.content.pm.PackageManager
 import android.os.IBinder
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,13 +36,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -45,11 +49,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -61,23 +67,23 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import uk.co.jwgardenservices.crm.voice.AssistantService
 import uk.co.jwgardenservices.crm.voice.AssistantTurn
 import uk.co.jwgardenservices.crm.voice.SherpaSpeechService
 
 /**
- * The Assistant tab, laid out like a phone call.
+ * The Assistant tab, styled as a phone call.
  *
  * Opening the tab binds to [AssistantService] but does not dial. The green
  * button starts the call: a ringback plays while the recogniser and voice
- * warm up, then the assistant answers "Hello?" and the microphone opens. The
- * service keeps the loaded models when the screen leaves, so the next call is
- * quick, and the red button hangs up.
- *
- * Every recognised sentence and every spoken reply is kept in the service's
- * rolling transcript, so the other person's words do not vanish when the
- * assistant starts talking.
+ * warm up, then the assistant answers and the timer starts. With warm models
+ * a repeat call resumes instantly without the dial tone. While connected the
+ * screen looks like a call sheet: glowing orb, name, timer, speaking bars,
+ * status pill and the rolling transcript above the Mute / Speaker / End
+ * controls. The service keeps the loaded models when the screen leaves, so
+ * the next call is quick.
  */
 @Composable
 fun AssistantScreen() {
@@ -88,6 +94,9 @@ fun AssistantScreen() {
     var thinking by remember { mutableStateOf(false) }
     var callActive by remember { mutableStateOf(false) }
     var dialling by remember { mutableStateOf(false) }
+    var muted by remember { mutableStateOf(false) }
+    var speakerOn by remember { mutableStateOf(false) }
+    var connectedAt by remember { mutableLongStateOf(0L) }
     var turns by remember { mutableStateOf<List<AssistantTurn>>(emptyList()) }
     var granted by remember { mutableStateOf(micGranted(context)) }
 
@@ -147,10 +156,13 @@ fun AssistantScreen() {
         launch { bound.thinking.collect { thinking = it } }
         launch { bound.callActive.collect { callActive = it } }
         launch { bound.dialling.collect { dialling = it } }
+        launch { bound.muted.collect { muted = it } }
+        launch { bound.speakerOn.collect { speakerOn = it } }
+        launch { bound.connectedAt.collect { connectedAt = it } }
         launch { bound.turns.collect { turns = it } }
     }
 
-    val listening = callActive && !dialling &&
+    val connected = callActive && !dialling &&
         state.phase == SherpaSpeechService.Phase.Listening && !speaking
     val status = when {
         !granted -> "Microphone permission needed"
@@ -163,158 +175,289 @@ fun AssistantScreen() {
         state.phase == SherpaSpeechService.Phase.Ready -> "Reconnecting…"
         else -> "Dialling…"
     }
+    val busy = speaking || thinking
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .background(CallBg)
+            .padding(horizontal = 24.dp, vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = "Assistant",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    text = if (callActive) "Hands-free call · on this phone" else "Offline · on this phone",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(
+                text = "Assistant",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = CallDim,
+            )
+            Spacer(Modifier.weight(1f))
             if (turns.isNotEmpty()) {
                 IconButton(onClick = { service?.clearTranscript() }) {
                     Icon(
                         imageVector = Icons.Outlined.Delete,
                         contentDescription = "Clear conversation",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = CallDim,
                     )
                 }
             }
         }
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.weight(1.1f))
 
         CallOrb(
             active = callActive,
-            speaking = speaking || thinking,
+            speaking = busy,
             loading = dialling,
-            level = if (listening) state.level else 0f,
+            level = if (connected) state.level else 0f,
         )
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(18.dp))
 
         Text(
-            text = status,
-            style = MaterialTheme.typography.titleMedium,
+            text = "J W Assistant",
+            style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
-            color = if (state.phase == SherpaSpeechService.Phase.Error) {
-                MaterialTheme.colorScheme.error
-            } else {
-                MaterialTheme.colorScheme.onSurface
-            },
+            color = if (callActive) CallOn else CallDim,
         )
-        if (state.phase == SherpaSpeechService.Phase.Error && state.message != null) {
+
+        // The familiar ticking call timer; runs while the call is connected.
+        CallTimer(startedAt = connectedAt, running = callActive && connectedAt > 0L)
+
+        Spacer(Modifier.weight(0.7f))
+
+        SpeakingBars(
+            active = callActive,
+            speaking = busy,
+            level = if (connected) state.level else 0f,
+        )
+
+        Spacer(Modifier.height(10.dp))
+
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = Color(0xFF1C1C1C),
+        ) {
             Text(
-                text = state.message!!,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 4.dp),
+                text = status,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (state.phase == SherpaSpeechService.Phase.Error) {
+                    Color(0xFFFF8A80)
+                } else {
+                    CallDim
+                },
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
         }
 
-        Spacer(Modifier.height(14.dp))
-
-        Transcript(
-            turns = turns,
-            partial = state.partial,
-            listening = listening,
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-        )
-
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
 
         if (!granted) {
             Text(
                 text = "The assistant needs the microphone to hear you. Nothing is uploaded.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = CallDim,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(8.dp))
         }
+
+        Transcript(
+            turns = turns,
+            partial = state.partial,
+            listening = connected,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(2.4f),
+        )
+
+        Spacer(Modifier.height(14.dp))
+
         if (callActive) {
-            CallButton(
-                label = "End call",
-                container = MaterialTheme.colorScheme.error,
-                content = MaterialTheme.colorScheme.onError,
-                onClick = { service?.endCall() },
-            ) { Icon(Icons.Filled.CallEnd, contentDescription = "End call", modifier = Modifier.size(30.dp)) }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RoundControl(
+                    label = if (muted) "Unmute" else "Mute",
+                    container = if (muted) Color(0xFF5C1F1F) else ControlBg,
+                    content = if (muted) Color(0xFFFF8A80) else CallOn,
+                    onClick = { service?.setMuted(!muted) },
+                ) {
+                    Icon(
+                        imageVector = if (muted) Icons.Filled.MicOff else Icons.Filled.Mic,
+                        contentDescription = if (muted) "Unmute" else "Mute",
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
+                RoundControl(
+                    label = "Speaker",
+                    container = if (speakerOn) Color(0xFF1F3A5C) else ControlBg,
+                    content = if (speakerOn) Color(0xFF8AC6FF) else CallOn,
+                    onClick = { service?.setSpeaker(!speakerOn) },
+                ) {
+                    Icon(
+                        imageVector = if (speakerOn) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
+                        contentDescription = "Toggle speaker",
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
+                RoundControl(
+                    label = "End",
+                    container = Color(0xFFC33B3B),
+                    content = Color.White,
+                    onClick = { service?.endCall() },
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.CallEnd,
+                        contentDescription = "End call",
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
+            }
         } else {
             CallButton(
-                label = "Call",
+                label = if (granted) "Call" else "Allow microphone",
                 container = CallGreen,
                 content = Color.White,
                 onClick = {
                     if (granted) startCall(context) else permission.launch(Manifest.permission.RECORD_AUDIO)
                 },
-            ) { Icon(Icons.Filled.Call, contentDescription = "Call the assistant", modifier = Modifier.size(28.dp)) }
+            ) {
+                Icon(
+                    Icons.Filled.Call,
+                    contentDescription = "Call the assistant",
+                    modifier = Modifier.size(28.dp),
+                )
+            }
         }
 
         Spacer(Modifier.height(6.dp))
     }
 }
 
+/** Phone-call colours, independent of the app theme. */
+private val CallBg = Color(0xFF060606)
+private val CallOn = Color(0xFFF2F2F2)
+private val CallDim = Color(0xFF8F978D)
+private val ControlBg = Color(0xFF232323)
+private val BarGreen = Color(0xFFB6E388)
+
+/** The familiar phone-call green, independent of the app's theme. */
+private val CallGreen = Color(0xFF1B8F3A)
+
+/** Glowing orb at the centre of the call sheet. */
 @Composable
 private fun CallOrb(active: Boolean, speaking: Boolean, loading: Boolean, level: Float) {
-    val container = when {
-        !active -> MaterialTheme.colorScheme.surfaceContainerHigh
-        speaking -> MaterialTheme.colorScheme.secondaryContainer
-        else -> MaterialTheme.colorScheme.primaryContainer
-    }
-    val content = when {
-        !active -> MaterialTheme.colorScheme.onSurfaceVariant
-        speaking -> MaterialTheme.colorScheme.onSecondaryContainer
-        else -> MaterialTheme.colorScheme.onPrimaryContainer
-    }
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    val halo = rememberInfiniteTransition(label = "halo")
+    val glow by halo.animateFloat(
+        initialValue = 0.25f,
+        targetValue = if (active) 0.65f else 0.25f,
+        animationSpec = infiniteRepeatable(tween(1600), RepeatMode.Reverse),
+        label = "glow",
+    )
+    val pulse by halo.animateFloat(
+        initialValue = 0.94f,
+        targetValue = if (speaking) 1.06f else 1f,
+        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+        label = "pulse",
+    )
+
+    Box(
+        modifier = Modifier.size(196.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        // Soft halo behind the orb, breathing only while the call is live.
         Box(
             modifier = Modifier
-                .size(104.dp)
+                .size(196.dp)
                 .clip(CircleShape)
-                .background(container),
+                .background(if (active) BarGreen else Color(0xFF3A3F3A))
+                .alpha(if (active) glow * 0.35f else 0.06f),
+        )
+        Box(
+            modifier = Modifier
+                .size((136 * pulse).dp)
+                .clip(CircleShape)
+                .background(
+                    when {
+                        !active -> Color(0xFF2A2D2A)
+                        speaking -> Color(0xFF37531F)
+                        else -> Color(0xFF1B8F3A)
+                    },
+                ),
             contentAlignment = Alignment.Center,
         ) {
             if (loading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(36.dp),
-                    color = content,
-                    strokeWidth = 3.dp,
+                Text(
+                    text = "✆",
+                    color = CallOn,
+                    style = MaterialTheme.typography.displaySmall,
                 )
             } else {
                 Icon(
                     imageVector = Icons.Filled.Mic,
                     contentDescription = null,
-                    tint = content,
-                    modifier = Modifier.size(42.dp),
+                    tint = if (active) Color(0xFFE9F7DC) else CallDim,
+                    modifier = Modifier.size(54.dp),
                 )
             }
         }
-        if (active) {
-            Spacer(Modifier.height(8.dp))
-            LinearProgressIndicator(
-                progress = { level },
+    }
+}
+
+/** Ticking call timer, shown once the line is connected. */
+@Composable
+private fun CallTimer(startedAt: Long, running: Boolean) {
+    var now by remember(startedAt) { mutableLongStateOf(startedAt) }
+    LaunchedEffect(startedAt, running) {
+        if (!running) return@LaunchedEffect
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(1_000)
+        }
+    }
+    val elapsed = if (running && startedAt > 0) ((now - startedAt) / 1_000).coerceAtLeast(0) else 0
+    val minutes = elapsed / 60
+    val seconds = elapsed % 60
+    Text(
+        text = "%02d:%02d".format(minutes, seconds),
+        style = MaterialTheme.typography.titleLarge,
+        color = CallDim,
+    )
+}
+
+/** The row of light bars under the name, alive while the call is. */
+@Composable
+private fun SpeakingBars(active: Boolean, speaking: Boolean, level: Float) {
+    val transition = rememberInfiniteTransition(label = "bars")
+    val wave by transition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(520), RepeatMode.Reverse),
+        label = "wave",
+    )
+    val heights = List(9) { index ->
+        val stagger = ((index % 3) + 1) / 3f
+        when {
+            !active -> 6.dp
+            speaking || level > 0.05f -> (12 + 26 * wave * stagger + 22 * level).dp
+            else -> 8.dp
+        }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
+        heights.forEach { height ->
+            Box(
                 modifier = Modifier
-                    .width(96.dp)
-                    .height(4.dp),
+                    .width(6.dp)
+                    .height(height)
+                    .clip(CircleShape)
+                    .background(if (active) BarGreen else Color(0xFF3A3F3A)),
             )
         }
     }
@@ -330,7 +473,7 @@ private fun Transcript(
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = Color(0xFF111111),
     ) {
         val listState = rememberLazyListState()
         val itemCount = turns.size + if (partial.isNotBlank()) 1 else 0
@@ -348,7 +491,7 @@ private fun Transcript(
                         "Everything stays on this phone."
                     },
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = CallDim,
                     textAlign = TextAlign.Center,
                 )
             }
@@ -375,16 +518,8 @@ private fun Transcript(
 
 @Composable
 private fun Bubble(text: String, fromUser: Boolean, pending: Boolean = false) {
-    val container = if (fromUser) {
-        MaterialTheme.colorScheme.primaryContainer
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerHighest
-    }
-    val content = if (fromUser) {
-        MaterialTheme.colorScheme.onPrimaryContainer
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
+    val container = if (fromUser) Color(0xFF233023) else Color(0xFF1D1D1D)
+    val content = if (fromUser) Color(0xFFD9E8CF) else CallOn
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (fromUser) Arrangement.End else Arrangement.Start,
@@ -405,6 +540,35 @@ private fun Bubble(text: String, fromUser: Boolean, pending: Boolean = false) {
     }
 }
 
+/** A round in-call control: Mute, Speaker or End. */
+@Composable
+private fun RoundControl(
+    label: String,
+    container: Color,
+    content: Color,
+    onClick: () -> Unit,
+    icon: @Composable () -> Unit,
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Surface(
+            shape = CircleShape,
+            color = container,
+            contentColor = content,
+            modifier = Modifier.size(66.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                IconButton(onClick = onClick) { icon() }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = CallDim,
+        )
+    }
+}
+
 @Composable
 private fun CallButton(
     label: String,
@@ -414,25 +578,24 @@ private fun CallButton(
     icon: @Composable () -> Unit,
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        FilledIconButton(
-            onClick = onClick,
+        Surface(
+            shape = CircleShape,
+            color = container,
+            contentColor = content,
             modifier = Modifier.size(68.dp),
-            colors = IconButtonDefaults.filledIconButtonColors(
-                containerColor = container,
-                contentColor = content,
-            ),
-        ) { icon() }
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                IconButton(onClick = onClick) { icon() }
+            }
+        }
         Spacer(Modifier.height(6.dp))
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = CallDim,
         )
     }
 }
-
-/** The familiar phone-call green, independent of the app's theme. */
-private val CallGreen = Color(0xFF1B8F3A)
 
 /** Dial out: start the call on the green button, not when the tab opens. */
 private fun startCall(context: Context) {

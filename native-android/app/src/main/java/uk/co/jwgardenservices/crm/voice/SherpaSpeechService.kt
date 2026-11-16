@@ -106,6 +106,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     private var recognizer: OnlineRecognizer? = null
     private var moonshine: OfflineRecognizer? = null
+    private var nemotron: OnlineRecognizer? = null
+    private val nemotronLock = Mutex()
     private var audioRecord: AudioRecord? = null
     private var thread: Thread? = null
 
@@ -172,6 +174,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             .getOrDefault(AsrEngine.Zipformer)
         if (engine == AsrEngine.Moonshine && MoonshineDownloader.isInstalled(context)) {
             if (forCall) ensureMoonshine()
+            return
+        }
+        if (engine == AsrEngine.Nemotron && NemotronDownloader.isInstalled(context)) {
+            if (forCall) ensureNemotron()
             return
         }
         if (recognizer != null) return
@@ -256,6 +262,110 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         recognizer = null
     }
 
+    /**
+     * Load the optional Nemotron 3.5 streaming recogniser: a true online
+     * transducer, so the shared streaming loop gives live partial words. The
+     * model is English (en) only and nothing auto-detects language.
+     */
+    private suspend fun ensureNemotron(): OnlineRecognizer? {
+        nemotron?.let { return it }
+        return nemotronLock.withLock {
+            nemotron?.let { return@withLock it }
+            val dir = NemotronDownloader.dir(context)
+            if (!NemotronDownloader.isInstalled(context)) {
+                fail("Nemotron is not downloaded. Open Assistant settings to install it.")
+                return@withLock null
+            }
+            _state.update { it.copy(phase = Phase.Loading, message = "Loading Nemotron…") }
+            val started = System.currentTimeMillis()
+            // Same generated-vocabulary trick as the Zipformer: an equal-score
+            // bpe.vocab from this model's own tokens.txt.
+            val vocab = AsrHotwords.ensureVocab(context, dir)
+            val created = try {
+                withContext(Dispatchers.IO) {
+                    OnlineRecognizer(
+                        assetManager = null,
+                        config = OnlineRecognizerConfig(
+                            featConfig = FeatureConfig(
+                                sampleRate = SAMPLE_RATE,
+                                featureDim = FEATURE_DIM,
+                            ),
+                            modelConfig = OnlineModelConfig(
+                                transducer = OnlineTransducerModelConfig(
+                                    encoder = File(dir, "encoder.int8.onnx").absolutePath,
+                                    decoder = File(dir, "decoder.int8.onnx").absolutePath,
+                                    joiner = File(dir, "joiner.int8.onnx").absolutePath,
+                                ),
+                                tokens = File(dir, "tokens.txt").absolutePath,
+                                numThreads = 2,
+                                provider = "cpu",
+                                modelingUnit = if (vocab != null) "bpe" else "",
+                                bpeVocab = vocab.orEmpty(),
+                            ),
+                            endpointConfig = EndpointConfig(
+                                rule1 = EndpointRule(
+                                    mustContainNonSilence = false,
+                                    minTrailingSilence = 0.65f,
+                                    minUtteranceLength = 0f,
+                                ),
+                                rule2 = EndpointRule(
+                                    mustContainNonSilence = true,
+                                    minTrailingSilence = 0.4f,
+                                    minUtteranceLength = 0f,
+                                ),
+                                rule3 = EndpointRule(
+                                    mustContainNonSilence = false,
+                                    minTrailingSilence = 0f,
+                                    minUtteranceLength = 20f,
+                                ),
+                            ),
+                            enableEndpoint = true,
+                            decodingMethod = "modified_beam_search",
+                            maxActivePaths = 4,
+                            hotwordsScore = 2.0f,
+                        ),
+                    )
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.e(TAG, "Could not load Nemotron", error)
+                fail("Nemotron could not be loaded. Check the downloaded files.")
+                return@withLock null
+            }
+            if (released) {
+                created.release()
+                null
+            } else {
+                nemotron = created
+                hotwordBiasEnabled = vocab != null
+                val vocabSource = if (vocab != null) "bpe.vocab" else "no vocab"
+                CrashLog.note(
+                    context,
+                    TAG,
+                    "Nemotron ready in ${System.currentTimeMillis() - started}ms " +
+                        "(biasing=${vocab != null} $vocabSource)",
+                )
+                _state.update { state ->
+                    if (state.phase == Phase.Loading) state.copy(phase = Phase.Ready, message = null) else state
+                }
+                created
+            }
+        }
+    }
+
+    /** Free the ~650 MB Nemotron model when the owner switches back or removes it. */
+    fun releaseNemotron() {
+        if (listening) return
+        nemotron?.release()
+        nemotron = null
+    }
+
+    /** Warm checks so a returning caller can skip the dial tone. */
+    fun onlineWarm(): Boolean = recognizer != null
+    fun moonshineWarm(): Boolean = moonshine != null
+    fun nemotronWarm(): Boolean = nemotron != null
+
     /** Build the recogniser once, under a lock shared by prepare and listen. */
     private suspend fun ensureRecognizer(): OnlineRecognizer? {
         recognizer?.let { return it }
@@ -307,13 +417,19 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         if (selected == AsrEngine.Moonshine && !offlineMode) {
             CrashLog.note(context, TAG, "Moonshine selected but not installed; using Zipformer")
         }
-        if (offlineMode) {
-            if (ensureMoonshine() == null) {
-                offlineMode = false
-                CrashLog.note(context, TAG, "Moonshine unavailable; falling back to Zipformer")
+        val onlineEngine = when {
+            offlineMode -> null
+            selected == AsrEngine.Nemotron && NemotronDownloader.isInstalled(context) -> {
+                val nemotronEngine = ensureNemotron()
+                if (nemotronEngine == null) {
+                    CrashLog.note(context, TAG, "Nemotron unavailable; falling back to Zipformer")
+                    ensureRecognizer()
+                } else {
+                    nemotronEngine
+                }
             }
+            else -> ensureRecognizer()
         }
-        val onlineEngine = if (offlineMode) null else ensureRecognizer()
         if (!offlineMode && onlineEngine == null) return
         hotwordNames = AsrHotwords.names()
         val hotwordBias = if (!offlineMode && hotwordBiasEnabled) {
@@ -347,7 +463,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             Thread({ processOffline(record) }, "moonshine-asr")
         } else {
             val engine = onlineEngine ?: return
-            Thread({ process(engine, record, hotwordBias) }, "zipformer-asr")
+            Thread({ process(engine, record, hotwordBias) }, "streaming-asr")
         }.apply { start() }
         } finally {
             startLock.unlock()
@@ -410,6 +526,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         recognizer = null
         runCatching { moonshine?.release() }
         moonshine = null
+        runCatching { nemotron?.release() }
+        nemotron = null
         _state.value = UiState()
     }
 

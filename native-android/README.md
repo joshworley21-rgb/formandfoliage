@@ -192,6 +192,11 @@ deliberately left on the web for now. The smaller known gaps:
   command is finalised without a tap. Shortening these is the cheapest
   latency win in the whole pipeline; any shorter starts cutting people off
   mid-sentence.
+- **Call screen**: the Assistant tab is a dark call sheet — a glowing orb,
+  "J W Assistant", a ticking call timer, animated speaking bars, a status
+  pill, the rolling transcript, and Mute / Speaker / End controls. Mute stops
+  the recogniser loop rather than just hiding it; Speaker routes to the
+  loudspeaker best-effort; End hangs up and stops speech immediately.
 - **Dialling and pickup**: the green button rings out with a generated UK
   ringback (400 + 450 Hz, 0.4/0.2/0.4 s cadence) instead of showing a model
   loading spinner. When the recogniser is listening it stops, the status
@@ -226,6 +231,16 @@ deliberately left on the web for now. The smaller known gaps:
   a second layer replaces near misses in the final transcript with the
   canonical name (one edit for five-letter names, two for nine or more). The
   correction also applies to Moonshine. Both layers are logged.
+- **Nemotron 3.5 (experimental)**: Settings → Assistant settings → Nemotron
+  ASR downloads NVIDIA Nemotron 3.5 Speech Streaming 0.6B int8 (English/en
+  only, about 662 MB) over Wi-Fi or mobile data. It is a **true streaming**
+  online transducer, so it produces live partial words like the Zipformer,
+  from a 2026-era model trained for noisy phone audio. It holds about 650 MB
+  in memory while selected and is released when switching back. NVIDIA Open
+  Model License, commercial use permitted.
+- **Quick resume**: a new call checks whether the selected recogniser and the
+  voice are already loaded. If they are, it skips the dial tone and connects
+  straight to the pickup; only a cold call rings out while the models load.
 - **Moonshine v2 (experimental)**: Settings → Assistant settings →
   Moonshine ASR downloads the 135 MB base English model (MIT) over Wi-Fi or
   mobile data. It is

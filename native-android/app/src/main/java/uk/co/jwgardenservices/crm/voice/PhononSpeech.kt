@@ -39,6 +39,10 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
     @Volatile
     private var closed = false
 
+    /** True when the native engine is already loaded. */
+    val isReady: Boolean
+        get() = engine != null
+
     suspend fun warmUp() {
         if (closed) return
         withContext(Dispatchers.IO) { ensureEngine() }

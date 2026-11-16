@@ -55,6 +55,7 @@ import uk.co.jwgardenservices.crm.voice.KokoroEngine
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
 import uk.co.jwgardenservices.crm.voice.MicSource
 import uk.co.jwgardenservices.crm.voice.MoonshineDownloader
+import uk.co.jwgardenservices.crm.voice.NemotronDownloader
 import uk.co.jwgardenservices.crm.voice.PhononDownloader
 import uk.co.jwgardenservices.crm.voice.PhononVoice
 import uk.co.jwgardenservices.crm.voice.PiperVoice
@@ -107,6 +108,9 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     val moonshineState by MoonshineDownloader.state.collectAsStateWithLifecycle()
     var moonshineInstalled by remember { mutableStateOf(MoonshineDownloader.isInstalled(context)) }
     var moonshineSaved by remember { mutableLongStateOf(MoonshineDownloader.savedBytes(context)) }
+    val nemotronState by NemotronDownloader.state.collectAsStateWithLifecycle()
+    var nemotronInstalled by remember { mutableStateOf(NemotronDownloader.isInstalled(context)) }
+    var nemotronSaved by remember { mutableLongStateOf(NemotronDownloader.savedBytes(context)) }
     val asrEngine by AssistantPreferences.asrEngineFlow(context)
         .collectAsStateWithLifecycle(initialValue = AsrEngine.Zipformer)
 
@@ -132,6 +136,17 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
             is MoonshineDownloader.State.Working -> Unit
             else -> moonshineSaved = MoonshineDownloader.savedBytes(context)
+        }
+    }
+    LaunchedEffect(nemotronState) {
+        when (val snapshot = nemotronState) {
+            is NemotronDownloader.State.Done -> {
+                nemotronInstalled = true
+                nemotronSaved = 0
+                NemotronDownloader.clearResult()
+            }
+            is NemotronDownloader.State.Working -> Unit
+            else -> nemotronSaved = NemotronDownloader.savedBytes(context)
         }
     }
     LaunchedEffect(hqState) {
@@ -568,6 +583,86 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
+        SectionCard(title = "Nemotron ASR (streaming)") {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "NVIDIA Nemotron 3.5 Speech Streaming 0.6B, English (en) only, " +
+                        "NVIDIA Open Model License (commercial use permitted). About 662 MB. " +
+                        "True streaming: live partial words like the Zipformer, from a " +
+                        "2026-era model trained for noisy phone audio. While selected it " +
+                        "holds about 650 MB in memory; switch back after comparing.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                val working = nemotronState as? NemotronDownloader.State.Working
+                val failure = nemotronState as? NemotronDownloader.State.Failed
+                if (working != null) {
+                    LinearProgressIndicator(
+                        progress = { working.progress },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "Downloading… ${working.done / MEGABYTE} of " +
+                            "${working.total / MEGABYTE} MB",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = { NemotronDownloader.cancel() }) { Text("Cancel") }
+                }
+
+                if (nemotronInstalled) {
+                    Text(
+                        text = "Remove it to free the storage.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                NemotronDownloader.remove(context)
+                                if (asrEngine == AsrEngine.Nemotron) {
+                                    AssistantPreferences.setAsrEngine(context, AsrEngine.Zipformer)
+                                }
+                                SpeechEngine.get(context).releaseNemotron()
+                                nemotronInstalled = false
+                                nemotronSaved = 0
+                            }
+                        },
+                    ) { Text("Remove Nemotron model") }
+                } else if (working == null) {
+                    OutlinedButton(
+                        onClick = { NemotronDownloader.start(context) },
+                    ) {
+                        Text(
+                            if (nemotronSaved > 0) {
+                                "Resume Nemotron download (${nemotronSaved / MEGABYTE} MB saved)"
+                            } else {
+                                "Download Nemotron (662 MB)"
+                            },
+                        )
+                    }
+                }
+
+                if (working == null && !nemotronInstalled) {
+                    Text(
+                        text = "Downloads on Wi-Fi or mobile data. About 662 MB.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                failure?.let { error ->
+                    Text(
+                        text = error.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+
         SectionCard(title = "Moonshine ASR (experimental)") {
             Column(
                 modifier = Modifier.padding(20.dp),
@@ -610,11 +705,10 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         onSelect = { engine ->
                             scope.launch {
                                 AssistantPreferences.setAsrEngine(context, engine)
-                                if (engine == AsrEngine.Zipformer) {
-                                    SpeechEngine.get(context).releaseMoonshine()
-                                } else {
-                                    SpeechEngine.get(context).releaseOnline()
-                                }
+                                val speechEngine = SpeechEngine.get(context)
+                                if (engine != AsrEngine.Zipformer) speechEngine.releaseOnline()
+                                if (engine != AsrEngine.Moonshine) speechEngine.releaseMoonshine()
+                                if (engine != AsrEngine.Nemotron) speechEngine.releaseNemotron()
                             }
                         },
                     )

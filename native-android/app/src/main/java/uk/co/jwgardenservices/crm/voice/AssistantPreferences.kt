@@ -47,7 +47,8 @@ private val FOLLOW_UP_KEY = booleanPreferencesKey("follow_up")
 /** The on-device speech recogniser. Streaming is the default; Moonshine is a test. */
 enum class AsrEngine(val label: String) {
     Zipformer("Zipformer — streaming, live words"),
-    Moonshine("Moonshine v2 — experimental, offline"),
+    Moonshine("Moonshine v2 — offline, English (en)"),
+    Nemotron("Nemotron — streaming, live words, English (en)"),
 }
 
 /**

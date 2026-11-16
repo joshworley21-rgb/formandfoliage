@@ -74,6 +74,18 @@ class AssistantService : Service() {
     private val _callActive = MutableStateFlow(false)
     val callActive: StateFlow<Boolean> = _callActive.asStateFlow()
 
+    /** Milliseconds timestamp when the current call connected; 0 while dialling. */
+    private val _connectedAt = MutableStateFlow(0L)
+    val connectedAt: StateFlow<Long> = _connectedAt.asStateFlow()
+
+    /** Microphone muted for this call; the assistant keeps listening to nothing. */
+    private val _muted = MutableStateFlow(false)
+    val muted: StateFlow<Boolean> = _muted.asStateFlow()
+
+    /** Loudspeaker route, best effort per device. */
+    private val _speakerOn = MutableStateFlow(false)
+    val speakerOn: StateFlow<Boolean> = _speakerOn.asStateFlow()
+
     /** True from the green button until the line is ready and the assistant answers. */
     private val _dialling = MutableStateFlow(false)
     val dialling: StateFlow<Boolean> = _dialling.asStateFlow()
@@ -95,6 +107,9 @@ class AssistantService : Service() {
 
     /** Whether a finished answer is followed by "Anything else?". */
     private var askFollowUp = true
+
+    /** Selected recogniser, mirrored so the quick-resume check is synchronous. */
+    private var selectedEngine = AsrEngine.Zipformer
 
     /** Set once the caller has said something in this call. */
     @Volatile
@@ -170,6 +185,9 @@ class AssistantService : Service() {
         scope.launch {
             AssistantPreferences.followUpFlow(this@AssistantService).collect { askFollowUp = it }
         }
+        scope.launch {
+            AssistantPreferences.asrEngineFlow(this@AssistantService).collect { selectedEngine = it }
+        }
         scope.launch { handleTranscripts() }
     }
 
@@ -189,10 +207,13 @@ class AssistantService : Service() {
             speaker.stopPlayback()
             cloudVoice?.stop()
             _speaking.value = false
-            // Ring out while the model and voice load; the caller hears a
-            // dialling line instead of a loading spinner.
-            _dialling.value = true
-            ringback.start()
+            // Quick resume: with both models already warm the call connects
+            // straight away, no dial tone needed. Cold calls ring out while
+            // they load instead of showing a loading spinner.
+            val warm = runCatching { selectedEngineWarm() }.getOrDefault(false)
+            CrashLog.note(this, TAG, if (warm) "quick resume: models warm" else "cold start")
+            _dialling.value = !warm
+            if (!warm) ringback.start()
         }
         _callActive.value = true
         startInForeground(if (fresh) CALLING_TEXT else LISTENING_TEXT)
@@ -291,6 +312,7 @@ class AssistantService : Service() {
 
     /** Start listening if this is the first bind or the loop stopped. */
     fun ensureListening() {
+        if (_muted.value) return
         CrashLog.note(this, TAG, "ensureListening")
         scope.launch {
             // startListening waits for an in-flight preload rather than
@@ -367,6 +389,9 @@ class AssistantService : Service() {
         CrashLog.note(this, TAG, "call ended")
         _callActive.value = false
         _dialling.value = false
+        _connectedAt.value = 0
+        _muted.value = false
+        setSpeaker(false)
         ringback.stop()
         speaker.stopPlayback()
         cloudVoice?.stop()
@@ -376,6 +401,50 @@ class AssistantService : Service() {
         runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
         foreground = false
         stopSelf()
+    }
+
+    /**
+     * Mute the microphone for this call. The recogniser loop is stopped
+     * rather than ignored, so nothing is decoded; unmuting reopens the mic.
+     */
+    fun setMuted(muted: Boolean) {
+        if (_muted.value == muted) return
+        _muted.value = muted
+        CrashLog.note(this, TAG, if (muted) "mic muted" else "mic unmuted")
+        if (muted) speech.stopListening() else ensureListening()
+    }
+
+    /** Route to the loudspeaker, best effort; some devices ignore the request. */
+    fun setSpeaker(on: Boolean) {
+        if (_speakerOn.value == on) return
+        _speakerOn.value = on
+        val manager = getSystemService(AudioManager::class.java) ?: return
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val speaker = manager.availableCommunicationDevices.firstOrNull {
+                    it.type == AudioManager.DEVICE_SPEAKERPHONE
+                }
+                if (on && speaker != null) {
+                    manager.setCommunicationDevice(speaker)
+                } else {
+                    manager.clearCommunicationDevice()
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                manager.setSpeakerphoneOn(on)
+            }
+        }
+        CrashLog.note(this, TAG, "speakerphone=$on")
+    }
+
+    /** True when the selected recogniser and the voice are already loaded. */
+    private fun selectedEngineWarm(): Boolean {
+        val voiceWarm = speaker.isWarm()
+        return voiceWarm && when (selectedEngine) {
+            AsrEngine.Zipformer -> speech.onlineWarm()
+            AsrEngine.Moonshine -> speech.moonshineWarm()
+            AsrEngine.Nemotron -> speech.nemotronWarm()
+        }
     }
 
     /** Wipe the conversation, not just the last sentence. */
@@ -712,6 +781,9 @@ class AssistantService : Service() {
         CrashLog.note(this, TAG, "service destroyed")
         _callActive.value = false
         _dialling.value = false
+        _connectedAt.value = 0
+        _muted.value = false
+        _speakerOn.value = false
         ringback.stop()
         abandonAudioFocus()
         scope.cancel()
