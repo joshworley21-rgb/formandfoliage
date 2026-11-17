@@ -35,39 +35,21 @@ class CallBriefing(
 ) {
 
     /**
-     * Null only when the snapshot could not be read at all.
-     *
-     * [callCount] is today's 1-based call number: the first call gets the
-     * full contextual briefing, calls two and three a one-liner, and every
-     * call after that a word. Later calls skip the database entirely.
+     * A short status line that follows the one fixed opener ("Hello Josh, how
+     * can I help?"). Earlier versions shrank the greeting to "Yep?" after a
+     * few calls; that made the assistant feel like it had stopped answering,
+     * so the opener is now constant and this line only adds context. Null when
+     * there is nothing useful to add, or the snapshot cannot be read.
      */
-    suspend fun line(callCount: Int = 1): String? = runCatching {
-        when {
-            callCount >= 4 -> microGreeting(callCount)
-            callCount in 2..3 -> shortGreeting(callCount)
-            else -> build()
-        }
+    suspend fun line(@Suppress("UNUSED_PARAMETER") callCount: Int = 1): String? = runCatching {
+        build()
     }.getOrNull()
-
-    private fun microGreeting(callCount: Int): String {
-        val options = arrayOf("Yep?", "Go ahead.", "Ready.")
-        return options[(callCount - 4) % options.size]
-    }
-
-    private fun shortGreeting(callCount: Int): String {
-        if (callCount == 2) return "Hey ${VoiceLines.OWNER_NAME} — what are we logging?"
-        val now = clock()
-        val zone = ZoneId.systemDefault()
-        return greetingFor(now.atZone(zone).toLocalTime().hour, now.localDate(zone).month) +
-            " — what are we logging?"
-    }
 
     private suspend fun build(): String {
         val now = clock()
         val zone = ZoneId.systemDefault()
         val time = now.atZone(zone).toLocalTime()
         val today = now.localDate(zone)
-        val greeting = greetingFor(time.hour, today.month)
 
         val clients = repository.observeClients().first().associateBy { it.id }
         val scheduled = repository.observeJobs().first()
@@ -83,10 +65,10 @@ class CallBriefing(
             val name = nameOf(job, clients)
             val minutesLeft = Duration.between(now, endsAt(job, starts)).toMinutes()
             return if (minutesLeft <= 35) {
-                "$greeting — just wrapping up at $name, or onto the next one?"
+                "You're just wrapping up at $name, or onto the next one?"
             } else {
                 val end = spokenTime(endsAt(job, starts).atZone(zone).toLocalTime())
-                "$greeting — you're at $name until $end. What are we logging?"
+                "You're at $name until $end."
             }
         }
 
@@ -95,8 +77,7 @@ class CallBriefing(
             val end = endsAt(job, starts)
             !now.isBefore(end) && Duration.between(end, now) <= Duration.ofMinutes(90)
         }?.let { (job, _) ->
-            return "$greeting — just wrapping up at ${nameOf(job, clients)}, " +
-                "or onto the next one?"
+            return "Just wrapping up at ${nameOf(job, clients)}, or onto the next one?"
         }
 
         // Still ahead today: lead with the first slot in the morning, or the
@@ -119,11 +100,9 @@ class CallBriefing(
                         1 -> "And one more today."
                         else -> "And $after more today."
                     }
-                    "$greeting — you've got $name first at $start.$reminder $tail " +
-                        "What are we logging?"
+                    "You've got $name first at $start.$reminder $tail"
                 } else {
-                    "$greeting — next up is $name at $start.$reminder " +
-                        "What are we logging?"
+                    "Next up is $name at $start.$reminder"
                 }
             }
 
@@ -132,11 +111,11 @@ class CallBriefing(
             ?.let { (_, starts) ->
                 val zoneStart = starts.atZone(zone)
                 val weekday = zoneStart.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.UK)
-                return "$greeting — nothing on today; next is $weekday at " +
-                    "${spokenTime(zoneStart.toLocalTime())}. What are we logging?"
+                return "Nothing on today; next is $weekday at " +
+                    "${spokenTime(zoneStart.toLocalTime())}."
             }
 
-        return "$greeting — nothing on the books. What are we logging?"
+        return "Nothing on the books."
     }
 
     private fun nameOf(job: ScheduledJob, clients: Map<String, Client>): String =
@@ -145,41 +124,6 @@ class CallBriefing(
     /** When the booked window ends; a zero-length job still gets a window. */
     private fun endsAt(job: ScheduledJob, starts: Instant): Instant =
         starts.plusSeconds(job.durationMinutes.coerceAtLeast(15) * 60L)
-
-    /**
-     * Time of day, plus a line of trade small talk when the season and hour
-     * make one obvious: dark winters, hot summers, busy springs.
-     */
-    private fun greetingFor(hour: Int, month: java.time.Month): String {
-        val time = when (hour) {
-            in 5..11 -> "Morning"
-            in 12..16 -> "Afternoon"
-            in 17..21 -> "Evening"
-            else -> "Hello"
-        }
-        val winter = month == java.time.Month.NOVEMBER ||
-            month == java.time.Month.DECEMBER ||
-            month == java.time.Month.JANUARY ||
-            month == java.time.Month.FEBRUARY
-        val seasonal = when {
-            // Winter mornings are cold and wet; after three it is the light
-            // that goes. No weather API needed to know a UK January.
-            winter && hour in 5..11 -> listOf(
-                "wrap up warm out there",
-                "looks like a muddy one today",
-            ).random()
-            winter -> if (hour >= 15) "getting dark early out there" else null
-            month in java.time.Month.JUNE..java.time.Month.AUGUST ->
-                if (hour >= 15) "long day in the heat" else null
-            month == java.time.Month.MARCH ||
-                month == java.time.Month.APRIL ||
-                month == java.time.Month.MAY -> "busy one today"
-            else -> null
-        }
-        // Spoken to Josh, not at him: "Morning Josh, getting dark early…"
-        val named = "$time ${VoiceLines.OWNER_NAME}"
-        return if (seasonal != null) "$named, $seasonal" else named
-    }
 
     /**
      * "nine", "half past two", "quarter to five". Booked slots are almost

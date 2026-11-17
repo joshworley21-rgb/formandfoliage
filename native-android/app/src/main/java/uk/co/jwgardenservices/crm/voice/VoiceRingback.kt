@@ -3,6 +3,7 @@ package uk.co.jwgardenservices.crm.voice
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.util.Log
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -22,14 +23,18 @@ class VoiceRingback {
     private var playing = false
 
     @Synchronized
-    fun start() {
-        if (playing) return
+    fun start(): Boolean {
+        if (playing) return true
         val pcm = buildPcm()
         val player = runCatching {
             AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                        // Same route as the assistant's speech. Sonification
+                        // follows the system stream, which Samsung can mute
+                        // even with media volume up — that is why the dial
+                        // tone was silent while replies were audible.
+                        .setUsage(AudioAttributes.USAGE_ASSISTANT)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build(),
                 )
@@ -43,22 +48,31 @@ class VoiceRingback {
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .setBufferSizeInBytes(pcm.size * 2)
                 .build()
-        }.getOrNull() ?: return
+        }.getOrNull() ?: run {
+            Log.w("Ringback", "AudioTrack could not be created")
+            return false
+        }
 
         playing = true
         track = player
+        runCatching { player.setVolume(1f) }
         if (runCatching { player.play() }.isFailure) {
+            Log.w("Ringback", "AudioTrack refused to play")
             playing = false
             track = null
             runCatching { player.release() }
-            return
+            return false
         }
         thread = Thread({
             // Write the 3 s cadence again and again until the call connects.
             while (playing) {
-                if (player.write(pcm, 0, pcm.size) <= 0) break
+                if (player.write(pcm, 0, pcm.size) <= 0) {
+                    Log.w("Ringback", "AudioTrack write stopped")
+                    break
+                }
             }
         }, "ringback").apply { start() }
+        return true
     }
 
     @Synchronized

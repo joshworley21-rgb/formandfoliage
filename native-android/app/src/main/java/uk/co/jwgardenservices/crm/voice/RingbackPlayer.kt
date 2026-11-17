@@ -23,8 +23,13 @@ class RingbackPlayer(@Suppress("UNUSED_PARAMETER") private val context: Context)
     fun start() {
         if (playing) return
         playing = true
-        synth.start()
-        CrashLog.note(context, "Ringback", "synth ringback started")
+        val started = synth.start()
+        CrashLog.note(
+            context,
+            "Ringback",
+            if (started) "synth ringback started" else "synth ringback could not start",
+        )
+        if (!started) playing = false
     }
 
     @Synchronized

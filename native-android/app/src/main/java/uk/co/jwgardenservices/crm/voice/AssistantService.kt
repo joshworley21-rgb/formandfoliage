@@ -425,11 +425,17 @@ class AssistantService : Service() {
             val callNumber = runCatching { AssistantMemory.noteCall(this@AssistantService) }
                 .getOrDefault(1)
             val briefing = callBriefing.line(callNumber)
-            var greeting = briefing ?: PICKUP_TEXT
-            if (lowBattery) {
-                // Warned once, up front: everything below is offline-only.
-                greeting = "$greeting Battery's running low, so I'm on offline mode only."
+            // The opener is fixed so every call starts with the same familiar
+            // line, whatever the schedule looks like. The briefing is a second
+            // sentence; it must never replace the greeting.
+            val batteryLine = if (lowBattery) {
+                "Battery's running low, so I'm on offline mode only."
+            } else {
+                null
             }
+            val extra = listOfNotNull(briefing?.takeIf { it.isNotBlank() }, batteryLine)
+                .joinToString(" ")
+            val greeting = if (extra.isEmpty()) PICKUP_TEXT else "$PICKUP_TEXT $extra"
             AssistantMemory.lastSpokenReply = greeting
             CrashLog.note(this, TAG, "pickup greeting: $greeting")
             val started = System.currentTimeMillis()
@@ -446,14 +452,14 @@ class AssistantService : Service() {
                 // Long enough for a Phonon hiccup and the local fallback to
                 // load; the drain in PhononSpeech caps its own wait.
                 withTimeoutOrNull(12_000) {
-                    if (briefing != null) {
-                        // Streamed sentence by sentence; the first words start
-                        // while the rest of the briefing is still generating.
-                        speaker.speakStreaming(greeting, speakerId, speed)
-                        true
-                    } else {
-                        speaker.speakPickup(speakerId, speed)
+                    // The cached opener goes first, so even a slow schedule or
+                    // a Phonon hiccup cannot swallow "how can I help?". The
+                    // briefing, if any, follows as its own sentence.
+                    val opened = speaker.speakPickup(speakerId, speed)
+                    if (opened && extra.isNotEmpty()) {
+                        speaker.speakStreaming(extra, speakerId, speed)
                     }
+                    opened
                 } ?: false
             } catch (error: Exception) {
                 CrashLog.note(this, TAG, "pickup failed: ${error.message}")
