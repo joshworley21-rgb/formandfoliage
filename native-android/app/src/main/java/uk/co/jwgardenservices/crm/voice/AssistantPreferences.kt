@@ -161,17 +161,21 @@ object AssistantPreferences {
     suspend fun setOnlineVoice(context: Context, enabled: Boolean) = Unit
 
     /**
-     * A downloaded Piper voice, or null for Kokoro. Selecting one replaces
-     * Kokoro entirely; the eight Kokoro speakers stay available for when no
-     * Piper voice is selected.
+     * A downloaded local voice (Piper VITS or Supertonic), or null for the
+     * default Phonon voice. Selecting one replaces Phonon entirely; clearing
+     * it goes back to Phonon.
      */
-    /**
-     * Downloadable local voice packs were removed: Phonon is the voice, and
-     * Kokoro is only an internal fallback if Phonon fails. Always null.
-     */
-    fun piperVoiceFlow(context: Context): Flow<PiperVoice?> = kotlinx.coroutines.flow.flowOf(null)
+    fun piperVoiceFlow(context: Context): Flow<PiperVoice?> = context.assistantDataStore.data.map { preferences ->
+        preferences[PIPER_KEY]?.let { name ->
+            PiperVoice.entries.firstOrNull { it.name == name }
+        }
+    }
 
-    suspend fun setPiperVoice(context: Context, voice: PiperVoice?) = Unit
+    suspend fun setPiperVoice(context: Context, voice: PiperVoice?) {
+        context.assistantDataStore.edit { preferences ->
+            if (voice == null) preferences.remove(PIPER_KEY) else preferences[PIPER_KEY] = voice.name
+        }
+    }
 
     /**
      * Open a fresh call with a short schedule briefing ("you've got Simon's

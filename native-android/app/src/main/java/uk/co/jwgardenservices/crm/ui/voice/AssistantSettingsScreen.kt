@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -12,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -32,6 +34,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -101,6 +104,12 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     val phononEnabled by AssistantPreferences.phononFlow(context)
         .collectAsStateWithLifecycle(initialValue = false)
     val phononState by PhononDownloader.state.collectAsStateWithLifecycle()
+    val piperState by PiperVoiceDownloader.state.collectAsStateWithLifecycle()
+    val localVoice by AssistantPreferences.piperVoiceFlow(context)
+        .collectAsStateWithLifecycle(initialValue = null)
+    var localInstalled by remember {
+        mutableStateOf(PiperVoice.entries.associateWith { PiperVoiceDownloader.isInstalled(context, it) })
+    }
     var phononInstalled by remember { mutableStateOf(PhononDownloader.isInstalled(context)) }
     var phononSaved by remember { mutableLongStateOf(PhononDownloader.savedBytes(context)) }
     val phononVoice by AssistantPreferences.phononVoiceFlow(context)
@@ -123,6 +132,20 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     val asrEngine by AssistantPreferences.asrEngineFlow(context)
         .collectAsStateWithLifecycle(initialValue = AsrEngine.Moonshine)
 
+    LaunchedEffect(piperState) {
+        when (val snapshot = piperState) {
+            is PiperVoiceDownloader.State.Done -> {
+                localInstalled = PiperVoice.entries.associateWith {
+                    PiperVoiceDownloader.isInstalled(context, it)
+                }
+                AssistantPreferences.setPiperVoice(context, snapshot.voice)
+                KokoroEngine.get(context).reload()
+                PiperVoiceDownloader.clearResult()
+            }
+            is PiperVoiceDownloader.State.Failed -> Unit
+            else -> Unit
+        }
+    }
     LaunchedEffect(phononState) {
         when (val snapshot = phononState) {
             is PhononDownloader.State.Done -> {
@@ -348,6 +371,145 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 failure?.let { error ->
                     Text(
                         text = error.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+
+        SectionCard(title = "Local voices (Piper & Supertonic)") {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "Downloadable on-device voices. A downloaded voice replaces Phonon " +
+                        "while it is selected; clearing the choice goes back to Phonon. Each " +
+                        "is a one-off download over Wi-Fi.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                val working = piperState as? PiperVoiceDownloader.State.Working
+                if (working != null) {
+                    LinearProgressIndicator(
+                        progress = { working.progress },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "${working.voice.label}: ${working.phase.name.lowercase()} " +
+                            "${working.done / MEGABYTE} of ${working.total / MEGABYTE} MB",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = { PiperVoiceDownloader.cancel() }) { Text("Cancel") }
+                }
+
+                // Going back to Phonon is always available.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Phonon (default)", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = "Streaming 31m voice, about 62 MB",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (localVoice == null) {
+                        Text(
+                            text = "In use",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    } else {
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    AssistantPreferences.setPiperVoice(context, null)
+                                    KokoroEngine.get(context).reload()
+                                }
+                            },
+                        ) { Text("Use") }
+                    }
+                }
+
+                PiperVoice.entries.forEach { voice ->
+                    val installed = localInstalled[voice] == true
+                    val selected = localVoice == voice
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(voice.label, style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                text = "${voice.bytes / MEGABYTE} MB, on-device",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        val remove = {
+                            scope.launch {
+                                if (selected) {
+                                    AssistantPreferences.setPiperVoice(context, null)
+                                }
+                                PiperVoiceDownloader.remove(context, voice)
+                                localInstalled = PiperVoice.entries.associateWith {
+                                    PiperVoiceDownloader.isInstalled(context, it)
+                                }
+                                KokoroEngine.get(context).reload()
+                            }
+                            Unit
+                        }
+                        val audition = {
+                            scope.launch {
+                                AssistantPreferences.setPiperVoice(context, voice)
+                                KokoroEngine.get(context).reload()
+                                runCatching {
+                                    KokoroEngine.get(context).speak(PREVIEW_TEXT, 0, draftSpeed)
+                                }
+                            }
+                            Unit
+                        }
+                        val use = {
+                            scope.launch {
+                                AssistantPreferences.setPiperVoice(context, voice)
+                                KokoroEngine.get(context).reload()
+                            }
+                            Unit
+                        }
+                        when {
+                            selected -> {
+                                Text(
+                                    text = "In use",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                IconButton(onClick = audition) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.VolumeUp,
+                                        contentDescription = "Preview ${voice.label}",
+                                    )
+                                }
+                                TextButton(onClick = remove) { Text("Remove") }
+                            }
+                            installed -> {
+                                OutlinedButton(onClick = use) { Text("Use") }
+                                IconButton(onClick = audition) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.VolumeUp,
+                                        contentDescription = "Preview ${voice.label}",
+                                    )
+                                }
+                                TextButton(onClick = remove) { Text("Remove") }
+                            }
+                            working == null -> OutlinedButton(
+                                onClick = { PiperVoiceDownloader.start(context, voice) },
+                            ) { Text("Download") }
+                        }
+                    }
+                }
+
+                (piperState as? PiperVoiceDownloader.State.Failed)?.let { failure ->
+                    Text(
+                        text = "${failure.voice.label}: ${failure.message}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )

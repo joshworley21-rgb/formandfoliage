@@ -33,11 +33,11 @@ import java.util.concurrent.TimeUnit
  * several British voices are available. They are a free way to audition a
  * different, often less synthetic, sound before paying for anything.
  *
- * Each archive is about 67 MB (cori-high is 110 MB) and is downloaded once
- * over Wi-Fi, resumably, then unpacked into filesDir/piper/<id>.
+ * Each archive is 20–160 MB and is downloaded once over Wi-Fi, resumably,
+ * then unpacked into filesDir/piper/<id>.
  */
 /** Which sherpa-onnx TTS config a downloaded pack needs. */
-enum class LocalVoiceEngine { Vits, Supertonic }
+enum class LocalVoiceEngine { Vits, Supertonic, Pocket, Kitten }
 
 enum class PiperVoice(
     val id: String,
@@ -45,13 +45,55 @@ enum class PiperVoice(
     val bytes: Long,
     val engine: LocalVoiceEngine = LocalVoiceEngine.Vits,
 ) {
-    /** The best British Piper voice; the other packs were removed in the audit. */
-    Cori("vits-piper-en_GB-cori-high", "cori — British female (high)", 115_574_061),
+    /** Kyutai Pocket TTS: 100M parameters, CPU, ~200 ms to first audio. */
+    Pocket(
+        "sherpa-onnx-pocket-tts-int8-2026-01-26",
+        "pocket tts — Kyutai, fastest (int8)",
+        98_336_520,
+        LocalVoiceEngine.Pocket,
+    ),
+
+    /** The same model at full precision: the best quality, 160 MB. */
+    PocketHq(
+        "sherpa-onnx-pocket-tts-2026-01-26",
+        "pocket tts — Kyutai, best quality (fp32)",
+        168_148_625,
+        LocalVoiceEngine.Pocket,
+    ),
+
+    /** Kitten nano: 15M parameters, the fastest lifelike voice here. */
+    KittenNano(
+        "kitten-nano-en-v0_8-int8",
+        "kitten nano — 8 voices, fastest (int8)",
+        31_220_690,
+        LocalVoiceEngine.Kitten,
+    ),
+
     Supertonic3(
         "sherpa-onnx-supertonic-3-tts-int8-2026-05-11",
         "supertonic 3 — English (10 voices)",
         128_774_318,
         LocalVoiceEngine.Supertonic,
+    ),
+
+    /** British Piper voices. Cori high is the best-quality Piper voice. */
+    Cori(
+        "vits-piper-en_GB-cori-high",
+        "cori — British female (highest quality)",
+        115_574_061,
+        LocalVoiceEngine.Vits,
+    ),
+    Alan(
+        "vits-piper-en_GB-alan-medium-int8",
+        "alan — British male (medium)",
+        21_103_831,
+        LocalVoiceEngine.Vits,
+    ),
+    Jenny(
+        "vits-piper-en_GB-jenny_dioco-medium-int8",
+        "jenny — British female (medium)",
+        20_950_036,
+        LocalVoiceEngine.Vits,
     ),
     ;
 
@@ -106,14 +148,38 @@ object PiperVoiceDownloader {
     private fun archive(context: Context, voice: PiperVoice): File =
         File(context.cacheDir, "piper/${voice.id}.tar.bz2.part")
 
-    fun isInstalled(context: Context, voice: PiperVoice): Boolean {
-        val dir = dir(context, voice)
-        if (voice.engine == LocalVoiceEngine.Supertonic) {
-            return SUPERTONIC_FILES.all { File(dir, it).isFile }
+    private val KITTEN_FILES = setOf(
+        "model.int8.onnx",
+        "voices.bin",
+        "tokens.txt",
+    )
+
+    fun isInstalled(context: Context, voice: PiperVoice): Boolean =
+        hasFiles(dir(context, voice), voice)
+
+    private fun anyOf(dir: File, vararg names: String): Boolean =
+        names.any { File(dir, it).isFile }
+
+    /** Whether [dir] already holds every file the engine needs. */
+    private fun hasFiles(dir: File, voice: PiperVoice): Boolean = when (voice.engine) {
+        LocalVoiceEngine.Supertonic -> SUPERTONIC_FILES.all { File(dir, it).isFile }
+        LocalVoiceEngine.Pocket -> {
+            // int8 and fp32 packs differ only in the .int8 suffix.
+            File(dir, "encoder.onnx").isFile &&
+                File(dir, "text_conditioner.onnx").isFile &&
+                File(dir, "vocab.json").isFile &&
+                File(dir, "token_scores.json").isFile &&
+                anyOf(dir, "lm_flow.int8.onnx", "lm_flow.onnx") &&
+                anyOf(dir, "lm_main.int8.onnx", "lm_main.onnx") &&
+                anyOf(dir, "decoder.int8.onnx", "decoder.onnx")
         }
-        return File(dir, "model.onnx").isFile &&
-            File(dir, "tokens.txt").isFile &&
+        LocalVoiceEngine.Kitten -> KITTEN_FILES.all { File(dir, it).isFile } &&
             File(dir, "espeak-ng-data/phontab").isFile
+        LocalVoiceEngine.Vits -> {
+            (File(dir, "model.onnx").isFile || File(dir, "model.int8.onnx").isFile) &&
+                File(dir, "tokens.txt").isFile &&
+                File(dir, "espeak-ng-data/phontab").isFile
+        }
     }
 
     /** Delete packs from voices that are no longer offered. */
@@ -293,9 +359,18 @@ object PiperVoiceDownloader {
     /** Unpack model.onnx, tokens.txt and espeak-ng-data into a temp folder. */
     private suspend fun extract(context: Context, voice: PiperVoice, archive: File) =
         withContext(Dispatchers.IO) {
-            if (voice.engine == LocalVoiceEngine.Supertonic) {
-                extractSupertonic(context, voice, archive)
-                return@withContext
+            when (voice.engine) {
+                LocalVoiceEngine.Supertonic -> {
+                    extractSupertonic(context, voice, archive)
+                    return@withContext
+                }
+                // Pocket is a five-model pipeline and Kitten ships voices.bin
+                // beside its model, so both need their own filenames.
+                LocalVoiceEngine.Pocket, LocalVoiceEngine.Kitten -> {
+                    extractTree(context, voice, archive)
+                    return@withContext
+                }
+                LocalVoiceEngine.Vits -> Unit
             }
             val target = dir(context, voice)
             val temp = File(target.parentFile, "${voice.id}.tmp")
@@ -350,6 +425,75 @@ object PiperVoiceDownloader {
                     !File(temp, "tokens.txt").isFile ||
                     !File(temp, "espeak-ng-data/phontab").isFile
                 ) {
+                    throw IOException("The voice archive was missing its model files.")
+                }
+
+                target.deleteRecursively()
+                if (!temp.renameTo(target)) {
+                    temp.copyRecursively(target, overwrite = true)
+                    temp.deleteRecursively()
+                }
+                _state.value = State.Working(voice, Phase.Extracting, total, total)
+            } catch (error: Exception) {
+                temp.deleteRecursively()
+                throw error
+            }
+        }
+
+    /**
+     * Multi-file packs must keep the layout the engine expects. Unlike the
+     * VITS path — which renames its single model to `model.onnx` — Pocket's
+     * five ONNX graphs and Kitten's `voices.bin` are referenced by name.
+     */
+    private suspend fun extractTree(context: Context, voice: PiperVoice, archive: File) =
+        withContext(Dispatchers.IO) {
+            val target = dir(context, voice)
+            val temp = File(target.parentFile, "${voice.id}.tmp")
+            temp.deleteRecursively()
+            temp.mkdirs()
+            val total = archive.length()
+            val jobContext = currentCoroutineContext()
+            var lastReportAt = 0L
+
+            try {
+                archive.inputStream().use { raw ->
+                    val counting = CountingStream(raw, total) { read ->
+                        val now = System.currentTimeMillis()
+                        if (now - lastReportAt > 500) {
+                            lastReportAt = now
+                            _state.value = State.Working(voice, Phase.Extracting, read, total)
+                        }
+                    }
+                    BZip2CompressorInputStream(counting, true).use { bzip ->
+                        TarArchiveInputStream(bzip).use { tar ->
+                            var entry = tar.nextEntry
+                            while (entry != null) {
+                                jobContext.ensureActive()
+                                val name = entry.name
+                                // Strip the archive's top-level folder; sample
+                                // wavs and licence files are not needed.
+                                val relative = name.substringAfter('/', "")
+                                val wanted = relative.isNotBlank() &&
+                                    !entry.isDirectory &&
+                                    !relative.startsWith("test_wavs/") &&
+                                    !relative.endsWith("README.md") &&
+                                    !relative.startsWith("LICENSE")
+                                if (wanted) {
+                                    require(!relative.contains("..")) {
+                                        "The voice archive had an unsafe path."
+                                    }
+                                    writeEntry(tar, File(temp, relative))
+                                } else {
+                                    // Skip the entry's bytes without buffering it.
+                                    tar.skip(entry.size)
+                                }
+                                entry = tar.nextEntry
+                            }
+                        }
+                    }
+                }
+
+                if (!hasFiles(temp, voice)) {
                     throw IOException("The voice archive was missing its model files.")
                 }
 

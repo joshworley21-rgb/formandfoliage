@@ -8,7 +8,9 @@ import android.util.Log
 import com.k2fsa.sherpa.onnx.GeneratedAudio
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsKittenModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsPocketModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsSupertonicModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
@@ -58,7 +60,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     /** Phonon 31m, when downloaded and selected; otherwise this class's own engines. */
     private var phonon: PhononSpeech? = null
 
-    private enum class EngineKind { Kokoro, Piper, Supertonic }
+    private enum class EngineKind { Kokoro, Piper, Supertonic, Pocket, Kitten }
 
     @Volatile
     private var engineKind = EngineKind.Kokoro
@@ -134,8 +136,15 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         ensureEngine()
     }
 
-    private suspend fun phononActive(): Boolean =
-        AssistantPreferences.phononFlow(context).first() && PhononDownloader.isInstalled(context)
+    private suspend fun phononActive(): Boolean {
+        // An explicitly chosen local voice wins over Phonon; clearing it goes
+        // back to Phonon without changing the Phonon toggle.
+        val local = AssistantPreferences.piperVoiceFlow(context).first()
+            ?.takeIf { PiperVoiceDownloader.isInstalled(context, it) }
+        if (local != null) return false
+        return AssistantPreferences.phononFlow(context).first() &&
+            PhononDownloader.isInstalled(context)
+    }
 
     private fun phononSpeech(): PhononSpeech =
         phonon ?: PhononSpeech(context).also { phonon = it }
@@ -382,6 +391,83 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     private fun buildLocalVoice(dir: File, voice: PiperVoice): OfflineTts? = when (voice.engine) {
         LocalVoiceEngine.Supertonic -> buildSupertonic(dir, voice)
         LocalVoiceEngine.Vits -> buildVits(dir, voice)
+        LocalVoiceEngine.Pocket -> buildPocket(dir, voice)
+        LocalVoiceEngine.Kitten -> buildKitten(dir, voice)
+    }
+
+    /** The first of [names] present in [dir], as an absolute path. */
+    private fun pick(dir: File, vararg names: String): String =
+        names.map { File(dir, it) }.firstOrNull { it.isFile }?.absolutePath
+            ?: File(dir, names.first()).absolutePath
+
+    /** Kyutai Pocket TTS: 100M parameters, CPU, fast to first audio. */
+    private fun buildPocket(dir: File, voice: PiperVoice): OfflineTts? {
+        CrashLog.note(context, TAG, "model=pocket:${voice.id}")
+        val config = OfflineTtsConfig(
+            model = OfflineTtsModelConfig(
+                pocket = OfflineTtsPocketModelConfig(
+                    // int8 and fp32 packs differ only in the suffix.
+                    lmFlow = pick(dir, "lm_flow.int8.onnx", "lm_flow.onnx"),
+                    lmMain = pick(dir, "lm_main.int8.onnx", "lm_main.onnx"),
+                    encoder = pick(dir, "encoder.onnx"),
+                    decoder = pick(dir, "decoder.int8.onnx", "decoder.onnx"),
+                    textConditioner = pick(dir, "text_conditioner.onnx"),
+                    vocabJson = File(dir, "vocab.json").absolutePath,
+                    tokenScoresJson = File(dir, "token_scores.json").absolutePath,
+                    voiceEmbeddingCacheCapacity = 16,
+                ),
+                numThreads = 4,
+                provider = "cpu",
+            ),
+            maxNumSentences = 1,
+        )
+        return try {
+            val created = OfflineTts(assetManager = null, config = config)
+            engineKind = EngineKind.Pocket
+            CrashLog.note(
+                context,
+                TAG,
+                "OfflineTts ready (pocket ${voice.id}, ${created.numSpeakers()} voices)",
+            )
+            created
+        } catch (error: Exception) {
+            CrashLog.note(context, TAG, "Pocket engine failed: ${error.message}")
+            Log.e(TAG, "Pocket engine creation failed", error)
+            null
+        }
+    }
+
+    /** Kitten nano: 15M parameters, eight voices, the quickest here. */
+    private fun buildKitten(dir: File, voice: PiperVoice): OfflineTts? {
+        CrashLog.note(context, TAG, "model=kitten:${voice.id}")
+        val config = OfflineTtsConfig(
+            model = OfflineTtsModelConfig(
+                kitten = OfflineTtsKittenModelConfig(
+                    model = File(dir, "model.int8.onnx").absolutePath,
+                    voices = File(dir, "voices.bin").absolutePath,
+                    tokens = File(dir, "tokens.txt").absolutePath,
+                    dataDir = File(dir, "espeak-ng-data").absolutePath,
+                    lengthScale = 1.0f,
+                ),
+                numThreads = 4,
+                provider = "cpu",
+            ),
+            maxNumSentences = 1,
+        )
+        return try {
+            val created = OfflineTts(assetManager = null, config = config)
+            engineKind = EngineKind.Kitten
+            CrashLog.note(
+                context,
+                TAG,
+                "OfflineTts ready (kitten ${voice.id}, ${created.numSpeakers()} voices)",
+            )
+            created
+        } catch (error: Exception) {
+            CrashLog.note(context, TAG, "Kitten engine failed: ${error.message}")
+            Log.e(TAG, "Kitten engine creation failed", error)
+            null
+        }
     }
 
     /** Supertonic 3: a fast multi-file ONNX pipeline with ten voice styles. */
@@ -425,7 +511,10 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         val config = OfflineTtsConfig(
             model = OfflineTtsModelConfig(
                 vits = OfflineTtsVitsModelConfig(
-                    model = File(dir, "model.onnx").absolutePath,
+                    model = File(dir, "model.int8.onnx")
+                        .takeIf { it.isFile }
+                        ?.absolutePath
+                        ?: File(dir, "model.onnx").absolutePath,
                     tokens = File(dir, "tokens.txt").absolutePath,
                     dataDir = File(dir, "espeak-ng-data").absolutePath,
                     lengthScale = 1.0f,
