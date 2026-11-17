@@ -157,12 +157,18 @@ class CallBriefing(
             in 17..21 -> "Evening"
             else -> "Hello"
         }
+        val winter = month == java.time.Month.NOVEMBER ||
+            month == java.time.Month.DECEMBER ||
+            month == java.time.Month.JANUARY ||
+            month == java.time.Month.FEBRUARY
         val seasonal = when {
-            month == java.time.Month.NOVEMBER ||
-                month == java.time.Month.DECEMBER ||
-                month == java.time.Month.JANUARY ||
-                month == java.time.Month.FEBRUARY ->
-                if (hour >= 15) "getting dark early out there" else null
+            // Winter mornings are cold and wet; after three it is the light
+            // that goes. No weather API needed to know a UK January.
+            winter && hour in 5..11 -> listOf(
+                "wrap up warm out there",
+                "looks like a muddy one today",
+            ).random()
+            winter -> if (hour >= 15) "getting dark early out there" else null
             month in java.time.Month.JUNE..java.time.Month.AUGUST ->
                 if (hour >= 15) "long day in the heat" else null
             month == java.time.Month.MARCH ||

@@ -173,6 +173,39 @@ class VoiceActionRunner(
         }
     }
 
+    /**
+     * Routine-log acknowledgements, shuffled so a run of jobs does not sound
+     * like a machine reading the same line.
+     */
+    private fun tradeAck(): String = listOf(
+        "Sorted, ${VoiceLines.OWNER_NAME}. Logged.",
+        "Righto, that's in.",
+        "Spot on, consider it done.",
+        "All sorted.",
+        "Bosh. Saved that for you.",
+    ).random()
+
+    /** Friday-afternoon sign-off, only when a job is being closed. */
+    private fun fridaySignOff(): String {
+        val now = LocalDateTime.now()
+        if (now.dayOfWeek != DayOfWeek.FRIDAY || now.toLocalTime() < LocalTime.of(14, 0)) {
+            return ""
+        }
+        val line = listOf(
+            "Almost time to down tools, ${VoiceLines.OWNER_NAME}.",
+            "Must be pub time soon, surely?",
+            "Last push for the week!",
+        ).random()
+        return " $line"
+    }
+
+    /** Human reaction when something has to be taken back out. */
+    private fun undoBanter(): String = listOf(
+        "No worries, scrubbed that.",
+        "Whoops. Deleted.",
+        "Right, wiped that from the record, ${VoiceLines.OWNER_NAME}.",
+    ).random()
+
     /** Pace markers — the runner knows the kind of reply; TTS honours it. */
     private fun fast(text: String): String = "${TtsProsody.FAST}$text"
 
@@ -621,22 +654,14 @@ class VoiceActionRunner(
         val whenText = if (date == LocalDate.now()) "" else " for ${date.dayOfMonth}/${date.monthValue}"
         // Time-of-day empathy, checked with two LocalDateTime reads — no
         // model, no I/O. A question ending also suppresses "anything else?".
+        val detail = "${hoursLabel(hours)} for ${client.name}$whenText, ${money(draft.amount)}"
         val now = LocalDateTime.now()
         val reply = when {
             now.dayOfWeek == DayOfWeek.FRIDAY && now.toLocalTime() >= LocalTime.of(15, 0) ->
-                "Logged ${hoursLabel(hours)} at ${client.name}. " +
-                    "Last one of the week, or keeping going?"
+                "${tradeAck()} $detail. Last one of the week, or keeping going?"
             now.toLocalTime() < LocalTime.of(9, 30) ->
-                "Morning! Logged ${hoursLabel(hours)} at ${client.name}$whenText."
-            else -> VoiceLines.pick(
-                "Logged ${hoursLabel(hours)} for ${client.name}$whenText, ${money(draft.amount)}.",
-                "Sorted — ${hoursLabel(hours)} down for ${client.name}$whenText, " +
-                    "${money(draft.amount)}.",
-                "All logged. ${hoursLabel(hours)} at ${client.name}$whenText, " +
-                    "that's ${money(draft.amount)}.",
-                "Done — ${hoursLabel(hours)} for ${client.name}$whenText goes on at " +
-                    "${money(draft.amount)}.",
-            )
+                "Morning! $detail."
+            else -> "${tradeAck()} $detail."
         }
         return fast(reply + (debt ?: ""))
     }
@@ -774,13 +799,7 @@ class VoiceActionRunner(
                 repository.reopenJob(job.id)
                 "That job is back on the schedule."
             }
-            fast(
-                VoiceLines.pick(
-                    "Right, marked that done for $name.",
-                    "Done — $name's job is closed off.",
-                    "Sorted, $name is marked down.",
-                ) + (debt ?: ""),
-            )
+            fast("${tradeAck()} $name's job is closed off." + fridaySignOff() + (debt ?: ""))
         } else {
             val hours = round2((job.durationMinutes / 60.0).coerceAtLeast(0.5))
             val amount = client?.let {
@@ -809,10 +828,9 @@ class VoiceActionRunner(
                 "Back on the schedule, and the visit is gone."
             }
             fast(
-                VoiceLines.pick(
-                    "Right, marked that done for $name — ${hoursLabel(hours)}.",
-                    "All sorted — stuck ${hoursLabel(hours)} down for $name and closed the job.",
-                ) + (debt ?: ""),
+                "${tradeAck()} ${hoursLabel(hours)} for $name — job's closed off." +
+                    fridaySignOff() +
+                    (debt ?: ""),
             )
         }
     }
@@ -835,23 +853,23 @@ class VoiceActionRunner(
                         runCatching { repository.deleteVoiceVisit(action.id) }
                         if (action.id == lastVoiceVisit?.id) lastVoiceVisit = null
                     }
-                    "Scratched that — ${action.clientName}'s job is back on the list. " +
-                        "What did you actually get done?"
+                    "${undoBanter()} ${action.clientName}'s job is back on the list — " +
+                        "what did you actually get done?"
                 }
 
                 Undo.Kind.Expense -> {
                     runCatching { repository.deleteVoiceVisit(action.id) }
                         .getOrElse { return "I couldn't remove that charge." }
                     if (action.id == lastVoiceVisit?.id) lastVoiceVisit = null
-                    "Right, scratched that. What did you actually want to charge?"
+                    "${undoBanter()} What did you actually want to charge?"
                 }
 
                 Undo.Kind.TimeLog -> {
                     runCatching { repository.deleteVoiceVisit(action.id) }
                         .getOrElse { return "I couldn't remove that visit." }
                     if (action.id == lastVoiceVisit?.id) lastVoiceVisit = null
-                    "Scratched that visit for ${action.clientName}. " +
-                        "How long were you actually there?"
+                    "${undoBanter()} That visit for ${action.clientName} is gone — " +
+                        "how long were you actually there?"
                 }
             }
 
@@ -859,10 +877,7 @@ class VoiceActionRunner(
                 val client = repository.client(action.clientId)
                     ?: return "That client is gone."
                 repository.updateClient(client, clientDraft(client, action.previous))
-                VoiceLines.pick(
-                    "Removed that note for ${action.clientName}.",
-                    "Right, the note for ${action.clientName} is gone.",
-                )
+                "${undoBanter()} That note on ${action.clientName} is gone."
             }
         }
     }
