@@ -185,6 +185,9 @@ class AssistantService : Service() {
         speech = SpeechEngine.get(this)
         speech.onBargeIn = {
             CrashLog.note(this, TAG, "barge-in; stopping playback")
+            // Only a real interruption of the voice counts — a barge while
+            // the line is merely open is normal turn-taking.
+            if (_speaking.value) AssistantMemory.wasInterrupted = true
             speaker.stopPlayback()
             cloudVoice?.stop()
         }

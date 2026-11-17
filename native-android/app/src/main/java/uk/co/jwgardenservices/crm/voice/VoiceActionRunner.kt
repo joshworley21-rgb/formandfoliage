@@ -118,7 +118,10 @@ class VoiceActionRunner(
         .filter { it.isNotBlank() }
 
     /** "Read them all" / "No thanks" for a chunked list. */
-    suspend fun continueReadAll(transcript: String): String? {
+    suspend fun continueReadAll(transcript: String): String? =
+        pivot(continueReadAllImpl(transcript))
+
+    private suspend fun continueReadAllImpl(transcript: String): String? {
         val items = pendingReadAll ?: return null
         val words = tokenWords(transcript.lowercase())
         val yes = words.any { it in SEND_YES } && words.none { it in SEND_NO }
@@ -147,6 +150,28 @@ class VoiceActionRunner(
     )
 
     private var pendingSend: PendingSend? = null
+
+    /**
+     * If the last reply was talked over, open this one with a small pivot so
+     * the assistant acknowledges the interruption instead of barrelling on.
+     * The pace marker stays first; the flag is spent exactly once.
+     */
+    suspend fun pivot(reply: String?): String? {
+        if (reply == null) return null
+        if (!AssistantMemory.wasInterrupted) return reply
+        AssistantMemory.wasInterrupted = false
+        val opening = VoiceLines.pick(
+            "Right, ",
+            "Yep, ",
+            "Moving on — ",
+            "Skipping ahead — ",
+        )
+        return when (reply.firstOrNull()) {
+            TtsProsody.FAST -> "${TtsProsody.FAST}$opening${reply.substring(1)}"
+            TtsProsody.SLOW -> "${TtsProsody.SLOW}$opening${reply.substring(1)}"
+            else -> opening + reply
+        }
+    }
 
     /** Pace markers — the runner knows the kind of reply; TTS honours it. */
     private fun fast(text: String): String = "${TtsProsody.FAST}$text"
@@ -178,7 +203,7 @@ class VoiceActionRunner(
                 return slow(askWhich(ambiguous))
             }
         }
-        return execute(transcript, intent)
+        return pivot(execute(transcript, intent))
     }
 
     /** Dispatch only; [run] wraps this with the ambiguity check. */
@@ -217,7 +242,10 @@ class VoiceActionRunner(
      * null when this sentence is not an answer to the pending question, in
      * which case the caller classifies it normally.
      */
-    suspend fun continuePending(transcript: String): String? {
+    suspend fun continuePending(transcript: String): String? =
+        pivot(continuePendingImpl(transcript))
+
+    private suspend fun continuePendingImpl(transcript: String): String? {
         val pending = pending ?: return null
         val text = transcript.lowercase()
         val hours = spokenHours(text) ?: pending.hours
@@ -299,6 +327,8 @@ class VoiceActionRunner(
         pendingReadAll = null
         resolvedClientId = null
         lastVoiceVisit = null
+        // Never let a cut-off from last night pivot tomorrow's first reply.
+        AssistantMemory.wasInterrupted = false
     }
 
     /** Hand the visits of a finished wrap-up to the caller for invoicing. */
@@ -352,7 +382,10 @@ class VoiceActionRunner(
      * Answer a wrap-up question. Returns null when no wrap-up is running, so
      * the caller can classify the sentence normally.
      */
-    suspend fun continueWrapUp(transcript: String): String? {
+    suspend fun continueWrapUp(transcript: String): String? =
+        pivot(continueWrapUpImpl(transcript))
+
+    private suspend fun continueWrapUpImpl(transcript: String): String? {
         val state = wrapUp ?: return null
         val text = transcript.lowercase().trim()
         if (text.isEmpty()) return null
@@ -777,8 +810,10 @@ class VoiceActionRunner(
     }
 
     /** Reverse the last reversible action: a logged visit or a client note. */
-    suspend fun undoLast(): String {
-        val action = lastUndo ?: return "Nothing to undo."
+    suspend fun undoLast(): String = pivot(undoLastImpl()) ?: "Nothing to undo."
+
+    private suspend fun undoLastImpl(): String? {
+        val action = lastUndo ?: return null
         lastUndo = null
         return when (action) {
             is Undo.Visit -> when (action.kind) {
@@ -1087,7 +1122,10 @@ class VoiceActionRunner(
      * Anything that is not a yes or a no clears the question and is
      * classified normally.
      */
-    suspend fun continueSend(transcript: String): String? {
+    suspend fun continueSend(transcript: String): String? =
+        pivot(continueSendImpl(transcript))
+
+    private suspend fun continueSendImpl(transcript: String): String? {
         val pending = pendingSend ?: return null
         val lower = transcript.lowercase().trim()
         val words = lower.replace(Regex("[^a-z' ]"), " ")
@@ -1596,7 +1634,10 @@ class VoiceActionRunner(
     }
 
     /** The answer to "which one?", executed against the original command. */
-    suspend fun continueClarification(transcript: String): String? {
+    suspend fun continueClarification(transcript: String): String? =
+        pivot(continueClarificationImpl(transcript))
+
+    private suspend fun continueClarificationImpl(transcript: String): String? {
         val waiting = pendingClarification ?: return null
         pendingClarification = null
         val clients = repository.observeClients().first()
@@ -1621,7 +1662,10 @@ class VoiceActionRunner(
     }
 
     /** The answer to "want me to flag that?". */
-    suspend fun continueChase(transcript: String): String? {
+    suspend fun continueChase(transcript: String): String? =
+        pivot(continueChaseImpl(transcript))
+
+    private suspend fun continueChaseImpl(transcript: String): String? {
         val chasing = pendingChase ?: return null
         val words = transcript.lowercase()
             .replace(Regex("[^a-z' ]"), " ")

@@ -50,6 +50,14 @@ object AssistantMemory {
     @Volatile
     var lastSpokenReply: String? = null
 
+    /**
+     * Set when the owner talks over a reply. The next answer opens with a
+     * small pivot ("Right, …") so the assistant acknowledges being cut off
+     * instead of pretending it finished.
+     */
+    @Volatile
+    var wasInterrupted = false
+
     private val FACTS = stringPreferencesKey("facts")
     private val TURNS = stringPreferencesKey("turns")
     private val CLOUD_CONVERSATION = booleanPreferencesKey("cloud_conversation")
