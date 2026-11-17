@@ -692,7 +692,11 @@ class VoiceActionRunner(
             val day = starts.localDate()
             !day.isBefore(range.from) && !day.isAfter(range.to)
         }
-        if (jobs.isEmpty()) return "Nothing booked ${range.label}."
+        if (jobs.isEmpty()) return VoiceLines.pick(
+            "Nothing booked ${range.label}, ${VoiceLines.OWNER_NAME}.",
+            "Clear diary ${range.label}.",
+            "Nothing on ${range.label} — free run at it.",
+        )
 
         val clients = repository.observeClients().first()
         val items = jobs.map { (job, starts) ->

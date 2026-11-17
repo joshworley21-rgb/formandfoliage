@@ -30,6 +30,9 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -173,7 +176,7 @@ internal fun JobEditorDialog(
                     label = "Date",
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
                         value = time,
                         onValueChange = { time = it },
@@ -181,21 +184,12 @@ internal fun JobEditorDialog(
                         singleLine = true,
                         modifier = Modifier.weight(1f),
                     )
-                    OutlinedTextField(
-                        value = duration,
-                        onValueChange = { duration = it },
-                        label = { Text("Minutes") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    Spacer(Modifier.width(12.dp))
+                    DurationDropdown(
+                        selectedMinutes = durationValue,
                         modifier = Modifier.weight(1f),
+                        onPick = { duration = it.toString() },
                     )
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DurationPreset("1h", 60) { duration = it.toString() }
-                    DurationPreset("2h", 120) { duration = it.toString() }
-                    DurationPreset("4h", 240) { duration = it.toString() }
-                    DurationPreset("8h", 480) { duration = it.toString() }
                 }
 
                 OutlinedTextField(
@@ -845,9 +839,76 @@ internal fun SeriesDialog(
     }
 }
 
+/**
+ * One tap for how long the job runs: a dropdown of the usual slots instead
+ * of a free-text minutes field and four floating buttons. An odd existing
+ * duration (45 minutes, say) is kept in the list so editing never silently
+ * rounds it.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DurationPreset(label: String, minutes: Int, onPick: (Int) -> Unit) {
-    OutlinedButton(onClick = { onPick(minutes) }) {
-        Text(label)
+private fun DurationDropdown(
+    selectedMinutes: Int,
+    modifier: Modifier = Modifier,
+    onPick: (Int) -> Unit,
+) {
+    val standard = listOf(30, 60, 90, 120, 150, 180, 240, 300, 360, 480)
+    val options = remember(selectedMinutes) {
+        if (selectedMinutes > 0 && selectedMinutes !in standard) {
+            (standard + selectedMinutes).sorted()
+        } else {
+            standard
+        }
+    }
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded },
+        modifier = modifier,
+    ) {
+        OutlinedTextField(
+            value = if (selectedMinutes > 0) durationLabel(selectedMinutes) else "",
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            label = { Text("How long") },
+            placeholder = { Text("Pick hours") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth(),
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            options.forEach { minutes ->
+                DropdownMenuItem(
+                    text = { Text(durationLabel(minutes)) },
+                    onClick = {
+                        onPick(minutes)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+private fun durationLabel(minutes: Int): String = when (minutes) {
+    30 -> "30 minutes"
+    60 -> "1 hour"
+    90 -> "1½ hours"
+    120 -> "2 hours"
+    150 -> "2½ hours"
+    180 -> "3 hours"
+    240 -> "4 hours"
+    300 -> "5 hours"
+    360 -> "6 hours"
+    480 -> "8 hours"
+    else -> if (minutes % 60 == 0) {
+        "${minutes / 60} hours"
+    } else {
+        "${minutes / 60}h ${minutes % 60}m".trim()
     }
 }

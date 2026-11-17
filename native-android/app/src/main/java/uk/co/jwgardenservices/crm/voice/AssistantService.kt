@@ -1382,14 +1382,39 @@ class AssistantService : Service() {
         val lower = text.lowercase().trim().trimEnd('.', '!', '?', ',')
         return when {
             Regex("^(hi|hello|hey|good morning|good afternoon|good evening)\b")
-                .containsMatchIn(lower) -> "Hello. What can I do?"
+                .containsMatchIn(lower) -> VoiceLines.pick(
+                "Hello ${VoiceLines.OWNER_NAME} — what do you need?",
+                "Hey — go on then.",
+                "Morning — what are we doing?",
+                "Afternoon ${VoiceLines.OWNER_NAME} — what's next?",
+            )
+            Regex("\\b(you alright|you ok|how's it going|hows it going|how are you)\\b")
+                .containsMatchIn(lower) -> VoiceLines.pick(
+                "All good, thanks — what do you need?",
+                "Can't complain. What's next?",
+            )
             lower in setOf(
                 "no", "no thanks", "nothing", "that's all", "thats all", "all done",
-                "we're done", "were done", "finished", "no thank you",
-            ) -> "Right, I'll leave you to it."
-            lower.contains("thank") -> "Any time."
-            lower.contains("how are you") -> "All good, thanks. What do you need?"
+                "we're done", "were done", "finished", "no thank you", "nothing else",
+            ) -> VoiceLines.pick(
+                "Right, I'll leave you to it.",
+                "No worries — I'm here if you need me.",
+            )
+            lower in setOf(
+                "bye", "goodbye", "night", "good night", "see you", "speak later",
+                "that's me done", "thats me done",
+            ) -> VoiceLines.pick(
+                "Right — talk later, ${VoiceLines.OWNER_NAME}.",
+                "Go on then — I'll be here.",
+            )
+            lower.contains("thank") || lower in setOf("ta", "nice one", "cheers") ->
+                VoiceLines.pick("Any time.", "No worries.", "Pleasure.")
             lower.contains("what can you do") || lower == "help" -> HELP_TEXT
+            lower.contains("busy") && lower.split(Regex("\\s+")).size <= 4 ->
+                VoiceLines.pick(
+                    "Busy enough. What's next?",
+                    "Busy one, aye. What do you need?",
+                )
             else -> null
         }
     }
