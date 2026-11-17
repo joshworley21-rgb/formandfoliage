@@ -62,7 +62,7 @@ object InvoicePdf {
         }
         val band = Paint().apply { color = bandColor }
 
-        val businessName = settings?.businessName ?: "JW Garden Services"
+        val businessName = settings?.businessName ?: "Form & Foliage"
         val right = PAGE_WIDTH - MARGIN
 
         fun drawFooter() {

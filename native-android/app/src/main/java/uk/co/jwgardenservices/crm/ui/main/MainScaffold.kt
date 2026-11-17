@@ -127,7 +127,7 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                         Spacer(Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "Garden Services",
+                                text = "Form & Foliage",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                             )

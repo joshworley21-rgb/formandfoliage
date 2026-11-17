@@ -27,7 +27,7 @@ class AssistantContext(
 ) {
     suspend fun snapshot(memories: List<String>, turns: List<AssistantTurn>): String = buildString {
         val settings = runCatching { repository.getSettings() }.getOrNull()
-        appendLine("Business: ${settings?.businessName ?: "JW Garden Services"}.")
+        appendLine("Business: ${settings?.businessName ?: "Form & Foliage"}.")
         if (settings != null) {
             appendLine(
                 "VAT: " + if (settings.vatRegistered) {

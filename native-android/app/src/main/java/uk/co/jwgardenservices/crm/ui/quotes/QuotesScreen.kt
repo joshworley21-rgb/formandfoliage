@@ -156,7 +156,7 @@ fun QuotesScreen(viewModel: CrmViewModel) {
         val link = quoteLink(quote.publicKey, origin)
         ShareText.share(
             context = context,
-            text = "Quote ${quote.number} from Garden Services: $link",
+            text = "Quote ${quote.number} from Form & Foliage: $link",
             title = "Share quote link",
         )
     }

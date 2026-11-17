@@ -6,16 +6,16 @@ import androidx.compose.ui.graphics.Color
 // keeping the same hue family. Text/background pairs keep at least 4.5:1.
 
 // Light
-val LightBackground = Color(0xFFF4FAF0)
+val LightBackground = Color(0xFFFBF9F6)
 val LightForeground = Color(0xFF13241A)
 val LightCard = Color(0xFFFFFFFF)
-val LightPrimary = Color(0xFF2A7F44)
+val LightPrimary = Color(0xFF1F4A33)
 val LightPrimaryForeground = Color(0xFFFFFFFF)
-val LightPrimaryContainer = Color(0xFFCDEFD2)
-val LightOnPrimaryContainer = Color(0xFF0B3A1B)
+val LightPrimaryContainer = Color(0xFFD9E8D5)
+val LightOnPrimaryContainer = Color(0xFF102A1C)
 // `secondary` is the app's soft "muted panel" colour (chips, info boxes), so it
 // stays a light tint rather than a strong accent.
-val LightSecondary = Color(0xFFE8F5E3)
+val LightSecondary = Color(0xFFEFF3EA)
 val LightSecondaryContainer = Color(0xFFCFEBD3)
 val LightOnSecondaryContainer = Color(0xFF17361F)
 val LightMutedForeground = Color(0xFF55675B)
@@ -23,8 +23,8 @@ val LightDestructive = Color(0xFFB3321F)
 val LightDestructiveForeground = Color(0xFFFFFFFF)
 val LightErrorContainer = Color(0xFFFADAD3)
 val LightOnErrorContainer = Color(0xFF5A0F05)
-val LightBorder = Color(0xFFD5E3D1)
-val LightOutlineVariant = Color(0xFFE2EDDF)
+val LightBorder = Color(0xFFD9E2D3)
+val LightOutlineVariant = Color(0xFFE7EDE2)
 val LightLime = Color(0xFF7FAE33)
 val LightLimeForeground = Color(0xFF13241A)
 val LightLimeContainer = Color(0xFFE3F4B8)

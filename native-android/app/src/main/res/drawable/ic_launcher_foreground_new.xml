@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive-icon foreground: the brand mark inset into the 108dp canvas so
+     nothing falls outside the launcher's safe zone. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_brand_mark"
+    android:inset="20dp" />

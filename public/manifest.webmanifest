@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "JW Garden Services CRM",
-  "short_name": "JW Garden",
-  "description": "Client, visit and invoicing manager for JW Garden Services — schedule jobs, log hours and send invoices.",
+  "name": "Form & Foliage CRM",
+  "short_name": "Form & Foliage",
+  "description": "Client, visit and invoicing manager for Form & Foliage — schedule jobs, log hours and send invoices.",
   "start_url": "/",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui", "browser"],
@@ -40,14 +40,14 @@
       "sizes": "412x915",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "JW Garden Services CRM on mobile"
+      "label": "Form & Foliage CRM on mobile"
     },
     {
       "src": "/screenshot-wide.png",
       "sizes": "1280x720",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "JW Garden Services CRM on desktop"
+      "label": "Form & Foliage CRM on desktop"
     }
   ],
   "shortcuts": [

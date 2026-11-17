@@ -565,7 +565,7 @@ suspend fun CrmRepository.saveSettings(draft: SettingsDraft) {
         val uid = userId()
         val existing = settings.get()
         val row = (existing ?: Settings(userId = uid)).copy(
-            businessName = draft.businessName.trim().ifBlank { "JW Garden Services" },
+            businessName = draft.businessName.trim().ifBlank { "Form & Foliage" },
             address = draft.address.clean(),
             phone = draft.phone.clean(),
             email = draft.email.clean(),

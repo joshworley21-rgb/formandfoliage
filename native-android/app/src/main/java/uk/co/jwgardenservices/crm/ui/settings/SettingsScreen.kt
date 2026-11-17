@@ -63,7 +63,7 @@ import uk.co.jwgardenservices.crm.ui.theme.LocalThemeMode
 import uk.co.jwgardenservices.crm.ui.theme.ThemeMode
 
 private data class SettingsForm(
-    val businessName: String = "JW Garden Services",
+    val businessName: String = "Form & Foliage",
     val address: String = "",
     val phone: String = "",
     val email: String = "",

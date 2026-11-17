@@ -2,7 +2,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
   appId: "uk.co.jwgardenservices.crm",
-  appName: "JW Garden Services",
+  appName: "Form & Foliage",
   // Built by `bun run build:app`, which turns the SPA output into a folder the
   // WebView can load directly. Not .output/public — that has no index.html.
   webDir: "dist-app",

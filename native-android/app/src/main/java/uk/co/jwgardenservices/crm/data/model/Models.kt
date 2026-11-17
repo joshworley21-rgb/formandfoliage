@@ -123,7 +123,7 @@ data class InvoiceItem(
 @Entity(tableName = "settings")
 data class Settings(
     @PrimaryKey @SerialName("user_id") val userId: String,
-    @SerialName("business_name") val businessName: String = "JW Garden Services",
+    @SerialName("business_name") val businessName: String = "Form & Foliage",
     val address: String? = null,
     val phone: String? = null,
     val email: String? = null,

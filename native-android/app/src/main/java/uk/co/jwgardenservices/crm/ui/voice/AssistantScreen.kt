@@ -261,7 +261,7 @@ fun AssistantScreen() {
         Spacer(Modifier.height(if (compact) 10.dp else 18.dp))
 
         Text(
-            text = "J W Assistant",
+            text = "Form & Foliage",
             style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onBackground,

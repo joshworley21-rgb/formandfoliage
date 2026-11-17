@@ -1647,7 +1647,7 @@ class AssistantService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("J W Garden Services")
+            .setContentTitle("Form & Foliage")
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_notification)
             .setOngoing(true)
