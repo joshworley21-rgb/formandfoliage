@@ -1,6 +1,9 @@
 package uk.co.jwgardenservices.crm.ui.settings
 
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -8,6 +11,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -23,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import uk.co.jwgardenservices.crm.core.Branding
 import uk.co.jwgardenservices.crm.core.TaxReservePrefs
 import androidx.compose.material3.Switch
 import java.time.LocalDate
@@ -38,11 +43,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -277,6 +285,76 @@ fun SettingsScreen(
                     modifier = Modifier.padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    // The app is Form & Foliage; the paperwork carries the
+                    // business that is signed in.
+                    var logoVersion by remember { mutableIntStateOf(0) }
+                    val logoBitmap = remember(logoVersion) {
+                        Branding.load(context)?.asImageBitmap()
+                    }
+                    val logoPicker = rememberLauncherForActivityResult(
+                        ActivityResultContracts.GetContent(),
+                    ) { uri ->
+                        if (uri != null) {
+                            scope.launch {
+                                if (Branding.save(context, uri)) {
+                                    logoVersion++
+                                    Toast.makeText(context, "Logo saved", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "That image could not be read", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier
+                                .width(96.dp)
+                                .height(64.dp),
+                        ) {
+                            if (logoBitmap != null) {
+                                Image(
+                                    bitmap = logoBitmap,
+                                    contentDescription = "Business logo",
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(6.dp),
+                                )
+                            } else {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "No logo",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            OutlinedButton(onClick = { logoPicker.launch("image/*") }) {
+                                Text("Choose logo")
+                            }
+                            if (logoBitmap != null) {
+                                TextButton(
+                                    onClick = {
+                                        scope.launch {
+                                            Branding.clear(context)
+                                            logoVersion++
+                                        }
+                                    },
+                                ) { Text("Remove") }
+                            }
+                        }
+                    }
+                    Text(
+                        text = "Shown on invoices and in the invoice PDF. Each business " +
+                            "keeps its own logo on this phone.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     OutlinedTextField(
                         value = form.businessName,
                         onValueChange = { form = form.copy(businessName = it) },

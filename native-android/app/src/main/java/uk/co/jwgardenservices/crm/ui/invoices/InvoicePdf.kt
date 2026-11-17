@@ -86,6 +86,28 @@ object InvoicePdf {
         }
 
         // ---- Business header -------------------------------------------------
+        // The uploaded mark, if this business has one. Drawn above the name in
+        // a box that never grows taller than two name lines, so a wide logo
+        // cannot push the invoice table off the page.
+        val logo = uk.co.jwgardenservices.crm.core.Branding.load(context)
+        if (logo != null) {
+            val maxWidth = 150f
+            val maxHeight = 54f
+            val scale = minOf(
+                maxWidth / logo.width,
+                maxHeight / logo.height,
+                1f,
+            )
+            val width = logo.width * scale
+            val height = logo.height * scale
+            canvas.drawBitmap(
+                logo,
+                null,
+                android.graphics.RectF(MARGIN, y, MARGIN + width, y + height),
+                null,
+            )
+            y += height + 12f
+        }
         canvas.drawText(businessName, MARGIN, y + 16f, title)
         y += 30f
         val businessLines = buildList {
