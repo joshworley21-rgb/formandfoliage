@@ -650,13 +650,23 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 val text = feed(engine, stream, samples)
                 val vadEndpoint = vad != null && hasSpeech && !voiced &&
                     SystemClock.elapsedRealtime() - lastVoiceAt >= ENDPOINT_SILENCE_MS
-                if (vadEndpoint || engine.isEndpoint(stream)) {
+                val engineEndpoint = engine.isEndpoint(stream)
+                // The recogniser's own idle endpoint (rule 1) can fire while a
+                // sentence is still being spoken. Resetting then throws the
+                // words away — the log showed only the tail arriving
+                // ("…you today"). While the VAD says speech is in progress,
+                // an empty engine endpoint is ignored and the stream survives.
+                if (engineEndpoint && text.isEmpty() && hasSpeech && !vadEndpoint) {
+                    if (frames % 100 == 0) {
+                        CrashLog.note(context, TAG, "engine endpoint ignored: speech in progress")
+                    }
+                } else if (vadEndpoint || engineEndpoint) {
                     engine.reset(stream)
                     if (vadEndpoint || text.isNotEmpty()) {
                         CrashLog.note(
                             context,
                             TAG,
-                            "endpoint: vad=$vadEndpoint text=${text.take(80)}",
+                            "endpoint: vad=$vadEndpoint engine=$engineEndpoint text=${text.take(80)}",
                         )
                     }
                     if (text.isNotEmpty()) publish(text)
@@ -1072,7 +1082,12 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         const val BARGE_FRAMES = 3
 
         /** Silence after the last voiced frame that ends the turn. */
-        const val ENDPOINT_SILENCE_MS = 450L
+        /**
+         * A natural sentence has pauses of half a second or more. Cutting at
+         * 450 ms sliced "what have I got on today" into "…you today"; 800 ms
+         * lets the thought finish before the stream is closed.
+         */
+        const val ENDPOINT_SILENCE_MS = 800L
 
         /** Audio kept before VAD reports speech, so the first word is not clipped. */
         const val PRE_ROLL_SAMPLES = SAMPLE_RATE * 4 / 10

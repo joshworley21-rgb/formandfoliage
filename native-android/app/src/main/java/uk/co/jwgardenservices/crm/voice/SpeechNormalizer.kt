@@ -265,6 +265,12 @@ object SpeechNormalizer {
     /** Single words that are commands even though no rule names them. */
     private val KNOWN_WORDS = setOf("undo", "help", "again", "repeat")
 
+    /** Single words the assistant answers conversationally, not noise. */
+    private val SMALL_TALK_WORDS = setOf(
+        "hello", "hi", "hey", "morning", "afternoon", "evening",
+        "thanks", "thank", "cheers", "ta", "bye", "goodbye",
+    )
+
     /**
      * True when a finalised sentence is not worth a turn: empty, punctuation
      * only, shorter than three meaningful characters, or a single word that
@@ -282,6 +288,7 @@ object SpeechNormalizer {
             val word = words[0].lowercase().trimEnd('.', ',', '!', '?', '—')
             if (word in NON_WORDS) return true
             if (word in KNOWN_WORDS) return false
+            if (word in SMALL_TALK_WORDS) return false
             val intent = IntentRules.classify(word)
             return intent.intent == SpokenIntent.Other && !intent.requiresCloud
         }

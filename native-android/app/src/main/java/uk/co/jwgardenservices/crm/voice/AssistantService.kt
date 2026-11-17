@@ -1468,7 +1468,7 @@ class AssistantService : Service() {
         // Punctuated input ("No thanks.") must still match the plain forms.
         val lower = text.lowercase().trim().trimEnd('.', '!', '?', ',')
         return when {
-            Regex("^(hi|hello|hey|good morning|good afternoon|good evening)\b")
+            Regex("^(hi|hello|hey|morning|afternoon|evening|good morning|good afternoon|good evening)\b")
                 .containsMatchIn(lower) -> VoiceLines.pick(
                 "Hello ${VoiceLines.OWNER_NAME} — what do you need?",
                 "Hey — go on then.",
