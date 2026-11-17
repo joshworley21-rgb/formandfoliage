@@ -118,10 +118,6 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @Volatile
     private var hotwordNames: List<String> = emptyList()
 
-    /** True when the generated bpe.vocab allows token-level hotword biasing. */
-    @Volatile
-    private var hotwordBiasEnabled = false
-
     /** Set while the confirmation is spoken, so the phone ignores itself. */
     @Volatile
     private var paused = false
@@ -394,7 +390,6 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 nemotron = created
                 // NeMo transducer has no decoder biasing here; the transcript
                 // corrector in AsrHotwords still fixes client names.
-                hotwordBiasEnabled = false
                 CrashLog.note(
                     context,
                     TAG,
@@ -480,13 +475,12 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         // Load the tiny punctuation model off the call path; the first
         // sentence is then punctuated without a stall.
         runCatching { Punctuator.warm(context) }
-        hotwordNames = AsrHotwords.biasTerms(context)
-        val hotwordBias = if (!offlineMode && hotwordBiasEnabled) {
-            AsrHotwords.buildBias(hotwordNames)
-        } else {
-            ""
-        }
-        CrashLog.note(context, TAG, "hotword names=${hotwordNames.size} bias=${hotwordBias.isNotBlank()}")
+        // Client names, aliases and the patch vocabulary, used by the
+        // post-ASR fuzzy corrector. Decoder biasing is not available on
+        // either engine here (Nemotron's NeMo transducer accepts
+        // greedy_search only), so this list never reaches the recogniser.
+        hotwordNames = AsrHotwords.correctionTerms(context)
+        CrashLog.note(context, TAG, "correction names=${hotwordNames.size}")
 
         if (!hasMicPermission()) {
             fail("Microphone permission is needed to listen.")
@@ -512,7 +506,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             Thread({ processOffline(record) }, "moonshine-asr")
         } else {
             val engine = onlineEngine ?: return
-            Thread({ process(engine, record, hotwordBias) }, "streaming-asr")
+            Thread({ process(engine, record) }, "streaming-asr")
         }.apply { start() }
         } finally {
             startLock.unlock()
@@ -581,8 +575,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     // --- audio loop -------------------------------------------------------
 
     @SuppressLint("MissingPermission") // checked by startListening before this point
-    private fun process(engine: OnlineRecognizer, record: AudioRecord, hotwords: String) {
-        val stream = if (hotwords.isBlank()) engine.createStream() else engine.createStream(hotwords)
+    private fun process(engine: OnlineRecognizer, record: AudioRecord) {
+        val stream = engine.createStream()
         val vad = createVad()
         var hasSpeech = false
         var lastVoiceAt = 0L

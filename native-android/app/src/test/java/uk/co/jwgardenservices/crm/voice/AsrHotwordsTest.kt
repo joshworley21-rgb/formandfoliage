@@ -3,17 +3,8 @@ package uk.co.jwgardenservices.crm.voice
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** The pure half of client-name biasing: the hotword lines and the correction. */
+/** The post-ASR corrector: near misses become canonical client names. */
 class AsrHotwordsTest {
-
-    @Test
-    fun `names become scored hotword lines`() {
-        assertEquals(
-            "SMITHS :2.0\nMRS JONES :2.0",
-            AsrHotwords.buildBias(listOf("SMITHS", "MRS JONES")),
-        )
-        assertEquals("", AsrHotwords.buildBias(emptyList()))
-    }
 
     @Test
     fun `a near miss is replaced with the client name`() {
