@@ -357,24 +357,32 @@ class AssistantService : Service() {
         val preferred = selectedEngine
         val moonshineInstalled = MoonshineDownloader.isInstalled(this)
         val nemotronInstalled = NemotronDownloader.isInstalled(this)
+        val nemotronFailures = NemotronDownloader.loadFailures(this)
         val tight = lowRam || info.lowMemory || availMb < NEMOTRON_MIN_FREE_MB
-        val effective = if (preferred == AsrEngine.Nemotron && tight && nemotronInstalled) {
-            // Even the smaller model needs space; if it is missing the load
-            // fails with an instruction instead of an abort.
-            AsrEngine.Moonshine
-        } else {
-            preferred
-        }
+        // Retired after two native deaths beats a memory check: it has to
+        // survive a reboot with plenty of RAM free.
+        val retired = preferred == AsrEngine.Nemotron && nemotronFailures >= 2
+        val memoryTight = preferred == AsrEngine.Nemotron && tight && nemotronInstalled
+        val effective = if (retired || memoryTight) AsrEngine.Moonshine else preferred
         speech.engineOverride = effective.takeIf { it != preferred }
         CrashLog.note(
             this,
             TAG,
             "init: sdk=${Build.VERSION.SDK_INT} avail=${availMb}MB lowRam=$lowRam " +
                 "lowMemory=${info.lowMemory} engine=$preferred→$effective " +
-                "(moonshine=$moonshineInstalled nemotron=$nemotronInstalled)",
+                "(moonshine=$moonshineInstalled nemotron=$nemotronInstalled " +
+                "nemotronFailures=$nemotronFailures)",
         )
-        if (effective != preferred) {
-            CrashLog.note(this, TAG, "init: Nemotron needs ${NEMOTRON_MIN_FREE_MB}MB free; using the smaller engine")
+        if (retired) {
+            CrashLog.note(this, TAG, "init: Nemotron retired after native crashes; using the smaller engine")
+            setNotification("Offline engine — Nemotron failed on this phone")
+        } else if (memoryTight) {
+            CrashLog.note(
+                this,
+                TAG,
+                "init: Nemotron needs ${NEMOTRON_MIN_FREE_MB}MB free; using the smaller engine",
+            )
+            setNotification("Offline engine — not enough memory for Nemotron")
         }
     }
 

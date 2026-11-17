@@ -84,6 +84,34 @@ object NemotronDownloader {
         }
     }
 
+    // --- crash-safe load bookkeeping -------------------------------------
+    //
+    // A native abort while constructing the recogniser cannot be caught, so
+    // the only way to learn from it is a marker left on disk. It is written
+    // before the construct and deleted on any normal outcome; if it is still
+    // there on the next launch, the previous process died loading Nemotron.
+
+    private fun attemptMarker(context: Context) = File(dir(context), "load.attempt")
+    private fun failureCounter(context: Context) = File(dir(context), "load.failures.txt")
+
+    /** How many times the process has died constructing Nemotron. */
+    fun loadFailures(context: Context): Int =
+        failureCounter(context).takeIf { it.isFile }
+            ?.readText()?.trim()?.toIntOrNull() ?: 0
+
+    /** Called immediately before the native construct. */
+    fun markAttempt(context: Context) {
+        runCatching { dir(context).mkdirs() }
+        runCatching { failureCounter(context).writeText((loadFailures(context) + 1).toString()) }
+        runCatching { attemptMarker(context).writeText("attempt") }
+    }
+
+    /** Called on every normal outcome, success or thrown exception. */
+    fun clearAttempt(context: Context) {
+        runCatching { attemptMarker(context).delete() }
+        runCatching { failureCounter(context).delete() }
+    }
+
     fun savedBytes(context: Context): Long {
         val dir = dir(context)
         return FILES.keys.sumOf { name ->

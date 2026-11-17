@@ -306,12 +306,30 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 fail("Nemotron is not downloaded. Open Assistant settings to install it.")
                 return@withLock null
             }
+            val failures = NemotronDownloader.loadFailures(context)
+            if (failures >= 2) {
+                // Two native deaths loading this model on this phone. Stop
+                // trying: the call keeps working on the smaller engine.
+                fail("Nemotron kept failing on this phone. Moonshine is the safer engine.")
+                CrashLog.note(context, TAG, "nemotron retired after $failures native failures")
+                return@withLock null
+            }
             _state.update { it.copy(phase = Phase.Loading, message = "Loading Nemotron…") }
-            CrashLog.note(context, TAG, "loading Nemotron (native construct starts)")
+            CrashLog.note(
+                context,
+                TAG,
+                "loading Nemotron (native construct starts, previousFailures=$failures)",
+            )
             val started = System.currentTimeMillis()
-            // Same generated-vocabulary trick as the Zipformer: an equal-score
-            // bpe.vocab from this model's own tokens.txt.
-            val vocab = AsrHotwords.ensureVocab(context, dir)
+            // First attempt: generated bpe.vocab for hotword biasing. If the
+            // process died last time, this attempt skips the biased decoding
+            // path entirely, which isolates a bpe.vocab problem from a plain
+            // out-of-memory one.
+            val vocab = if (failures == 0) AsrHotwords.ensureVocab(context, dir) else null
+            if (failures > 0) {
+                CrashLog.note(context, TAG, "retrying Nemotron without hotword biasing")
+            }
+            NemotronDownloader.markAttempt(context)
             val created = try {
                 withContext(Dispatchers.IO) {
                     OnlineRecognizer(
@@ -358,12 +376,18 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     )
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                // Cancelled by the user, not a native death.
+                NemotronDownloader.clearAttempt(context)
                 throw cancelled
             } catch (error: Exception) {
+                NemotronDownloader.clearAttempt(context)
                 Log.e(TAG, "Could not load Nemotron", error)
+                CrashLog.note(context, TAG, "Nemotron load threw: ${error.message}")
                 fail("Nemotron could not be loaded. Check the downloaded files.")
                 return@withLock null
             }
+            // The construct returned, so the marker has done its job.
+            NemotronDownloader.clearAttempt(context)
             if (released) {
                 created.release()
                 null
