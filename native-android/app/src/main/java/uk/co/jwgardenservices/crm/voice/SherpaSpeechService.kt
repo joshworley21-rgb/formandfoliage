@@ -592,6 +592,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             val buffer = ShortArray(FRAME_SAMPLES)
             var frames = 0
             var readFailures = 0
+            var peakLevel = 0f
+            var peakPartial = 0
             while (listening) {
                 val read = record.read(buffer, 0, buffer.size)
                 if (read < 0) {
@@ -650,11 +652,13 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     SystemClock.elapsedRealtime() - lastVoiceAt >= ENDPOINT_SILENCE_MS
                 if (vadEndpoint || engine.isEndpoint(stream)) {
                     engine.reset(stream)
-                    CrashLog.note(
-                        context,
-                        TAG,
-                        "endpoint: vad=$vadEndpoint text=${text.take(80)}",
-                    )
+                    if (vadEndpoint || text.isNotEmpty()) {
+                        CrashLog.note(
+                            context,
+                            TAG,
+                            "endpoint: vad=$vadEndpoint text=${text.take(80)}",
+                        )
+                    }
                     if (text.isNotEmpty()) publish(text)
                     hasSpeech = false
                     vad?.reset()
@@ -668,17 +672,25 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 }
                 // Listening heartbeat, every ~5 s of audio: is anything
                 // arriving at all, does the VAD see a voice, is text forming?
-                // One run then separates a dead microphone from a VAD
-                // threshold from an endpoint that never fires.
+                // Peak catches a sentence spoken between beats; the routed
+                // device names the physical microphone in use.
+                peakLevel = maxOf(peakLevel, _state.value.level)
+                peakPartial = maxOf(peakPartial, _state.value.partial.length)
                 if (frames % 50 == 0) {
+                    val route = record.routedDevice
+                        ?.let { "type=${it.type} ${it.productName}" }
+                        ?: "route=?"
                     CrashLog.note(
                         context,
                         TAG,
                         "listen: level=${"%.2f".format(_state.value.level)} " +
+                            "peak=${"%.2f".format(peakLevel)} " +
                             "voiced=$voiced hasSpeech=$hasSpeech " +
-                            "partial=${_state.value.partial.length} " +
-                            "src=${record.audioSource} rec=${record.recordingState}",
+                            "partial=${_state.value.partial.length} maxPartial=$peakPartial " +
+                            "src=${record.audioSource} rec=${record.recordingState} $route",
                     )
+                    peakLevel = 0f
+                    peakPartial = 0
                 }
             }
             finish(engine, stream)
@@ -909,9 +921,11 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             val config = VadModelConfig(
                 sileroVadModelConfig = SileroVadModelConfig(
                     model = modelFile.absolutePath,
-                    threshold = 0.5f,
-                    minSilenceDuration = 0.35f,
-                    minSpeechDuration = 0.1f,
+                    // A van cabin and a phone in a cradle are quieter and
+                    // duller than a desk mic; 0.5 missed ordinary speech.
+                    threshold = 0.3f,
+                    minSilenceDuration = 0.3f,
+                    minSpeechDuration = 0.15f,
                     windowSize = 512,
                     maxSpeechDuration = 10f,
                 ),
@@ -924,7 +938,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         }
             .onFailure { Log.w(TAG, "Silero VAD unavailable", it) }
             .getOrNull()
-            ?.also { CrashLog.note(context, TAG, "silero VAD ready") }
+            ?.also { CrashLog.note(context, TAG, "silero VAD ready (threshold=0.3)") }
     }
 
     /** Copy the 640 KB VAD model out of assets once and return its path. */

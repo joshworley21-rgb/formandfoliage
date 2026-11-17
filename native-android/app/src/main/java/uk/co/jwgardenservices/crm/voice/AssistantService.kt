@@ -129,6 +129,12 @@ class AssistantService : Service() {
     private var lastHeardAt = 0L
     @Volatile
     private var silencePrompts = 0
+
+    /** Has the microphone shown any real audio since listening began? */
+    @Volatile
+    private var micHeardAnything = false
+    @Volatile
+    private var hearHintGiven = false
     private var cloudVoice: CloudVoice? = null
     // Lazy: the base context is only attached after construction, and the
     // profile asset is read once per process on first use.
@@ -480,6 +486,8 @@ class AssistantService : Service() {
         silenceJob?.cancel()
         lastHeardAt = SystemClock.elapsedRealtime()
         silencePrompts = 0
+        micHeardAnything = false
+        hearHintGiven = false
         silenceJob = scope.launch {
             while (_callActive.value) {
                 delay(1_000)
@@ -496,11 +504,30 @@ class AssistantService : Service() {
                 }
                 val state = speech.state.value
                 if (state.level > 0.06f || state.partial.isNotBlank()) {
+                    if (state.level > 0.08f) micHeardAnything = true
                     // A voice, a cough, anything: the clock is theirs again.
                     lastHeardAt = now
                     silencePrompts = 0
                     continue
                 }
+                // Twenty seconds of a microphone that has never carried any
+                // real audio: it is not "take your time", it is "I can't hear
+                // you" — and that is worth saying once, with the fix.
+                if (!micHeardAnything && !hearHintGiven && now - lastHeardAt > 20_000) {
+                    hearHintGiven = true
+                    setNotification("No microphone input — check Assistant settings")
+                    val wasListeningNow = speech.isListening()
+                    if (wasListeningNow) speech.pauseForSpeech()
+                    say(
+                        "I'm not getting any sound from the microphone. Check the mic " +
+                            "in the Assistant settings, or that the call is not held by " +
+                            "another app.",
+                    )
+                    if (wasListeningNow) speech.resumeAfterSpeech()
+                    lastHeardAt = SystemClock.elapsedRealtime()
+                    continue
+                }
+                if (!micHeardAnything) continue
                 if (now - lastHeardAt < SILENCE_PROMPT_MS) continue
                 if (silencePrompts >= SILENCE_PROMPTS.size) continue
                 val wasListening = speech.isListening()
