@@ -198,15 +198,25 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         if (released) return
         // Neither model is bundled: never pull one into memory at app launch.
         // The ringback covers its load when a call actually starts.
-        val engine = runCatching { AssistantPreferences.asrEngineFlow(context).first() }
-            .getOrDefault(AsrEngine.Moonshine)
+        val engine = engineOverride ?: runCatching {
+            AssistantPreferences.asrEngineFlow(context).first()
+        }.getOrDefault(AsrEngine.Moonshine)
+        val moonshineHere = MoonshineDownloader.isInstalled(context)
+        val nemotronHere = NemotronDownloader.isInstalled(context)
+        CrashLog.note(
+            context,
+            TAG,
+            "prepare: engine=${engine.name} installed(moonshine=$moonshineHere, " +
+                "nemotron=$nemotronHere) forCall=$forCall override=${engineOverride?.name}",
+        )
         when {
-            engine == AsrEngine.Moonshine && MoonshineDownloader.isInstalled(context) -> {
+            engine == AsrEngine.Moonshine && moonshineHere -> {
                 if (forCall) ensureMoonshine()
             }
-            engine == AsrEngine.Nemotron && NemotronDownloader.isInstalled(context) -> {
+            engine == AsrEngine.Nemotron && nemotronHere -> {
                 if (forCall) ensureNemotron()
             }
+            else -> CrashLog.note(context, TAG, "prepare: no usable engine installed")
         }
     }
 
@@ -226,6 +236,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 return@withLock null
             }
             _state.update { it.copy(phase = Phase.Loading, message = "Loading Moonshine…") }
+            CrashLog.note(context, TAG, "loading Moonshine (native construct starts)")
             val started = System.currentTimeMillis()
             val created = try {
                 withContext(Dispatchers.IO) {
@@ -296,6 +307,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 return@withLock null
             }
             _state.update { it.copy(phase = Phase.Loading, message = "Loading Nemotron…") }
+            CrashLog.note(context, TAG, "loading Nemotron (native construct starts)")
             val started = System.currentTimeMillis()
             // Same generated-vocabulary trick as the Zipformer: an equal-score
             // bpe.vocab from this model's own tokens.txt.
@@ -402,6 +414,15 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     fun nemotronWarm(): Boolean = nemotron != null
 
     /**
+     * Per-call engine override, set by the service's memory guard. A phone
+     * short on RAM is spared the 660 MB Nemotron load, which is a native
+     * allocation that aborts the process when it fails — uncatchable.
+     * Null means "whatever the owner chose".
+     */
+    @Volatile
+    var engineOverride: AsrEngine? = null
+
+    /**
      * Open the mic, loading the model from assets the first time. Returns
      * immediately if already listening; never leaves a half-started loop.
      */
@@ -413,7 +434,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         try {
         if (released || listening) return
 
-        val selected = AssistantPreferences.asrEngineFlow(context).first()
+        val selected = engineOverride
+            ?: AssistantPreferences.asrEngineFlow(context).first()
+        CrashLog.note(context, TAG, "startListening: engine=${selected.name}")
         offlineMode = selected == AsrEngine.Moonshine && MoonshineDownloader.isInstalled(context)
         if (selected == AsrEngine.Moonshine && !offlineMode) {
             fail("Moonshine is not downloaded. Open Assistant settings to install it.")

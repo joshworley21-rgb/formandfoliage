@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.Manifest
+import android.app.ActivityManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
@@ -303,30 +304,78 @@ class AssistantService : Service() {
         // Rejoining an existing call just reopens the microphone.
         if (!fresh) scope.launch { ensureListening() }
         scope.launch(Dispatchers.Default) {
-            val callVoice = runCatching { AssistantPreferences.voiceFlow(this@AssistantService).first() }
-                .getOrDefault(voice)
-            val callSpeed = runCatching { AssistantPreferences.speedFlow(this@AssistantService).first() }
-                .getOrDefault(speed)
-            voice = callVoice
-            speed = callSpeed
-            // Load the recogniser and the voice together. On a fresh call the
-            // microphone stays closed while the ringback plays, so it cannot
-            // hear the tones as a command.
-            coroutineScope {
-                launch { runCatching { speech.prepare(forCall = true) } }
+            try {
+                val callVoice = runCatching { AssistantPreferences.voiceFlow(this@AssistantService).first() }
+                    .getOrDefault(voice)
+                val callSpeed = runCatching { AssistantPreferences.speedFlow(this@AssistantService).first() }
+                    .getOrDefault(speed)
+                voice = callVoice
+                speed = callSpeed
+                // The recogniser is the risky allocation: 660 MB for Nemotron,
+                // and a native OOM there kills the process without a Java
+                // crash. Decide here, log it, then load voice first so the two
+                // never peak together.
+                applyMemoryGuard()
                 speaker.warmUp()
                 runCatching { speaker.prepareFiller(callVoice.speakerId, callSpeed) }
-            }
-            if (fresh) {
-                connectCall(callVoice.speakerId, callSpeed)
-                // Now the line is connected, finish warming the filler pool in
-                // the background; nothing waits on it.
-                if (cloudConversation && _callActive.value) {
-                    runCatching { speaker.prepareRemainingFillers(callVoice.speakerId, callSpeed) }
+                CrashLog.note(this@AssistantService, TAG, "init: voice ready")
+                runCatching { speech.prepare(forCall = true) }
+                CrashLog.note(this@AssistantService, TAG, "init: recogniser step done")
+                if (fresh) {
+                    connectCall(callVoice.speakerId, callSpeed)
+                    // Now the line is connected, finish warming the filler pool
+                    // in the background; nothing waits on it.
+                    if (cloudConversation && _callActive.value) {
+                        runCatching { speaker.prepareRemainingFillers(callVoice.speakerId, callSpeed) }
+                    }
                 }
+            } catch (cancel: kotlinx.coroutines.CancellationException) {
+                throw cancel
+            } catch (error: Throwable) {
+                CrashLog.record(
+                    this@AssistantService,
+                    error as? Exception ?: Exception(error),
+                    "assistant init",
+                )
+                runCatching { endCall() }
             }
         }
         return START_NOT_STICKY
+    }
+
+    /**
+     * Log what the machine can afford, then pick the engine for this call.
+     * Nemotron's 660 MB model is loaded by native code: if the allocation
+     * fails the process aborts and no crash report can be written, so the
+     * only defence is not to attempt it on a tight phone.
+     */
+    private fun applyMemoryGuard() {
+        val manager = getSystemService(ActivityManager::class.java)
+        val info = ActivityManager.MemoryInfo().also { manager?.getMemoryInfo(it) }
+        val availMb = info.availMem / (1024L * 1024L)
+        val lowRam = manager?.isLowRamDevice == true
+        val preferred = selectedEngine
+        val moonshineInstalled = MoonshineDownloader.isInstalled(this)
+        val nemotronInstalled = NemotronDownloader.isInstalled(this)
+        val tight = lowRam || info.lowMemory || availMb < NEMOTRON_MIN_FREE_MB
+        val effective = if (preferred == AsrEngine.Nemotron && tight && nemotronInstalled) {
+            // Even the smaller model needs space; if it is missing the load
+            // fails with an instruction instead of an abort.
+            AsrEngine.Moonshine
+        } else {
+            preferred
+        }
+        speech.engineOverride = effective.takeIf { it != preferred }
+        CrashLog.note(
+            this,
+            TAG,
+            "init: sdk=${Build.VERSION.SDK_INT} avail=${availMb}MB lowRam=$lowRam " +
+                "lowMemory=${info.lowMemory} engine=$preferred→$effective " +
+                "(moonshine=$moonshineInstalled nemotron=$nemotronInstalled)",
+        )
+        if (effective != preferred) {
+            CrashLog.note(this, TAG, "init: Nemotron needs ${NEMOTRON_MIN_FREE_MB}MB free; using the smaller engine")
+        }
     }
 
     /**
@@ -526,16 +575,23 @@ class AssistantService : Service() {
         CrashLog.note(this, TAG, "battery saver=$lowBattery")
     }
 
-    /** One short buzz: the line is live, pocket-friendly confirmation. */
-    private fun buzzConnected() {
-        runCatching {
-            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+    /** VibrationEffect only exists from Oreo; older devices just skip it. */
+    private fun vibrator(): android.os.Vibrator? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return null
+        return runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 getSystemService(VibratorManager::class.java)?.defaultVibrator
             } else {
                 @Suppress("DEPRECATION")
                 getSystemService(Vibrator::class.java)
             }
-            vibrator?.vibrate(
+        }.getOrNull()
+    }
+
+    /** One short buzz: the line is live, pocket-friendly confirmation. */
+    private fun buzzConnected() {
+        runCatching {
+            vibrator()?.vibrate(
                 VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE),
             )
         }
@@ -544,13 +600,7 @@ class AssistantService : Service() {
     /** Two short pulses: the audio route moved under your feet. */
     private fun buzzAudioChanged() {
         runCatching {
-            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                getSystemService(VibratorManager::class.java)?.defaultVibrator
-            } else {
-                @Suppress("DEPRECATION")
-                getSystemService(Vibrator::class.java)
-            }
-            vibrator?.vibrate(
+            vibrator()?.vibrate(
                 VibrationEffect.createWaveform(longArrayOf(0, 70, 90, 70), -1),
             )
         }
@@ -793,6 +843,8 @@ class AssistantService : Service() {
         CrashLog.note(this, TAG, "call ended")
         silenceJob?.cancel()
         silenceJob = null
+        // The next call decides its engine afresh from the owner's setting.
+        speech.engineOverride = null
         _callActive.value = false
         callActiveNow = false
         mediaSession?.isActive = false
@@ -1600,6 +1652,9 @@ class AssistantService : Service() {
         const val CHANNEL_ID = "assistant_mic"
         const val NOTIFICATION_ID = 41
         const val CALL_BUTTON_DOUBLE_MS = 900L
+
+        /** Nemotron is ~660 MB resident; below this much free RAM it is unsafe. */
+        const val NEMOTRON_MIN_FREE_MB = 1_200L
 
         /** Six seconds of silence earns one light nudge, twice at most. */
         const val SILENCE_PROMPT_MS = 6_000L
