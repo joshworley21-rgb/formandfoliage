@@ -39,19 +39,24 @@ import java.util.concurrent.TimeUnit
 object NemotronDownloader {
     private const val TAG = "NemotronDownload"
 
-    const val MODEL_DIR = "nemotron-speech-streaming-en-0.6b-int8-2026-01-14"
+    // The 2026-04-25 560 ms re-export. The January checkpoint this app used
+    // first was superseded by sherpa-onnx's own "Update nemotron" release:
+    // with the newer runtime it loads but decodes most speech to nothing.
+    // Docs: "Please always use the latest version."
+    const val MODEL_DIR = "nemotron-560ms-2026-04-25"
+    private const val LEGACY_DIR = "nemotron-speech-streaming-en-0.6b-int8-2026-01-14"
     private const val BASE =
-        "https://huggingface.co/csukuangfj/sherpa-onnx-nemotron-speech-streaming-en-0.6b-int8-2026-01-14/resolve/main/"
+        "https://huggingface.co/csukuangfj2/sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25/resolve/main/"
 
     /** Exact sizes let a half file be detected and resumed without a HEAD request. */
     private val FILES: Map<String, Long> = linkedMapOf(
-        "encoder.int8.onnx" to 652_916_830L,
+        "encoder.int8.onnx" to 652_916_849L,
         "decoder.int8.onnx" to 7_257_753L,
         "joiner.int8.onnx" to 1_735_862L,
         "tokens.txt" to 8_952L,
     )
 
-    const val TOTAL_BYTES = 661_919_397L
+    const val TOTAL_BYTES = 661_919_416L
 
     private const val STALL_TIMEOUT_MS = 60_000L
     private const val FREE_SPACE_MARGIN = 80L * 1024 * 1024
@@ -95,7 +100,7 @@ object NemotronDownloader {
     // under an old config (e.g. the unsupported modified_beam_search) must
     // not retire a configuration that actually works.
 
-    private const val LOAD_CONFIG = "greedy-v2"
+    private const val LOAD_CONFIG = "greedy-v3"
 
     private fun attemptMarker(context: Context) =
         File(dir(context), "load.attempt.$LOAD_CONFIG")
@@ -163,6 +168,7 @@ object NemotronDownloader {
         job?.cancelAndJoin()
         job = null
         dir(context).deleteRecursively()
+        runCatching { File(context.filesDir, LEGACY_DIR).deleteRecursively() }
         _state.value = State.Idle
     }
 
@@ -177,6 +183,9 @@ object NemotronDownloader {
         if (completed < TOTAL_BYTES) {
             throw IOException("The download stopped early. Try again to resume.")
         }
+        // The Jan-2026 checkpoint is superseded and decodes to nothing on this
+        // runtime; reclaim its 662 MB only after the replacement is complete.
+        runCatching { File(context.filesDir, LEGACY_DIR).deleteRecursively() }
     }
 
     private suspend fun downloadFile(

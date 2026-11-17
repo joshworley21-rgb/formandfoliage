@@ -361,10 +361,10 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             ) {
                 Text(
                     text = "NVIDIA Nemotron 3.5 Speech Streaming 0.6B, English (en) only, " +
-                        "NVIDIA Open Model License (commercial use permitted). About 662 MB. " +
-                        "True streaming: live partial words like the Zipformer, from a " +
-                        "2026-era model trained for noisy phone audio. While selected it " +
-                        "holds about 650 MB in memory; switch back after comparing.",
+                        "NVIDIA Open Model License (commercial use permitted). About 662 MB, " +
+                        "April 2026 560 ms export. True streaming: live partial words from a " +
+                        "model trained for noisy phone audio. While selected it holds about " +
+                        "650 MB in memory; switch back after comparing.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
