@@ -591,10 +591,18 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             }
             val buffer = ShortArray(FRAME_SAMPLES)
             var frames = 0
+            var readFailures = 0
             while (listening) {
                 val read = record.read(buffer, 0, buffer.size)
                 if (read < 0) {
                     Log.e(TAG, "AudioRecord.read failed with $read")
+                    if (++readFailures == 1) {
+                        CrashLog.note(
+                            context,
+                            TAG,
+                            "AudioRecord.read failed: $read (src=${record.audioSource})",
+                        )
+                    }
                     continue
                 }
                 if (read == 0) continue
@@ -642,6 +650,11 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     SystemClock.elapsedRealtime() - lastVoiceAt >= ENDPOINT_SILENCE_MS
                 if (vadEndpoint || engine.isEndpoint(stream)) {
                     engine.reset(stream)
+                    CrashLog.note(
+                        context,
+                        TAG,
+                        "endpoint: vad=$vadEndpoint text=${text.take(80)}",
+                    )
                     if (text.isNotEmpty()) publish(text)
                     hasSpeech = false
                     vad?.reset()
@@ -651,6 +664,20 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                         TAG,
                         "frames=$frames read=$read rms=${_state.value.level} " +
                             "partial=${_state.value.partial.length} final=${_state.value.finalText.length}",
+                    )
+                }
+                // Listening heartbeat, every ~5 s of audio: is anything
+                // arriving at all, does the VAD see a voice, is text forming?
+                // One run then separates a dead microphone from a VAD
+                // threshold from an endpoint that never fires.
+                if (frames % 50 == 0) {
+                    CrashLog.note(
+                        context,
+                        TAG,
+                        "listen: level=${"%.2f".format(_state.value.level)} " +
+                            "voiced=$voiced hasSpeech=$hasSpeech " +
+                            "partial=${_state.value.partial.length} " +
+                            "src=${record.audioSource} rec=${record.recordingState}",
                     )
                 }
             }
@@ -945,6 +972,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         if (punctuated == lastResult) return
         lastResult = punctuated
         _state.update { it.copy(finalText = punctuated, partial = "") }
+        CrashLog.note(context, TAG, "final: ${punctuated.take(80)}")
         _transcripts.tryEmit(punctuated)
     }
 
@@ -1008,6 +1036,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     ) == PackageManager.PERMISSION_GRANTED
 
     private fun fail(message: String) {
+        // Engine and microphone failures used to be UI-only, which left the
+        // assistant log silent about them. They belong in the breadcrumb trail.
+        CrashLog.note(context, TAG, "fail: $message")
         _state.update { it.copy(phase = Phase.Error, message = message, partial = "") }
     }
 
