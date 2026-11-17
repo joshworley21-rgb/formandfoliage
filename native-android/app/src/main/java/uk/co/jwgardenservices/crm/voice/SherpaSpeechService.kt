@@ -594,6 +594,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             var readFailures = 0
             var peakLevel = 0f
             var peakPartial = 0
+            var inputPeak = 0f
             while (listening) {
                 val read = record.read(buffer, 0, buffer.size)
                 if (read < 0) {
@@ -640,7 +641,26 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 }
                 pausedClean = false
                 frames += 1
-                val samples = FloatArray(read) { buffer[it] / 32768.0f }
+                val raw = FloatArray(read) { buffer[it] / 32768.0f }
+                // Quiet speech yields no tokens at all from a chunked NeMo
+                // decoder: the log showed vad=true with an empty transcript at
+                // peak 0.23, and clean transcripts at peak 0.5+. A decaying
+                // peak tracker raises the whole pipeline — VAD included — when
+                // the room is quiet, and leaves loud audio alone.
+                var framePeak = 0f
+                for (sample in raw) framePeak = maxOf(framePeak, kotlin.math.abs(sample))
+                inputPeak = maxOf(inputPeak * 0.985f, framePeak)
+                val inputGain = when {
+                    inputPeak < 0.15f -> 2.2f
+                    inputPeak < 0.30f -> 1.6f
+                    inputPeak < 0.50f -> 1.2f
+                    else -> 1f
+                }
+                val samples = if (inputGain == 1f) {
+                    raw
+                } else {
+                    FloatArray(raw.size) { (raw[it] * inputGain).coerceIn(-1f, 1f) }
+                }
                 vad?.acceptWaveform(samples)
                 val voiced = vad?.isSpeechDetected() == true
                 if (voiced) {
@@ -697,7 +717,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                             "peak=${"%.2f".format(peakLevel)} " +
                             "voiced=$voiced hasSpeech=$hasSpeech " +
                             "partial=${_state.value.partial.length} maxPartial=$peakPartial " +
-                            "src=${record.audioSource} rec=${record.recordingState} $route",
+                            "src=${record.audioSource} rec=${record.recordingState} " +
+                            "gain=${"%.1f".format(inputGain)} $route",
                     )
                     peakLevel = 0f
                     peakPartial = 0
@@ -1033,16 +1054,19 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             }.getOrNull()
             CrashLog.note(context, TAG, "echo canceller=${echoCanceller != null}")
         }
-        if (source == MediaRecorder.AudioSource.VOICE_COMMUNICATION) {
-            // Keep hardware AEC for barge-in, but turn Android's automatic gain
-            // control off: on the communication source it ducks and clips the
-            // speech harmonics, which the recogniser reads as worse audio.
-            gainController = runCatching {
-                AutomaticGainControl.create(record.audioSessionId)
-            }.getOrNull()
-            runCatching { gainController?.setEnabled(false) }
-            CrashLog.note(context, TAG, "agc off=${gainController != null}")
-        }
+        // AGC helps on the plain microphone (quiet gardens, phones on a desk)
+        // and fights the platform suppressor on the communication source, so
+        // it follows the source rather than a single rule.
+        gainController = runCatching {
+            AutomaticGainControl.create(record.audioSessionId)
+        }.getOrNull()
+        val gainWanted = source != MediaRecorder.AudioSource.VOICE_COMMUNICATION
+        runCatching { gainController?.enabled = gainWanted }
+        CrashLog.note(
+            context,
+            TAG,
+            "agc=${gainWanted && gainController != null} available=${gainController != null}",
+        )
         return record
     }
 
