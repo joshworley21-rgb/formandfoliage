@@ -12,6 +12,9 @@ import java.util.concurrent.atomic.AtomicInteger
  * randomness to reproduce.
  */
 object VoiceLines {
+    /** The owner's name, used in greetings and conversational pivots. */
+    const val OWNER_NAME = "Josh"
+
     private val counter = AtomicInteger()
 
     fun pick(vararg options: String): String {

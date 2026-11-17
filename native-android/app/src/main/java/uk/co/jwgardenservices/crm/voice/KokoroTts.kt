@@ -38,7 +38,7 @@ import kotlin.math.abs
  * for the whole utterance.
  */
 /** Cached hello, used only when the call briefing cannot be built. */
-internal const val PICKUP_TEXT = "Hello, how can I help?"
+internal const val PICKUP_TEXT = "Hello Josh, how can I help?"
 
 class KokoroTts(private val context: Context) : AutoCloseable {
 

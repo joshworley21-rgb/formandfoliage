@@ -161,10 +161,10 @@ class VoiceActionRunner(
         if (!AssistantMemory.wasInterrupted) return reply
         AssistantMemory.wasInterrupted = false
         val opening = VoiceLines.pick(
-            "Right, ",
-            "Yep, ",
-            "Moving on — ",
-            "Skipping ahead — ",
+            "Right ${VoiceLines.OWNER_NAME}, ",
+            "Yep ${VoiceLines.OWNER_NAME}, ",
+            "Moving on ${VoiceLines.OWNER_NAME} — ",
+            "Skipping ahead ${VoiceLines.OWNER_NAME} — ",
         )
         return when (reply.firstOrNull()) {
             TtsProsody.FAST -> "${TtsProsody.FAST}$opening${reply.substring(1)}"
@@ -371,11 +371,19 @@ class VoiceActionRunner(
                 )
             }
         if (items.isEmpty()) {
-            return "Nothing left on today's schedule — everything is already marked done."
+            return "Nothing left on today's schedule, ${VoiceLines.OWNER_NAME} — " +
+                "everything is already marked done."
         }
         val state = WrapUp(items)
         wrapUp = state
-        return prompt(state, first = true)
+        // A proper opener before the clipboard starts: they asked for the
+        // day back, so acknowledge it first.
+        val opener = if (LocalTime.now().hour >= 12) {
+            "Long day out there, ${VoiceLines.OWNER_NAME}. Let's run through today's jobs."
+        } else {
+            "Right ${VoiceLines.OWNER_NAME} — let's run through today's jobs."
+        }
+        return "$opener ${prompt(state, first = true)}"
     }
 
     /**

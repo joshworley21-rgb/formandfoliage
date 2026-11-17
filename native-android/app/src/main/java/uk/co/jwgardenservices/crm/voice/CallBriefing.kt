@@ -55,7 +55,7 @@ class CallBriefing(
     }
 
     private fun shortGreeting(callCount: Int): String {
-        if (callCount == 2) return "Hey — what are we logging?"
+        if (callCount == 2) return "Hey ${VoiceLines.OWNER_NAME} — what are we logging?"
         val now = clock()
         val zone = ZoneId.systemDefault()
         return greetingFor(now.atZone(zone).toLocalTime().hour, now.localDate(zone).month) +
@@ -170,7 +170,9 @@ class CallBriefing(
                 month == java.time.Month.MAY -> "busy one today"
             else -> null
         }
-        return if (seasonal != null) "$time, $seasonal" else time
+        // Spoken to Josh, not at him: "Morning Josh, getting dark early…"
+        val named = "$time ${VoiceLines.OWNER_NAME}"
+        return if (seasonal != null) "$named, $seasonal" else named
     }
 
     /**
