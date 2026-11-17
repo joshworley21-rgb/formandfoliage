@@ -595,6 +595,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             var peakLevel = 0f
             var peakPartial = 0
             var inputPeak = 0f
+            var rawBeatPeak = 0f
             while (listening) {
                 val read = record.read(buffer, 0, buffer.size)
                 if (read < 0) {
@@ -649,11 +650,18 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 // the room is quiet, and leaves loud audio alone.
                 var framePeak = 0f
                 for (sample in raw) framePeak = maxOf(framePeak, kotlin.math.abs(sample))
+                rawBeatPeak = maxOf(rawBeatPeak, framePeak)
                 inputPeak = maxOf(inputPeak * 0.985f, framePeak)
+                // Measured on this phone: ordinary speech arrived at raw peaks
+                // of 0.05-0.12 in a cradle, and both recognisers decoded that
+                // to nothing. The ladder now lifts far more aggressively; it
+                // caps at x3.5 so pure noise is not turned into shouting.
                 val inputGain = when {
-                    inputPeak < 0.15f -> 2.2f
-                    inputPeak < 0.30f -> 1.6f
-                    inputPeak < 0.50f -> 1.2f
+                    inputPeak < 0.08f -> 3.5f
+                    inputPeak < 0.15f -> 2.6f
+                    inputPeak < 0.25f -> 1.9f
+                    inputPeak < 0.40f -> 1.4f
+                    inputPeak < 0.55f -> 1.15f
                     else -> 1f
                 }
                 val samples = if (inputGain == 1f) {
@@ -718,10 +726,12 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                             "voiced=$voiced hasSpeech=$hasSpeech " +
                             "partial=${_state.value.partial.length} maxPartial=$peakPartial " +
                             "src=${record.audioSource} rec=${record.recordingState} " +
-                            "gain=${"%.1f".format(inputGain)} $route",
+                            "gain=${"%.1f".format(inputGain)} " +
+                            "rawPeak=${"%.2f".format(rawBeatPeak)} $route",
                     )
                     peakLevel = 0f
                     peakPartial = 0
+                    rawBeatPeak = 0f
                 }
             }
             finish(engine, stream)

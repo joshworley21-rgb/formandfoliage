@@ -54,6 +54,7 @@ import uk.co.jwgardenservices.crm.voice.KokoroHqDownloader
 import uk.co.jwgardenservices.crm.voice.KokoroEngine
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
 import uk.co.jwgardenservices.crm.voice.MicSource
+import uk.co.jwgardenservices.crm.voice.MicTest
 import uk.co.jwgardenservices.crm.voice.MoonshineDownloader
 import uk.co.jwgardenservices.crm.voice.NemotronDownloader
 import uk.co.jwgardenservices.crm.voice.PhononDownloader
@@ -721,6 +722,45 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+
+                // Hear exactly what the phone hears, through the same source
+                // the assistant uses. One beep first: no beep means the output
+                // is misrouted, beep but no voice means the mic is the problem.
+                var micTesting by remember { mutableStateOf(false) }
+                var micTestNote by remember { mutableStateOf<String?>(null) }
+                OutlinedButton(
+                    enabled = !micTesting,
+                    onClick = {
+                        scope.launch {
+                            micTesting = true
+                            micTestNote = "Recording 5 seconds — say something."
+                            val outcome = runCatching {
+                                MicTest.record(context, micSource.androidSource)
+                            }
+                            val samples = outcome.getOrNull()
+                            if (samples == null || samples < 2_000) {
+                                micTestNote = "No audio was captured. " +
+                                    (outcome.exceptionOrNull()?.message ?: "Check the microphone " +
+                                        "permission.")
+                            } else {
+                                micTestNote = "Playing it back — you should hear a beep, then you."
+                                runCatching { MicTest.play(context) }
+                                micTestNote = "Beep but no voice? The microphone is the problem. " +
+                                    "Both? The phone's audio output is the problem."
+                            }
+                            micTesting = false
+                        }
+                    },
+                ) {
+                    Text(if (micTesting) "Testing…" else "Test microphone (5 s)")
+                }
+                micTestNote?.let { note ->
+                    Text(
+                        text = note,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
 
