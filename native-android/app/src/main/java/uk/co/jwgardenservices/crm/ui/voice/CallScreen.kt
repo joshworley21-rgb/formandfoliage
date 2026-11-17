@@ -85,12 +85,12 @@ fun CallScreen(
                 text = "Calling…",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
-                color = CallDim,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
                 text = "warming up the models",
                 style = MaterialTheme.typography.labelMedium,
-                color = CallDim.copy(alpha = 0.7f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )
         } else {
             CallClock(connectedAt = connectedAt)
@@ -116,7 +116,7 @@ fun CallScreen(
             text = hint,
             style = MaterialTheme.typography.bodyLarge,
             fontStyle = if (partial.isNotBlank()) FontStyle.Italic else FontStyle.Normal,
-            color = if (partial.isNotBlank()) PartialColor else CallDim,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
@@ -188,7 +188,7 @@ private fun CallClock(connectedAt: Long) {
         text = "%02d:%02d".format(seconds / 60, seconds % 60),
         style = MaterialTheme.typography.headlineMedium,
         fontWeight = FontWeight.SemiBold,
-        color = CallOn,
+        color = MaterialTheme.colorScheme.onBackground,
     )
 }
 
@@ -253,8 +253,8 @@ private fun RoundCallToggle(
     Surface(
         onClick = onClick,
         shape = CircleShape,
-        color = if (active) ToggleActive else ToggleIdle,
-        contentColor = if (active) Color.White else CallDim,
+        color = if (active) ToggleActive else MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = if (active) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.size(58.dp),
     ) {
         Box(contentAlignment = Alignment.Center) {
@@ -263,10 +263,6 @@ private fun RoundCallToggle(
     }
 }
 
-private val CallOn = Color(0xFFF2F2F2)
-private val CallDim = Color(0xFF8F978D)
-private val PartialColor = Color(0xFF9AA49A)
 private val Green = Color(0xFF63C176)
 private val EndRed = Color(0xFFC33B3B)
 private val ToggleActive = Color(0xFF2C4A2E)
-private val ToggleIdle = Color(0xFF232323)

@@ -193,7 +193,7 @@ fun AssistantScreen() {
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(CallBg),
+            .background(MaterialTheme.colorScheme.background),
     ) {
         // Short screens (small phones, split screen) get a smaller orb and
         // tighter spacing so the controls and transcript always fit.
@@ -235,7 +235,7 @@ fun AssistantScreen() {
                 text = "Assistant",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = CallDim,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.weight(1f))
             if (turns.isNotEmpty()) {
@@ -243,7 +243,7 @@ fun AssistantScreen() {
                     Icon(
                         imageVector = Icons.Outlined.Delete,
                         contentDescription = "Clear conversation",
-                        tint = CallDim,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
@@ -264,7 +264,7 @@ fun AssistantScreen() {
             text = "J W Assistant",
             style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
-            color = if (callActive) CallOn else CallDim,
+            color = MaterialTheme.colorScheme.onBackground,
         )
 
         // The familiar ticking call timer; runs while the call is connected.
@@ -282,15 +282,15 @@ fun AssistantScreen() {
 
         Surface(
             shape = RoundedCornerShape(20.dp),
-            color = Color(0xFF1C1C1C),
+            color = MaterialTheme.colorScheme.surfaceVariant,
         ) {
             Text(
                 text = status,
                 style = MaterialTheme.typography.labelLarge,
                 color = if (state.phase == SherpaSpeechService.Phase.Error) {
-                    Color(0xFFFF8A80)
+                    MaterialTheme.colorScheme.error
                 } else {
-                    CallDim
+                    MaterialTheme.colorScheme.onSurfaceVariant
                 },
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -303,7 +303,7 @@ fun AssistantScreen() {
             Text(
                 text = "The assistant needs the microphone to hear you. Nothing is uploaded.",
                 style = MaterialTheme.typography.bodySmall,
-                color = CallDim,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(8.dp))
@@ -357,10 +357,6 @@ fun AssistantScreen() {
 }
 
 /** Phone-call colours, independent of the app theme. */
-private val CallBg = Color(0xFF060606)
-private val CallOn = Color(0xFFF2F2F2)
-private val CallDim = Color(0xFF8F978D)
-private val ControlBg = Color(0xFF232323)
 private val BarGreen = Color(0xFFB6E388)
 
 /** The familiar phone-call green, independent of the app's theme. */
@@ -397,7 +393,7 @@ private fun CallOrb(
             modifier = Modifier
                 .size(size)
                 .clip(CircleShape)
-                .background(if (active) BarGreen else Color(0xFF3A3F3A))
+                .background(if (active) BarGreen else MaterialTheme.colorScheme.surfaceVariant)
                 .alpha(if (active) glow * 0.35f else 0.06f),
         )
         Box(
@@ -406,8 +402,8 @@ private fun CallOrb(
                 .clip(CircleShape)
                 .background(
                     when {
-                        !active -> Color(0xFF2A2D2A)
-                        speaking -> Color(0xFF37531F)
+                        !active -> MaterialTheme.colorScheme.surface
+                        speaking -> MaterialTheme.colorScheme.primaryContainer
                         else -> Color(0xFF1B8F3A)
                     },
                 ),
@@ -416,14 +412,14 @@ private fun CallOrb(
             if (loading) {
                 Text(
                     text = "✆",
-                    color = CallOn,
+                    color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.displaySmall,
                 )
             } else {
                 Icon(
                     imageVector = Icons.Filled.Mic,
                     contentDescription = null,
-                    tint = if (active) Color(0xFFE9F7DC) else CallDim,
+                    tint = if (active) Color(0xFFE9F7DC) else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(size * 0.28f),
                 )
             }
@@ -448,7 +444,7 @@ private fun CallTimer(startedAt: Long, running: Boolean) {
     Text(
         text = "%02d:%02d".format(minutes, seconds),
         style = MaterialTheme.typography.titleLarge,
-        color = CallDim,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 
@@ -477,7 +473,7 @@ private fun SpeakingBars(active: Boolean, speaking: Boolean, level: Float) {
                     .width(6.dp)
                     .height(height)
                     .clip(CircleShape)
-                    .background(if (active) BarGreen else Color(0xFF3A3F3A)),
+                    .background(if (active) BarGreen else MaterialTheme.colorScheme.surfaceVariant),
             )
         }
     }
@@ -493,7 +489,7 @@ private fun Transcript(
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(24.dp),
-        color = Color(0xFF111111),
+        color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
         val listState = rememberLazyListState()
         val itemCount = turns.size + if (partial.isNotBlank()) 1 else 0
@@ -511,7 +507,7 @@ private fun Transcript(
                         "Everything stays on this phone."
                     },
                     style = MaterialTheme.typography.bodyMedium,
-                    color = CallDim,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
             }
@@ -548,8 +544,8 @@ private fun PostCallSummary(
 ) {
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = Color(0xFF1E2A1C),
-        contentColor = CallOn,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
@@ -594,13 +590,17 @@ private fun PostCallSummary(
 
 @Composable
 private fun Bubble(text: String, fromUser: Boolean, pending: Boolean = false) {
-    val container = if (fromUser) Color(0xFF233023) else Color(0xFF1D1D1D)
+    val container = if (fromUser) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
     // A streaming partial is a rumour, not a fact: dimmed grey and italic
     // until the turn finalises, so live Nemotron feedback reads as provisional.
     val content = when {
-        fromUser && pending -> CallDim
-        fromUser -> Color(0xFFD9E8CF)
-        else -> CallOn
+        fromUser && pending -> MaterialTheme.colorScheme.onSurfaceVariant
+        fromUser -> MaterialTheme.colorScheme.onPrimaryContainer
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -646,7 +646,7 @@ private fun RoundControl(
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,
-            color = CallDim,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -674,7 +674,7 @@ private fun CallButton(
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,
-            color = CallDim,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
