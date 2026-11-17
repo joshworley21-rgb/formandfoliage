@@ -138,15 +138,20 @@ object AssistantPreferences {
         }
     }
 
-    /** A catalog voice for Phonon. */
-    fun phononVoiceFlow(context: Context): Flow<PhononVoice> = context.assistantDataStore.data.map { preferences ->
-        PhononVoice.entries.firstOrNull { it.name == preferences[PHONON_VOICE_KEY] }
-            ?: PhononVoice.Freya
+    /**
+     * The selected Phonon voice name. Catalogue voices use their enum name;
+     * imported custom voices use the file name without `.safetensors`.
+     */
+    fun phononVoiceFlow(context: Context): Flow<String> = context.assistantDataStore.data.map { preferences ->
+        preferences[PHONON_VOICE_KEY] ?: PhononVoice.Freya.name
     }
 
-    suspend fun setPhononVoice(context: Context, voice: PhononVoice) {
+    suspend fun setPhononVoice(context: Context, voice: PhononVoice) =
+        setPhononVoice(context, voice.name)
+
+    suspend fun setPhononVoice(context: Context, name: String) {
         context.assistantDataStore.edit { preferences ->
-            preferences[PHONON_VOICE_KEY] = voice.name
+            preferences[PHONON_VOICE_KEY] = name
         }
     }
 

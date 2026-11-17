@@ -1,5 +1,7 @@
 package uk.co.jwgardenservices.crm.ui.voice
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -113,7 +115,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     var phononInstalled by remember { mutableStateOf(PhononDownloader.isInstalled(context)) }
     var phononSaved by remember { mutableLongStateOf(PhononDownloader.savedBytes(context)) }
     val phononVoice by AssistantPreferences.phononVoiceFlow(context)
-        .collectAsStateWithLifecycle(initialValue = PhononVoice.Freya)
+        .collectAsStateWithLifecycle(initialValue = PhononVoice.Freya.name)
+    var customVoices by remember { mutableStateOf(PhononDownloader.customVoices(context)) }
     var voiceDownloading by remember { mutableStateOf(false) }
     var voiceError by remember { mutableStateOf<String?>(null) }
     val moonshineState by MoonshineDownloader.state.collectAsStateWithLifecycle()
@@ -273,8 +276,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     )
                     OptionPicker(
                         options = PhononVoice.entries,
-                        selected = phononVoice,
-                        label = { it?.label ?: PhononVoice.Freya.label },
+                        selected = PhononVoice.entries.firstOrNull { it.name == phononVoice },
+                        label = { it?.label ?: "Custom — $phononVoice" },
                         enabled = !voiceDownloading,
                         onSelect = { selected ->
                             scope.launch {
@@ -305,6 +308,92 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                             color = MaterialTheme.colorScheme.error,
                         )
                     }
+
+                    Text(
+                        text = "Custom voices",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    customVoices.forEach { name ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Custom — $name",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                )
+                                Text(
+                                    text = "Imported voice file, works offline",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            if (phononVoice == name) {
+                                Text(
+                                    text = "In use",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            } else {
+                                OutlinedButton(
+                                    onClick = {
+                                        scope.launch {
+                                            AssistantPreferences.setPhononVoice(context, name)
+                                            KokoroEngine.get(context).reload()
+                                        }
+                                    },
+                                ) { Text("Use") }
+                            }
+                            IconButton(
+                                onClick = {
+                                    scope.launch {
+                                        PhononDownloader.removeCustomVoice(context, name)
+                                        customVoices = PhononDownloader.customVoices(context)
+                                        if (phononVoice == name) {
+                                            AssistantPreferences.setPhononVoice(
+                                                context,
+                                                PhononVoice.Freya,
+                                            )
+                                            KokoroEngine.get(context).reload()
+                                        }
+                                    }
+                                },
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Delete,
+                                    contentDescription = "Remove custom voice $name",
+                                )
+                            }
+                        }
+                    }
+                    val pickVoiceFile = rememberLauncherForActivityResult(
+                        ActivityResultContracts.GetContent(),
+                    ) { uri ->
+                        if (uri == null) return@rememberLauncherForActivityResult
+                        scope.launch {
+                            voiceError = null
+                            val imported = PhononDownloader.importVoice(context, uri)
+                            if (imported != null) {
+                                customVoices = PhononDownloader.customVoices(context)
+                                AssistantPreferences.setPhononVoice(context, imported)
+                                KokoroEngine.get(context).reload()
+                            } else {
+                                voiceError = "That file is not a Phonon voice."
+                            }
+                        }
+                    }
+                    OutlinedButton(
+                        enabled = phononEnabled,
+                        onClick = { pickVoiceFile.launch("*/*") },
+                    ) { Text("Import custom voice (.safetensors)") }
+                    Text(
+                        text = "Gradium custom voices are not public downloads. Export yours " +
+                            "from Gradium Studio, or with the download-voice.py script, then " +
+                            "import the .safetensors file here. It is copied into the app and " +
+                            "spoken on-device.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
                     TextButton(
                         enabled = phononEnabled && !voiceDownloading,
                         onClick = {

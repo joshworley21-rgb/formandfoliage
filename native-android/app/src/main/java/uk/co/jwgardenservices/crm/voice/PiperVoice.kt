@@ -198,11 +198,8 @@ object PiperVoiceDownloader {
         File(context.filesDir, "parakeet-tdt-0.6b-v2-en").deleteRecursively()
         // The bundled Zipformer was removed; free any extracted copy.
         File(context.filesDir, "sherpa-onnx-streaming-zipformer-en-2023-06-21").deleteRecursively()
-        // Keep only the offered Phonon catalog voices and the checkpoint voice.
-        val keepVoices = PhononVoice.entries.map { it.name }.toSet() + setOf("default", "default-voice")
-        File(PhononDownloader.dir(context), "voices").listFiles()?.forEach { file ->
-            if (file.nameWithoutExtension !in keepVoices) file.delete()
-        }
+        // Phonon voices are left alone: imported custom voices live in the same
+        // folder and cannot be told apart from retired catalogue entries.
     }
 
     /** How much of an interrupted download is already on disk. */

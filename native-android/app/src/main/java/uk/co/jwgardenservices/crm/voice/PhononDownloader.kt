@@ -141,8 +141,79 @@ object PhononDownloader {
         }
     }
 
-    fun start(context: Context) {
-        if (job?.isActive == true) return
+    /**
+     * Voices the user imported from Gradium Studio (or any Phonon voice file),
+     * by file name without extension. They are stored beside the catalogue
+     * voices, but are not part of [PhononVoice].
+     */
+    fun customVoices(context: Context): List<String> {
+        val catalog = PhononVoice.entries.map { it.name }.toSet() + setOf("default", "default-voice")
+        return File(dir(context), "voices")
+            .listFiles { file -> file.isFile && file.extension == "safetensors" }
+            ?.map { it.nameWithoutExtension }
+            ?.filter { it !in catalog }
+            ?.sorted()
+            ?: emptyList()
+    }
+
+    /**
+     * Copy an imported voice file into the model's voices folder. Gradium
+     * custom voices are not published on Hugging Face, so they have to be
+     * exported once (the studio or `download-voice.py`) and imported here.
+     */
+    suspend fun importVoice(context: Context, uri: android.net.Uri): String? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                if (!isInstalled(context)) throw IOException("Download the Phonon model first.")
+                val folder = File(dir(context), "voices").apply { mkdirs() }
+                val suggested = runCatching {
+                    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                        val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+                    }
+                }.getOrNull()
+                val base = suggested
+                    ?.substringBeforeLast('.')
+                    ?.replace(Regex("[^A-Za-z0-9 _-]"), "")
+                    ?.trim()
+                    ?.take(48)
+                    ?.ifBlank { null }
+                    ?: "Custom voice"
+                var target = File(folder, "$base.safetensors")
+                var suffix = 2
+                while (target.exists() && target.length() > 0) {
+                    target = File(folder, "$base $suffix.safetensors")
+                    suffix++
+                }
+                val temp = File(folder, "${target.name}.part")
+                val opened = context.contentResolver.openInputStream(uri)
+                    ?: throw IOException("That file could not be opened.")
+                opened.use { input ->
+                    temp.outputStream().use { output -> input.copyTo(output) }
+                }
+                // A Phonon voice is a ~256 KB speaker embedding; anything much
+                // smaller is an HTML error page or the wrong file.
+                if (temp.length() < 100_000) {
+                    temp.delete()
+                    throw IOException("That is not a Phonon voice file.")
+                }
+                if (!temp.renameTo(target)) {
+                    temp.copyTo(target, overwrite = true)
+                    temp.delete()
+                }
+                CrashLog.note(context, TAG, "custom voice imported: ${target.nameWithoutExtension}")
+                target.nameWithoutExtension
+            }.getOrElse { error ->
+                CrashLog.note(context, TAG, "custom voice import failed: ${error.message}")
+                null
+            }
+        }
+
+    suspend fun removeCustomVoice(context: Context, name: String) = withContext(Dispatchers.IO) {
+        File(dir(context), "voices/$name.safetensors").delete()
+    }
+
+    fun start(context: Context) {        if (job?.isActive == true) return
         val appContext = context.applicationContext
         job = scope.launch {
             try {
