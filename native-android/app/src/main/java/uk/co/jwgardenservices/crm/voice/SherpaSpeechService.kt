@@ -321,14 +321,15 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 "loading Nemotron (native construct starts, previousFailures=$failures)",
             )
             val started = System.currentTimeMillis()
-            // First attempt: generated bpe.vocab for hotword biasing. If the
-            // process died last time, this attempt skips the biased decoding
-            // path entirely, which isolates a bpe.vocab problem from a plain
-            // out-of-memory one.
-            val vocab = if (failures == 0) AsrHotwords.ensureVocab(context, dir) else null
             if (failures > 0) {
-                CrashLog.note(context, TAG, "retrying Nemotron without hotword biasing")
+                CrashLog.note(context, TAG, "retrying Nemotron after a native crash")
             }
+            // This model is a NeMo transducer: sherpa-onnx's implementation
+            // accepts greedy_search only. modified_beam_search, active paths
+            // and hotword scores are rejected at load time by the native
+            // library (sherpa-onnx issue #3572), which aborts the process.
+            // Client-name accuracy comes from the transcript corrector
+            // instead of decoder biasing on this engine.
             NemotronDownloader.markAttempt(context)
             val created = try {
                 withContext(Dispatchers.IO) {
@@ -348,8 +349,6 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                                 tokens = File(dir, "tokens.txt").absolutePath,
                                 numThreads = 2,
                                 provider = "cpu",
-                                modelingUnit = if (vocab != null) "bpe" else "",
-                                bpeVocab = vocab.orEmpty(),
                             ),
                             endpointConfig = EndpointConfig(
                                 rule1 = EndpointRule(
@@ -369,9 +368,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                                 ),
                             ),
                             enableEndpoint = true,
-                            decodingMethod = "modified_beam_search",
-                            maxActivePaths = 4,
-                            hotwordsScore = 2.0f,
+                            // NeMo transducer: greedy is the only supported
+                            // decoder in sherpa-onnx.
+                            decodingMethod = "greedy_search",
                         ),
                     )
                 }
@@ -393,13 +392,14 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 null
             } else {
                 nemotron = created
-                hotwordBiasEnabled = vocab != null
-                val vocabSource = if (vocab != null) "bpe.vocab" else "no vocab"
+                // NeMo transducer has no decoder biasing here; the transcript
+                // corrector in AsrHotwords still fixes client names.
+                hotwordBiasEnabled = false
                 CrashLog.note(
                     context,
                     TAG,
                     "Nemotron ready in ${System.currentTimeMillis() - started}ms " +
-                        "(biasing=${vocab != null} $vocabSource)",
+                        "(decoding=greedy_search, biasing=off)",
                 )
                 _state.update { state ->
                     if (state.phase == Phase.Loading) state.copy(phase = Phase.Ready, message = null) else state

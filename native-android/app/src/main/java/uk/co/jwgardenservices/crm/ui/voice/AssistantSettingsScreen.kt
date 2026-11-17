@@ -442,8 +442,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 Text(
                     text = "Moonshine v2 base English, MIT licence. About 135 MB. It is an " +
                         "offline model: there are no live partial words, just a transcript when " +
-                        "you stop speaking. The Zipformer stays the default for its live words " +
-                        "and automatic client-name hotwords; switch below to compare.",
+                        "you stop speaking. Nemotron stays the option for live partial words; " +
+                        "client names are corrected after recognition on either engine.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -90,9 +90,17 @@ object NemotronDownloader {
     // the only way to learn from it is a marker left on disk. It is written
     // before the construct and deleted on any normal outcome; if it is still
     // there on the next launch, the previous process died loading Nemotron.
+    //
+    // The counter is versioned by the load configuration: failures recorded
+    // under an old config (e.g. the unsupported modified_beam_search) must
+    // not retire a configuration that actually works.
 
-    private fun attemptMarker(context: Context) = File(dir(context), "load.attempt")
-    private fun failureCounter(context: Context) = File(dir(context), "load.failures.txt")
+    private const val LOAD_CONFIG = "greedy-v2"
+
+    private fun attemptMarker(context: Context) =
+        File(dir(context), "load.attempt.$LOAD_CONFIG")
+    private fun failureCounter(context: Context) =
+        File(dir(context), "load.failures.$LOAD_CONFIG.txt")
 
     /** How many times the process has died constructing Nemotron. */
     fun loadFailures(context: Context): Int =
