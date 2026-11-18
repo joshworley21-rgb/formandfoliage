@@ -443,6 +443,10 @@ class AssistantService : Service() {
             // muted or the clip fails.
             _turns.value = (_turns.value + AssistantTurn(fromUser = false, text = greeting))
                 .takeLast(MAX_TURNS)
+            // If a screen already opened the mic, suspend it for the greeting;
+            // the speakerphone otherwise transcribes the assistant itself.
+            val wasListening = speech.isListening()
+            if (wasListening) speech.pauseForSpeech()
             _speaking.value = true
             val focused = requestAudioFocus()
             val spoken = try {
@@ -467,6 +471,7 @@ class AssistantService : Service() {
             } finally {
                 if (focused) abandonAudioFocus()
                 _speaking.value = false
+                if (wasListening) speech.resumeAfterSpeech()
             }
             CrashLog.note(
                 this,
@@ -551,6 +556,9 @@ class AssistantService : Service() {
     /** Start listening if this is the first bind or the loop stopped. */
     fun ensureListening() {
         if (_muted.value) return
+        // The greeting and replies are played through the loudspeaker; opening
+        // the mic then feeds them straight back as a user turn.
+        if (_speaking.value || _thinking.value || _dialling.value) return
         CrashLog.note(this, TAG, "ensureListening")
         scope.launch {
             // startListening waits for an in-flight preload rather than

@@ -478,7 +478,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 Text(
                     text = "On-device voices. The ones marked included ship inside the app, " +
                         "so Install copies one locally in seconds; any others are downloaded " +
-                        "once over Wi-Fi. A chosen voice replaces Phonon until it is cleared.",
+                        "once over Wi-Fi. A chosen voice replaces Phonon until it is cleared. " +
+                        "Pocket clones the short reference voice bundled with the app.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

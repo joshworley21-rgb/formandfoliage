@@ -31,6 +31,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.YearMonth
+import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
 import kotlin.math.abs
 
@@ -699,16 +700,64 @@ class VoiceActionRunner(
         )
 
         val clients = repository.observeClients().first()
+        val zone = ZoneId.systemDefault()
         val items = jobs.map { (job, starts) ->
             val name = clients.firstOrNull { it.id == job.clientId }?.name ?: "a client"
-            when {
-                range.from == range.to -> "${starts.formatTime()} $name"
-                else -> "${starts.formatShortWeekday()} ${starts.formatDayMonth()} " +
-                    "at ${starts.formatTime()} $name"
+            val time = spokenClock(starts.atZone(zone).toLocalTime())
+            if (range.from == range.to) {
+                "you're at $name at $time"
+            } else {
+                val day = starts.atZone(zone).dayOfWeek
+                    .getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.UK)
+                "$day you're at $name at $time"
             }
         }
-        val count = if (jobs.size == 1) "job" else "jobs"
-        return slow(chunkedList("You have ${jobs.size} $count ${range.label}:", items))
+        val intro = when (jobs.size) {
+            1 -> "Just the one ${range.label}, Josh"
+            else -> "${numberWord(jobs.size)} ${range.label}, Josh"
+        }
+        val joined = when (items.size) {
+            1 -> items[0]
+            2 -> "${items[0]}, then ${items[1]}"
+            else -> items.dropLast(1).joinToString(", ") + ", then " + items.last()
+        }
+        return slow("$intro — $joined.")
+    }
+
+    /** "eight", "half past nine", "quarter to five": how a person says a slot. */
+    private fun spokenClock(time: LocalTime): String {
+        val hour = hourWord(time.hour)
+        return when (time.minute) {
+            0 -> hour
+            15 -> "quarter past $hour"
+            30 -> "half past $hour"
+            45 -> "quarter to ${hourWord(time.hour + 1)}"
+            else -> "${time.hour}:${time.minute.toString().padStart(2, '0')}"
+        }
+    }
+
+    private fun hourWord(hour24: Int): String = when (hour24 % 12) {
+        0 -> "twelve"
+        1 -> "one"
+        2 -> "two"
+        3 -> "three"
+        4 -> "four"
+        5 -> "five"
+        6 -> "six"
+        7 -> "seven"
+        8 -> "eight"
+        9 -> "nine"
+        10 -> "ten"
+        else -> "eleven"
+    }
+
+    private fun numberWord(count: Int): String = when (count) {
+        2 -> "Two"
+        3 -> "Three"
+        4 -> "Four"
+        5 -> "Five"
+        6 -> "Six"
+        else -> "$count"
     }
 
     private data class DateRange(val from: LocalDate, val to: LocalDate, val label: String)

@@ -6,6 +6,9 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import android.util.Log
 import com.k2fsa.sherpa.onnx.GeneratedAudio
+import com.k2fsa.sherpa.onnx.GenerationConfig
+import com.k2fsa.sherpa.onnx.WaveData
+import com.k2fsa.sherpa.onnx.WaveReader
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKittenModelConfig
@@ -95,7 +98,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             // speaker id to a VITS model can index past its table.
             val sid = speakerFor(engine, speakerId)
             val audio = withContext(Dispatchers.Default) {
-                engine.generate(
+                generate(engine, 
                     clean,
                     sid,
                     (speed * pace).coerceIn(AssistantPreferences.MIN_SPEED, AssistantPreferences.MAX_SPEED),
@@ -120,6 +123,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             loadLock.withLock {
                 runCatching { tts?.release() }
                 tts = null
+                pocketReference = null
                 fillers.clear()
                 pickup = null
             }
@@ -170,7 +174,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             val index = fillerIndex % FILLER_TEXTS.size
             fillerIndex++
             val audio = fillers[index] ?: withContext(Dispatchers.Default) {
-                engine.generate(FILLER_TEXTS[index], sid, speed)
+                generate(engine, FILLER_TEXTS[index], sid, speed)
             }.also { fillers[index] = it }
             stopRequested = false
             play(audio)
@@ -200,7 +204,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             for (index in 0..1) {
                 if (fillers[index] == null) {
                     fillers[index] = withContext(Dispatchers.Default) {
-                        engine.generate(FILLER_TEXTS[index], sid, speed)
+                        generate(engine, FILLER_TEXTS[index], sid, speed)
                     }
                 }
             }
@@ -208,7 +212,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             // call never waits for synthesis.
             if (pickup == null) {
                 pickup = withContext(Dispatchers.Default) {
-                    engine.generate(PICKUP_TEXT, sid, speed)
+                    generate(engine, PICKUP_TEXT, sid, speed)
                 }
             }
         }
@@ -230,7 +234,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             val engine = ensureEngine() ?: return@withLock false
             val sid = speakerFor(engine, speakerId)
             val audio = pickup ?: withContext(Dispatchers.Default) {
-                engine.generate(PICKUP_TEXT, sid, speed)
+                generate(engine, PICKUP_TEXT, sid, speed)
             }.also { pickup = it }
             stopRequested = false
             play(audio)
@@ -254,7 +258,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             for (index in FILLER_TEXTS.indices) {
                 if (fillers[index] != null) continue
                 fillers[index] = withContext(Dispatchers.Default) {
-                    engine.generate(FILLER_TEXTS[index], sid, speed)
+                    generate(engine, FILLER_TEXTS[index], sid, speed)
                 }
             }
         }
@@ -301,7 +305,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                     try {
                         for (chunk in chunks) {
                             if (stopRequested || closed) break
-                            audio.send(engine.generate(chunk, sid, speed * pace))
+                            audio.send(generate(engine, chunk, sid, speed * pace))
                         }
                     } finally {
                         audio.close()
@@ -505,16 +509,61 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     private fun speakerFor(engine: OfflineTts, speakerId: Int): Int =
         if (engineKind == EngineKind.Kokoro) speakerId else 0
 
+    /** The clip Pocket TTS clones. Packaged in assets/voices/. */
+    private var pocketReference: WaveData? = null
+
+    private fun pocketReference(): WaveData? {
+        pocketReference?.let { return it }
+        return runCatching {
+            WaveReader.readWave(context.assets, "voices/pocket-reference.wav")
+        }.onFailure {
+            CrashLog.note(context, TAG, "Pocket reference missing: ${it.message}")
+        }.getOrNull()?.also { pocketReference = it }
+    }
+
+    /**
+     * Pocket TTS is zero-shot voice cloning: without a reference clip
+     * `generate()` returns no samples. Every other engine takes (text, sid,
+     * speed) directly.
+     */
+    private fun generate(
+        engine: OfflineTts,
+        text: String,
+        sid: Int,
+        speed: Float,
+    ): GeneratedAudio {
+        if (engineKind != EngineKind.Pocket) return engine.generate(text, sid, speed)
+        val reference = pocketReference()
+        if (reference == null) {
+            CrashLog.note(context, TAG, "Pocket has no reference clip; cannot generate")
+            return engine.generate(text, 0, speed)
+        }
+        return engine.generateWithConfig(
+            text,
+            GenerationConfig(
+                speed = speed,
+                sid = 0,
+                referenceAudio = reference.samples,
+                referenceSampleRate = reference.sampleRate,
+                numSteps = 5,
+                extra = mapOf("max_reference_audio_len" to "12"),
+            ),
+        )
+    }
+
     /** A downloaded Piper (VITS) voice. */
     private fun buildVits(dir: File, voice: PiperVoice): OfflineTts? {
         CrashLog.note(context, TAG, "model=piper:${voice.id}")
         val config = OfflineTtsConfig(
             model = OfflineTtsModelConfig(
                 vits = OfflineTtsVitsModelConfig(
-                    model = File(dir, "model.int8.onnx")
-                        .takeIf { it.isFile }
-                        ?.absolutePath
-                        ?: File(dir, "model.onnx").absolutePath,
+                    model = (
+                        File(dir, "model.int8.onnx").takeIf { it.isFile }
+                            ?: File(dir, "model.onnx").takeIf { it.isFile }
+                            ?: dir.listFiles { file ->
+                                file.isFile && file.extension == "onnx"
+                            }?.maxByOrNull { it.length() }
+                        )?.absolutePath ?: File(dir, "model.onnx").absolutePath,
                     tokens = File(dir, "tokens.txt").absolutePath,
                     dataDir = File(dir, "espeak-ng-data").absolutePath,
                     lengthScale = 1.0f,
@@ -686,7 +735,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     private suspend fun play(audio: GeneratedAudio): Boolean {
         val samples = trimSilence(audio.samples, audio.sampleRate)
         if (samples.isEmpty()) {
-            CrashLog.note(context, TAG, "empty audio returned by Kokoro")
+            CrashLog.note(context, TAG, "empty audio returned by $engineKind")
             return false
         }
         // Environmental gain: louder over engine noise, normal when quiet.

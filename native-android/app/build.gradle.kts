@@ -410,6 +410,18 @@ val bundleVoices = tasks.register("bundleVoices") {
             check(exit == 0) { "Could not unpack ${archive.name}" }
 
             val root = unpacked.listFiles()?.firstOrNull { it.isDirectory } ?: unpacked
+
+            // Pocket is a voice-cloning model; keep the demo reference clip it
+            // clones, once, at assets/voices/pocket-reference.wav.
+            if (voice.id.startsWith("sherpa-onnx-pocket-tts")) {
+                val reference = File(root, "test_wavs/bria.wav")
+                if (reference.isFile) {
+                    val output = File(assets, "voices/pocket-reference.wav")
+                    output.parentFile?.mkdirs()
+                    reference.copyTo(output, overwrite = true)
+                }
+            }
+
             destination.deleteRecursively()
             root.copyRecursively(destination, overwrite = true)
             unpacked.deleteRecursively()

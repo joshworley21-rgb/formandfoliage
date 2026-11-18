@@ -48,7 +48,7 @@ enum class PiperVoice(
     /** Kyutai Pocket TTS: 100M parameters, CPU, ~200 ms to first audio. */
     Pocket(
         "sherpa-onnx-pocket-tts-int8-2026-01-26",
-        "pocket tts — Kyutai, fastest (int8)",
+        "pocket tts — Kyutai, cloned voice (fast)",
         98_336_520,
         LocalVoiceEngine.Pocket,
     ),
@@ -56,7 +56,7 @@ enum class PiperVoice(
     /** The same model at full precision: the best quality, 160 MB. */
     PocketHq(
         "sherpa-onnx-pocket-tts-2026-01-26",
-        "pocket tts — Kyutai, best quality (fp32)",
+        "pocket tts — Kyutai, cloned voice (best)",
         168_148_625,
         LocalVoiceEngine.Pocket,
     ),
@@ -250,9 +250,11 @@ object PiperVoiceDownloader {
         LocalVoiceEngine.Kitten -> KITTEN_FILES.all { File(dir, it).isFile } &&
             File(dir, "espeak-ng-data/phontab").isFile
         LocalVoiceEngine.Vits -> {
-            (File(dir, "model.onnx").isFile || File(dir, "model.int8.onnx").isFile) &&
-                File(dir, "tokens.txt").isFile &&
-                File(dir, "espeak-ng-data/phontab").isFile
+            // Piper archives name the graph after the voice (en_GB-...onnx);
+            // the downloader renames it, bundled assets keep the original.
+            File(dir, "tokens.txt").isFile &&
+                File(dir, "espeak-ng-data/phontab").isFile &&
+                dir.listFiles()?.any { it.isFile && it.extension == "onnx" } == true
         }
     }
 
