@@ -99,6 +99,12 @@ class AssistantService : Service() {
     /** Delayed "let me check" clip, cancelled as soon as an answer is ready. */
     private var thinkingMask: Job? = null
 
+    /** "Ah, my mistake —" prefix for a self-correction, consumed once. */
+    private var correctionLead: String? = null
+
+    /** The last real command, replayed by "same again" / "the usual". */
+    private var lastCommand: String? = null
+
     /** True while a call is connected (mic on, or just paused between tabs). */
     private val _callActive = MutableStateFlow(false)
     val callActive: StateFlow<Boolean> = _callActive.asStateFlow()
@@ -197,6 +203,15 @@ class AssistantService : Service() {
     override fun onCreate() {
         super.onCreate()
         speech = SpeechEngine.get(this)
+        speech.onBackchannel = {
+            // Wired-headset only, decided in the recogniser; never over a
+            // loudspeaker or a car kit.
+            if (_callActive.value && !_speaking.value && !_muted.value) {
+                scope.launch {
+                    runCatching { speaker.speakBackchannel(voice.speakerId, speed) }
+                }
+            }
+        }
         speech.onBargeIn = {
             CrashLog.note(this, TAG, "barge-in; stopping playback")
             // Only a real interruption of the voice counts — a barge while
@@ -763,7 +778,16 @@ class AssistantService : Service() {
             // Kokoro rather than leaving the assistant silent.
             val spokenOnline = onlineVoice && !lowBattery &&
                 runCatching { onlineSpeaker().speak(stripped) }.getOrDefault(false)
-            if (!spokenOnline) speaker.speakStreaming(text.trim(), voice.speakerId, speed)
+            if (!spokenOnline) {
+                // Short confirmations brisk; anything with a figure or money
+                // a shade slower so it is heard once.
+                val naturalPace = when {
+                    stripped.length < 50 -> 1.04f
+                    Regex("\\d").containsMatchIn(stripped) -> 0.96f
+                    else -> 1f
+                }
+                speaker.speakStreaming(text.trim(), voice.speakerId, speed * naturalPace)
+            }
         } finally {
             if (focused) abandonAudioFocus()
         }
@@ -790,7 +814,11 @@ class AssistantService : Service() {
      * small talk is left alone so it does not feel like a script.
      */
     private suspend fun sayAnswer(text: String) {
-        val clean = text.trim()
+        // A short beat reads as listening rather than parsing.
+        if (!speech.fastPath) delay(180)
+        val lead = correctionLead
+        correctionLead = null
+        val clean = text.trim().let { if (lead != null) "$lead$it" else it }
         if (clean.isNotEmpty() && askFollowUp && !clean.endsWith("?")) {
             val nudge = VoiceLines.pick(
                 "Right — what next?",
@@ -1147,6 +1175,33 @@ class AssistantService : Service() {
             // "£180" instead of "one hundred and eighty quid", no spoken
             // lead-ins. This is the cheapest accuracy gain in the pipeline.
             val heard = SpeechNormalizer.normalize(text)
+            correctionLead = if (
+                Regex("^(actually|sorry[, ]+i mean|i mean|make that|scratch that,)")
+                    .containsMatchIn(heard.lowercase())
+            ) {
+                VoiceLines.pick(
+                    "Ah, my mistake — ",
+                    "Right, my mistake — ",
+                    "Sorry — ",
+                )
+            } else {
+                null
+            }
+            if (waitRequested(heard)) {
+                say("No rush — take your time.")
+                return@collect
+            }
+            if (sameAgainRequested(heard)) {
+                val previous = lastCommand
+                if (previous != null) {
+                    say("Same again — ")
+                    answerTurn(previous)
+                } else {
+                    say("Same as what? I haven't run anything yet.")
+                }
+                return@collect
+            }
+            lastCommand = heard
             // A pending answer ("Yep", "Next", "send it") skips the thinking
             // pause: the reply goes straight to the already-warm voice.
             if (!speech.fastPath) _thinking.value = true
@@ -1251,6 +1306,7 @@ class AssistantService : Service() {
             } finally {
                 thinkingMask?.cancel()
                 thinkingMask = null
+                correctionLead = null
                 _thinking.value = false
                 _speaking.value = false
                 if (wasListening) speech.resumeAfterSpeech()
@@ -1513,6 +1569,25 @@ class AssistantService : Service() {
         Regex("^(undo|undo that|undo the last one|scratch that|revert that)[.!]?$")
             .matches(text.lowercase().trim())
 
+    /** "Same again", "the usual": replay the previous command. */
+    private fun sameAgainRequested(text: String): Boolean {
+        val lower = text.lowercase().trim().trimEnd('.', '!', '?', ',')
+        return lower in setOf(
+            "same again", "same as last time", "do that again", "the usual",
+            "same as before", "run that again",
+        )
+    }
+
+    /** "Hang on", "one sec": keep the line open without treating it as a command. */
+    private fun waitRequested(text: String): Boolean {
+        val lower = text.lowercase().trim().trimEnd('.', '!', '?', ',')
+        return lower in setOf(
+            "hang on", "hang on a sec", "hang on a second", "hold on", "hold on a sec",
+            "one sec", "one second", "just a sec", "just a second", "wait", "wait a sec",
+            "wait a second", "give me a sec", "give me a second", "two secs", "back in a sec",
+        )
+    }
+
     /** "Say again", "repeat that", "pardon": replay the last sentence. */
     private fun repeatRequested(text: String): Boolean {
         val lower = text.lowercase().trim().trimEnd('.', '!', '?', ',')
@@ -1533,7 +1608,7 @@ class AssistantService : Service() {
                 "Hello ${VoiceLines.OWNER_NAME} — what do you need?",
                 "Hey — go on then.",
                 "Morning — what are we doing?",
-                "Afternoon ${VoiceLines.OWNER_NAME} — what's next?",
+                "Ha — afternoon ${VoiceLines.OWNER_NAME}, what's next?",
             )
             Regex("\\b(you alright|you ok|how's it going|hows it going|how are you)\\b")
                 .containsMatchIn(lower) -> VoiceLines.pick(
@@ -1555,7 +1630,7 @@ class AssistantService : Service() {
                 "Go on then — I'll be here.",
             )
             lower.contains("thank") || lower in setOf("ta", "nice one", "cheers") ->
-                VoiceLines.pick("Any time.", "No worries.", "Pleasure.")
+                VoiceLines.pick("Any time.", "No worries.", "Ha — pleasure.")
             lower.contains("what can you do") || lower == "help" -> HELP_TEXT
             lower.contains("busy") && lower.split(Regex("\\s+")).size <= 4 ->
                 VoiceLines.pick(

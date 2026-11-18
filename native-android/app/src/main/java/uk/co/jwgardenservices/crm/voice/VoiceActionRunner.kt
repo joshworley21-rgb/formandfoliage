@@ -194,7 +194,7 @@ class VoiceActionRunner(
         }
         val line = listOf(
             "Almost time to down tools, ${VoiceLines.OWNER_NAME}.",
-            "Must be pub time soon, surely?",
+            "Ha — must be pub time soon, surely?",
             "Last push for the week!",
         ).random()
         return " $line"

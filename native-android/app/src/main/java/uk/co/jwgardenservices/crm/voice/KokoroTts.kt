@@ -55,6 +55,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
 
     /** Pre-synthesised "thinker" clips, rotated so a slow turn is not silent. */
     private val fillers = java.util.concurrent.ConcurrentHashMap<Int, GeneratedAudio>()
+    private var backchannel: GeneratedAudio? = null
     private var fillerIndex = 0
 
     /** Cached "Hello?" for the start of a call, so pickup is instant. */
@@ -126,6 +127,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                 pocketReference = null
                 fillers.clear()
                 pickup = null
+                backchannel = null
             }
         }
     }
@@ -182,6 +184,32 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     }
 
     /**
+     * A quiet "Mm-hmm" while the owner is mid-sentence. Only used on a wired
+     * headset, where the mic will not hear the earpiece; speakerphone and car
+     * kits would feed it straight back.
+     */
+    suspend fun speakBackchannel(
+        speakerId: Int = KokoroVoice.BmFable.speakerId,
+        speed: Float = AssistantPreferences.DEFAULT_SPEED,
+    ) {
+        if (closed) return
+        if (phononActive()) {
+            runCatching { phononSpeech().speak(BACKCHANNEL_TEXT) }
+            return
+        }
+        speakLock.withLock {
+            if (closed) return@withLock
+            val engine = ensureEngine() ?: return@withLock
+            val sid = speakerFor(engine, speakerId)
+            val audio = backchannel ?: withContext(Dispatchers.Default) {
+                generate(engine, BACKCHANNEL_TEXT, sid, speed)
+            }.also { backchannel = it }
+            stopRequested = false
+            play(audio, volume = 0.35f)
+        }
+    }
+
+    /**
      * Generate the filler ahead of time, once the voice is warm. Called when a
      * call starts so the first slow cloud turn is covered too.
      */
@@ -213,6 +241,11 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             if (pickup == null) {
                 pickup = withContext(Dispatchers.Default) {
                     generate(engine, PICKUP_TEXT, sid, speed)
+                }
+            }
+            if (backchannel == null) {
+                backchannel = withContext(Dispatchers.Default) {
+                    generate(engine, BACKCHANNEL_TEXT, sid, speed)
                 }
             }
         }
@@ -732,14 +765,14 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         }
     }
 
-    private suspend fun play(audio: GeneratedAudio): Boolean {
+    private suspend fun play(audio: GeneratedAudio, volume: Float = 1f): Boolean {
         val samples = trimSilence(audio.samples, audio.sampleRate)
         if (samples.isEmpty()) {
             CrashLog.note(context, TAG, "empty audio returned by $engineKind")
             return false
         }
         // Environmental gain: louder over engine noise, normal when quiet.
-        val gain = TtsGain.current
+        val gain = TtsGain.current * volume
         val pcm = ShortArray(samples.size) { index ->
             ((samples[index] * gain).coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt().toShort()
         }
@@ -812,6 +845,8 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         const val COPY_VERSION = "2"
 
         /** Rotated while a slower answer is on its way. */
+        const val BACKCHANNEL_TEXT = "Mm-hmm."
+
         val FILLER_TEXTS = listOf(
             "Let me check.",
             "One moment.",

@@ -222,6 +222,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @Volatile
     private var activeEngine = AsrEngine.Moonshine
 
+    /** Quiet "Mm-hmm" while the owner is talking; wired headsets only. */
+    @Volatile
+    var onBackchannel: (() -> Unit)? = null
+
     /** False once the call pauses or ends, so a fallback restart cannot reopen the mic. */
     @Volatile
     private var listenWanted = false
@@ -681,6 +685,14 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             var noiseFloor = 0.008f
             var beatAudioMs = 0L
             var beatDecodeMs = 0L
+            var speechStartedAt = 0L
+            var lastBackchannelAt = 0L
+            val wired = record.routedDevice?.type in setOf(
+                android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+                android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
+                android.media.AudioDeviceInfo.TYPE_USB_DEVICE,
+            )
             val agc = InputAgc()
             // Amplified audio for the whole utterance: Nemotron streams the
             // partials, Moonshine re-decodes this buffer for the final text.
@@ -763,12 +775,24 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 val speechFloor = maxOf(RMS_SPEECH_THRESHOLD, noiseFloor * 2.2f)
                 val voiced = vadVoiced || frameRms >= speechFloor
                 if (voiced) {
+                    val now = SystemClock.elapsedRealtime()
+                    if (speechStartedAt == 0L) speechStartedAt = now
+                    // A quiet noise of agreement, never on a loudspeaker or a
+                    // car kit where it would be heard by the microphone.
+                    if (wired && now - speechStartedAt >= 3_000 &&
+                        now - lastBackchannelAt >= 4_500
+                    ) {
+                        lastBackchannelAt = now
+                        onBackchannel?.invoke()
+                    }
                     if (!hasSpeech) {
                         // Keep the syllable before the detector fired.
                         while (preRoll.isNotEmpty()) utterance.add(preRoll.removeFirst())
                     }
                     hasSpeech = true
-                    lastVoiceAt = SystemClock.elapsedRealtime()
+                    lastVoiceAt = now
+                } else {
+                    speechStartedAt = 0L
                 }
                 val feedStarted = SystemClock.elapsedRealtimeNanos()
                 val text = feed(engine, stream, samples)
@@ -919,6 +943,14 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         val preRoll = ArrayDeque<Float>()
         val agc = InputAgc()
         var noiseFloor = 0.008f
+        var speechStartedAt = 0L
+        var lastBackchannelAt = 0L
+        val wired = record.routedDevice?.type in setOf(
+            android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+            android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
+            android.media.AudioDeviceInfo.TYPE_USB_DEVICE,
+        )
         CrashLog.note(context, TAG, "moonshine loop starting (source=${record.audioSource})")
         android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
         try {
@@ -980,6 +1012,17 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 val speechFloor = maxOf(RMS_SPEECH_THRESHOLD, noiseFloor * 2.2f)
                 val voiced = vad?.isSpeechDetected() == true || frameRms >= speechFloor
                 val now = SystemClock.elapsedRealtime()
+                if (voiced) {
+                    if (speechStartedAt == 0L) speechStartedAt = now
+                    if (wired && now - speechStartedAt >= 3_000 &&
+                        now - lastBackchannelAt >= 4_500
+                    ) {
+                        lastBackchannelAt = now
+                        onBackchannel?.invoke()
+                    }
+                } else {
+                    speechStartedAt = 0L
+                }
 
                 if (!hasSpeech) {
                     for (sample in samples) {
