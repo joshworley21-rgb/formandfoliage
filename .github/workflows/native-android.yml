@@ -101,7 +101,8 @@ jobs:
           # needs admin rights, an annotation is readable from the API.
           set -o pipefail
           ./gradlew :app:testDebugUnitTest --no-daemon \
-            -Dorg.gradle.jvmargs="-Xmx2048m -XX:MaxMetaspaceSize=512m" 2>&1 | tee /tmp/unit-tests.log || {
+            -Dorg.gradle.jvmargs="-Xmx2048m -XX:MaxMetaspaceSize=512m" \
+            -PbundleVoices=false 2>&1 | tee /tmp/unit-tests.log || {
             status=$?
             grep -E "^e: |FAILED|Execution failed|Caused by|error:" /tmp/unit-tests.log |
               head -25 | while IFS= read -r line; do

@@ -112,6 +112,9 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     var localInstalled by remember {
         mutableStateOf(PiperVoice.entries.associateWith { PiperVoiceDownloader.isInstalled(context, it) })
     }
+    val localBundled = remember {
+        PiperVoice.entries.associateWith { PiperVoiceDownloader.isBundled(context, it) }
+    }
     var phononInstalled by remember { mutableStateOf(PhononDownloader.isInstalled(context)) }
     var phononSaved by remember { mutableLongStateOf(PhononDownloader.savedBytes(context)) }
     val phononVoice by AssistantPreferences.phononVoiceFlow(context)
@@ -473,9 +476,9 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "Downloadable on-device voices. A downloaded voice replaces Phonon " +
-                        "while it is selected; clearing the choice goes back to Phonon. Each " +
-                        "is a one-off download over Wi-Fi.",
+                    text = "On-device voices. The ones marked included ship inside the app, " +
+                        "so Install copies one locally in seconds; any others are downloaded " +
+                        "once over Wi-Fi. A chosen voice replaces Phonon until it is cleared.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -524,12 +527,17 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
 
                 PiperVoice.entries.forEach { voice ->
                     val installed = localInstalled[voice] == true
+                    val bundled = localBundled[voice] == true
                     val selected = localVoice == voice
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(voice.label, style = MaterialTheme.typography.bodyLarge)
                             Text(
-                                text = "${voice.bytes / MEGABYTE} MB, on-device",
+                                text = if (bundled) {
+                                    "${voice.bytes / MEGABYTE} MB, included in the app"
+                                } else {
+                                    "${voice.bytes / MEGABYTE} MB, on-device"
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -591,7 +599,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                             }
                             working == null -> OutlinedButton(
                                 onClick = { PiperVoiceDownloader.start(context, voice) },
-                            ) { Text("Download") }
+                            ) { Text(if (bundled) "Install" else "Download") }
                         }
                     }
                 }

@@ -157,6 +157,80 @@ object PiperVoiceDownloader {
     fun isInstalled(context: Context, voice: PiperVoice): Boolean =
         hasFiles(dir(context, voice), voice)
 
+    /**
+     * True when this voice was packaged into the APK (assets/voices/<id>).
+     * Installing it is then a local copy, not a download.
+     */
+    fun isBundled(context: Context, voice: PiperVoice): Boolean = runCatching {
+        context.assets.list("voices/${voice.id}")?.isNotEmpty() == true
+    }.getOrDefault(false)
+
+    /** Copy a bundled voice out of the APK into filesDir/piper/<id>. */
+    suspend fun installBundled(context: Context, voice: PiperVoice): Boolean =
+        withContext(Dispatchers.IO) {
+            if (!isBundled(context, voice)) return@withContext false
+            val target = dir(context, voice)
+            val temp = File(target.parentFile, "${voice.id}.bundled")
+            temp.deleteRecursively()
+            temp.mkdirs()
+            var copied = 0L
+            _state.value = State.Working(voice, Phase.Extracting, 0, voice.bytes)
+            try {
+                copyAssetTree(context, "voices/${voice.id}", temp) { bytes ->
+                    copied += bytes
+                    _state.value = State.Working(
+                        voice,
+                        Phase.Extracting,
+                        copied.coerceAtMost(voice.bytes),
+                        voice.bytes,
+                    )
+                }
+                if (!hasFiles(temp, voice)) {
+                    throw IOException("The bundled voice was missing its model files.")
+                }
+                target.deleteRecursively()
+                if (!temp.renameTo(target)) {
+                    temp.copyRecursively(target, overwrite = true)
+                    temp.deleteRecursively()
+                }
+                CrashLog.note(context, TAG, "bundled ${voice.id} installed")
+                _state.value = State.Working(voice, Phase.Extracting, voice.bytes, voice.bytes)
+                true
+            } catch (error: Exception) {
+                temp.deleteRecursively()
+                CrashLog.note(context, TAG, "bundled install failed (${voice.id}): ${error.message}")
+                false
+            }
+        }
+
+    private fun copyAssetTree(
+        context: Context,
+        assetPath: String,
+        destination: File,
+        onBytes: (Long) -> Unit,
+    ) {
+        val children = context.assets.list(assetPath) ?: emptyArray()
+        if (children.isEmpty()) {
+            context.assets.open(assetPath).use { input ->
+                destination.parentFile?.mkdirs()
+                destination.outputStream().use { output ->
+                    val buffer = ByteArray(128 * 1024)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                        onBytes(read.toLong())
+                    }
+                }
+            }
+        } else {
+            destination.mkdirs()
+            children.forEach { child ->
+                copyAssetTree(context, "$assetPath/$child", File(destination, child), onBytes)
+            }
+        }
+    }
+
     private fun anyOf(dir: File, vararg names: String): Boolean =
         names.any { File(dir, it).isFile }
 
@@ -211,7 +285,13 @@ object PiperVoiceDownloader {
         val appContext = context.applicationContext
         job = scope.launch {
             try {
-                downloadAndExtract(appContext, voice)
+                if (isBundled(appContext, voice)) {
+                    if (!installBundled(appContext, voice)) {
+                        throw IOException("The bundled voice was incomplete.")
+                    }
+                } else {
+                    downloadAndExtract(appContext, voice)
+                }
                 _state.value = State.Done(voice)
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled

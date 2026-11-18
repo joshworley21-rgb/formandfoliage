@@ -329,6 +329,106 @@ val downloadKokoro by tasks.registering(Exec::class) {
     }
 }
 
+
+// --- local voice packs bundled into the APK -------------------------------
+//
+// Downloading and unpacking a 20-160 MB voice on the phone is slow, especially
+// on site. CI has the bandwidth and disk, so the build fetches the offered
+// voices, unpacks them into generated assets, and the app only has to copy one
+// folder into its files directory when the owner picks it. Set
+// -PbundleVoices=false to skip this (unit tests do; they need no voices).
+data class BundledVoice(val id: String, val bytes: Long)
+
+val bundledVoices = buildList {
+    add(BundledVoice("sherpa-onnx-pocket-tts-int8-2026-01-26", 98_336_520L))
+    add(BundledVoice("kitten-nano-en-v0_8-int8", 31_220_690L))
+    add(BundledVoice("sherpa-onnx-supertonic-3-tts-int8-2026-05-11", 128_774_318L))
+    add(BundledVoice("vits-piper-en_GB-cori-high", 115_574_061L))
+    add(BundledVoice("vits-piper-en_GB-alan-medium-int8", 21_103_831L))
+    add(BundledVoice("vits-piper-en_GB-jenny_dioco-medium-int8", 20_950_036L))
+    // Pocket fp32 is 451 MB unpacked: it stays a download-only option unless
+    // a build explicitly asks for the extra size.
+    if (providers.gradleProperty("bundlePocketHq").orNull == "true") {
+        add(BundledVoice("sherpa-onnx-pocket-tts-2026-01-26", 168_148_625L))
+    }
+}
+
+val voiceAssetsDir = layout.buildDirectory.dir("generated/voiceAssets")
+val voiceArchiveDir = layout.buildDirectory.dir("voiceArchives")
+
+val bundleVoices = tasks.register("bundleVoices") {
+    description = "Download and unpack the local TTS voices into APK assets."
+    group = "build"
+    outputs.dir(voiceAssetsDir)
+
+    doLast {
+        val assets = voiceAssetsDir.get().asFile
+        val archives = voiceArchiveDir.get().asFile
+        assets.mkdirs()
+        archives.mkdirs()
+
+        fun download(url: String, target: File, expected: Long) {
+            if (target.isFile && target.length() == expected) return
+            val part = File(target.parentFile, "${target.name}.part")
+            part.delete()
+            val connection = URI(url).toURL().openConnection() as HttpURLConnection
+            connection.instanceFollowRedirects = true
+            connection.connectTimeout = 30_000
+            connection.readTimeout = 180_000
+            connection.setRequestProperty("User-Agent", "formandfoliage-build")
+            connection.inputStream.use { input ->
+                part.outputStream().use { output -> input.copyTo(output, 1 shl 20) }
+            }
+            check(part.length() == expected) {
+                "Voice download ${target.name} was ${part.length()} bytes, expected $expected"
+            }
+            if (!part.renameTo(target)) {
+                part.copyTo(target, overwrite = true)
+                part.delete()
+            }
+        }
+
+        bundledVoices.forEach { voice ->
+            // Runtime reads assets/voices/<id>, so the APK path must match.
+            val destination = File(assets, "voices/${voice.id}")
+            if (File(destination, ".bundled").isFile) return@forEach
+
+            val archive = File(archives, "${voice.id}.tar.bz2")
+            download(
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/" +
+                    "${voice.id}.tar.bz2",
+                archive,
+                voice.bytes,
+            )
+
+            val unpacked = File(voiceAssetsDir.get().asFile.parentFile, "voiceUnpack/${voice.id}")
+            unpacked.deleteRecursively()
+            unpacked.mkdirs()
+            val exit = ProcessBuilder(
+                "tar", "xjf", archive.absolutePath, "-C", unpacked.absolutePath,
+            ).inheritIO().start().waitFor()
+            check(exit == 0) { "Could not unpack ${archive.name}" }
+
+            val root = unpacked.listFiles()?.firstOrNull { it.isDirectory } ?: unpacked
+            destination.deleteRecursively()
+            root.copyRecursively(destination, overwrite = true)
+            unpacked.deleteRecursively()
+            // Sample wavs and licence text only waste APK space.
+            File(destination, "test_wavs").deleteRecursively()
+            listOf("README.md", "LICENSE", ".gitattributes").forEach {
+                File(destination, it).delete()
+            }
+            File(destination, ".bundled").writeText("1")
+        }
+    }
+}
+
+if (providers.gradleProperty("bundleVoices").orNull != "false") {
+    android.sourceSets.getByName("main").assets.srcDir(voiceAssetsDir)
+    tasks.named("preBuild") { dependsOn(bundleVoices) }
+}
+
+
 afterEvaluate {
     tasks.named("preBuild") {
         dependsOn(downloadSherpa)
