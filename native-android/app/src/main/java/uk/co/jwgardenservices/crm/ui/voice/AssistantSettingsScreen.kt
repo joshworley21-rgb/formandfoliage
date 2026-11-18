@@ -614,10 +614,12 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 Text(
                     text = "NVIDIA Nemotron 3.5 Speech Streaming 0.6B, English (en) only, " +
                         "NVIDIA Open Model License (commercial use permitted). About 662 MB, " +
-                        "April 2026 560 ms export. True streaming: live partial words. It is " +
-                        "less tolerant of a quiet phone mic than Moonshine, so if a call " +
-                        "produces no words the app switches the saved engine to Moonshine. " +
-                        "While selected it holds about 650 MB in memory.",
+                        "April 2026 560 ms export. True streaming: live partial words. " +
+                        "While Nemotron streams the partials, the finished sentence is " +
+                        "re-decoded with Moonshine when it is installed, so a quiet word " +
+                        "missed by NeMo still comes through in the final transcript. If a " +
+                        "call produces no words at all the saved engine also switches to " +
+                        "Moonshine. While selected it holds about 650 MB in memory.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

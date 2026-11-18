@@ -43,6 +43,8 @@ import java.io.File
 import java.io.IOException
 import java.util.ArrayDeque
 import uk.co.jwgardenservices.crm.core.CrashLog
+import kotlin.math.log10
+import kotlin.math.pow
 import kotlin.math.sqrt
 
 /**
@@ -57,6 +59,44 @@ import kotlin.math.sqrt
  * No model is downloaded and nothing leaves the phone, so this works in a
  * dead-signal lane.
  */
+/**
+ * Frame-wise automatic gain control for a quiet phone microphone.
+ *
+ * A fixed ladder cannot follow a voice: it sits at the boost chosen for the
+ * quietest recent frame, so the first word after a pause starts too low. This
+ * tracks RMS against a target and lifts quietly, caps the lift at 6x, never
+ * attenuates, and freezes during true silence so the room noise floor is not
+ * pumped up between sentences. Loud speech therefore passes untouched.
+ */
+private class InputAgc {
+    private var gain = 1f
+
+    fun reset() {
+        gain = 1f
+    }
+
+    fun process(raw: FloatArray): FloatArray {
+        if (raw.isEmpty()) return raw
+        var energy = 0.0
+        for (sample in raw) energy += sample * sample
+        val rms = sqrt(energy / raw.size)
+        val rmsDb = (20 * log10(rms.coerceAtLeast(1e-5))).toFloat()
+        if (rmsDb < -58f) {
+            // Silence: ease back rather than amplifying the noise floor.
+            gain = 1f + (gain - 1f) * 0.995f
+            return FloatArray(raw.size) { (raw[it] * gain).coerceIn(-0.98f, 0.98f) }
+        }
+        // -22 dBFS is a comfortable speech level for the feature extractor.
+        val desired = 10f.pow((-22f - rmsDb) / 20f).coerceIn(1f, 6f)
+        val coefficient = if (desired > gain) 0.35f else 0.12f
+        gain += (desired - gain) * coefficient
+        return FloatArray(raw.size) { (raw[it] * gain).coerceIn(-0.98f, 0.98f) }
+    }
+
+    val gainDb: Float
+        get() = (20.0 * log10(gain.coerceAtLeast(0.001f).toDouble())).toFloat()
+}
+
 class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     enum class Phase {
@@ -104,6 +144,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     private var moonshine: OfflineRecognizer? = null
     private var nemotron: OnlineRecognizer? = null
     private val nemotronLock = Mutex()
+    private val offlineDecodeLock = Any()
     private var audioRecord: AudioRecord? = null
     private var thread: Thread? = null
 
@@ -342,7 +383,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                         config = OnlineRecognizerConfig(
                             featConfig = FeatureConfig(
                                 sampleRate = SAMPLE_RATE,
-                                featureDim = FEATURE_DIM,
+                                // Nemotron's encoder is trained on 128 mel bins.
+                                featureDim = 128,
                             ),
                             modelConfig = OnlineModelConfig(
                                 transducer = OnlineTransducerModelConfig(
@@ -351,8 +393,11 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                                     joiner = File(dir, "joiner.int8.onnx").absolutePath,
                                 ),
                                 tokens = File(dir, "tokens.txt").absolutePath,
-                                numThreads = 2,
+                                numThreads = 4,
                                 provider = "cpu",
+                                // The NeMo streaming implementation, rather than
+                                // relying on node-count auto-detection.
+                                modelType = "nemotron",
                             ),
                             endpointConfig = EndpointConfig(
                                 rule1 = EndpointRule(
@@ -371,7 +416,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                                     minUtteranceLength = 20f,
                                 ),
                             ),
-                            enableEndpoint = true,
+                            // Silero/energy decides the turn; NeMo's internal
+                            // endpoint resets mid-sentence on quiet audio.
+                            enableEndpoint = false,
                             // NeMo transducer: greedy is the only supported
                             // decoder in sherpa-onnx.
                             decodingMethod = "greedy_search",
@@ -596,6 +643,13 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         var pausedClean = false
         CrashLog.note(context, TAG, "recognition loop starting (source=${record.audioSource})")
         Log.i(TAG, "Recognition loop starting (source=${record.audioSource})")
+        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
+        // Prime the cache-aware encoder with 0.5 s of silence, as sherpa's
+        // Nemotron examples do; a cold first chunk decodes poorly.
+        runCatching {
+            stream.acceptWaveform(FloatArray(SAMPLE_RATE / 2), SAMPLE_RATE)
+            while (engine.isReady(stream)) engine.decode(stream)
+        }
         try {
             record.startRecording()
             if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
@@ -609,6 +663,14 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             var peakPartial = 0
             var inputPeak = 0f
             var rawBeatPeak = 0f
+            var beatRms = 0f
+            var beatAudioMs = 0L
+            var beatDecodeMs = 0L
+            val agc = InputAgc()
+            // Amplified audio for the whole utterance: Nemotron streams the
+            // partials, Moonshine re-decodes this buffer for the final text.
+            val utterance = ArrayList<Float>(SAMPLE_RATE * 8)
+            val preRoll = java.util.ArrayDeque<Float>()
             while (listening) {
                 val read = record.read(buffer, 0, buffer.size)
                 if (read < 0) {
@@ -629,6 +691,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                         // playback stops.
                         hasSpeech = false
                         vad?.reset()
+                        agc.reset()
+                        utterance.clear()
+                        preRoll.clear()
                         pausedClean = true
                         pausePreRoll.clear()
                     }
@@ -656,63 +721,76 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 pausedClean = false
                 frames += 1
                 val raw = FloatArray(read) { buffer[it] / 32768.0f }
-                // Quiet speech yields no tokens at all from a chunked NeMo
-                // decoder: the log showed vad=true with an empty transcript at
-                // peak 0.23, and clean transcripts at peak 0.5+. A decaying
-                // peak tracker raises the whole pipeline — VAD included — when
-                // the room is quiet, and leaves loud audio alone.
                 var framePeak = 0f
-                for (sample in raw) framePeak = maxOf(framePeak, kotlin.math.abs(sample))
+                var frameEnergy = 0.0
+                for (sample in raw) {
+                    framePeak = maxOf(framePeak, kotlin.math.abs(sample))
+                    frameEnergy += sample * sample
+                }
                 rawBeatPeak = maxOf(rawBeatPeak, framePeak)
                 inputPeak = maxOf(inputPeak * 0.985f, framePeak)
-                // Measured on this phone: ordinary speech arrived at raw peaks
-                // of 0.05-0.09 in a cradle, and both recognisers decoded that
-                // to nothing. The ladder lifts up to x5 so the VAD sees quiet
-                // speech; loud audio is left alone.
-                val inputGain = when {
-                    inputPeak < 0.05f -> 5f
-                    inputPeak < 0.10f -> 4f
-                    inputPeak < 0.16f -> 3f
-                    inputPeak < 0.25f -> 2.2f
-                    inputPeak < 0.40f -> 1.5f
-                    inputPeak < 0.55f -> 1.2f
-                    else -> 1f
-                }
-                val samples = if (inputGain == 1f) {
-                    raw
-                } else {
-                    FloatArray(raw.size) { (raw[it] * inputGain).coerceIn(-1f, 1f) }
-                }
+                val frameRms = sqrt(frameEnergy / raw.size).toFloat()
+                beatRms = maxOf(beatRms, frameRms)
+                // AGC, not a step ladder: it follows the voice instead of the
+                // quietest recent frame, and never attenuates loud speech.
+                val samples = agc.process(raw)
                 vad?.acceptWaveform(samples)
-                val voiced = vad?.isSpeechDetected() == true
+                val vadVoiced = vad?.isSpeechDetected() == true
+                // Silero misses quiet speech; raw RMS does not. Either is
+                // enough to open a turn, so a quiet sentence still endpoints.
+                val voiced = vadVoiced || frameRms >= RMS_SPEECH_THRESHOLD
                 if (voiced) {
+                    if (!hasSpeech) {
+                        // Keep the syllable before the detector fired.
+                        while (preRoll.isNotEmpty()) utterance.add(preRoll.removeFirst())
+                    }
                     hasSpeech = true
                     lastVoiceAt = SystemClock.elapsedRealtime()
                 }
+                val feedStarted = SystemClock.elapsedRealtimeNanos()
                 val text = feed(engine, stream, samples)
+                beatDecodeMs += (SystemClock.elapsedRealtimeNanos() - feedStarted) / 1_000_000
+                beatAudioMs += read.toLong() * 1000 / SAMPLE_RATE
                 if (text.isNotEmpty()) producedText = true
-                val vadEndpoint = vad != null && hasSpeech && !voiced &&
-                    SystemClock.elapsedRealtime() - lastVoiceAt >= ENDPOINT_SILENCE_MS
-                val engineEndpoint = engine.isEndpoint(stream)
-                // The recogniser's own idle endpoint (rule 1) can fire while a
-                // sentence is still being spoken. Resetting then throws the
-                // words away — the log showed only the tail arriving
-                // ("…you today"). While the VAD says speech is in progress,
-                // an empty engine endpoint is ignored and the stream survives.
-                if (engineEndpoint && text.isEmpty() && hasSpeech && !vadEndpoint) {
-                    if (frames % 100 == 0) {
-                        CrashLog.note(context, TAG, "engine endpoint ignored: speech in progress")
+
+                if (hasSpeech) {
+                    for (sample in samples) utterance.add(sample)
+                } else {
+                    for (sample in samples) {
+                        preRoll.addLast(sample)
+                        while (preRoll.size > PRE_ROLL_SAMPLES) preRoll.removeFirst()
                     }
-                } else if (vadEndpoint || engineEndpoint) {
+                }
+
+                // No recogniser endpoint: NeMo's own rule resets mid-sentence
+                // on quiet audio. The VAD/energy silence is authoritative.
+                val quietFor = SystemClock.elapsedRealtime() - lastVoiceAt
+                val endpoint = hasSpeech && !voiced && quietFor >= ENDPOINT_SILENCE_MS
+                val overflow = utterance.size >= MAX_UTTERANCE_SAMPLES
+                if (endpoint || overflow) {
+                    // Nemotron gives the live partials; Moonshine, decoding the
+                    // same buffered audio, gives the final sentence. That is the
+                    // hybrid: streaming feel without the NeMo low-energy misses.
+                    val refined = refineWithMoonshine(utterance)
+                    val finalText = refined.ifBlank { text }
+                    CrashLog.note(
+                        context,
+                        TAG,
+                        "endpoint: nemotron=${text.take(120)} moonshine=${refined.take(120)}",
+                    )
                     engine.reset(stream)
-                    if (vadEndpoint || text.isNotEmpty()) {
-                        CrashLog.note(
-                            context,
-                            TAG,
-                            "endpoint: vad=$vadEndpoint engine=$engineEndpoint text=${text.take(80)}",
-                        )
+                    if (finalText.isNotEmpty()) {
+                        producedText = true
+                        publish(finalText)
+                        // Decoding held the reader; drop the audio it queued so
+                        // the next turn cannot start with stale words.
+                        runCatching {
+                            record.stop()
+                            record.startRecording()
+                        }
                     }
-                    if (text.isNotEmpty()) publish(text)
+                    utterance.clear()
+                    preRoll.clear()
                     hasSpeech = false
                     vad?.reset()
                 }
@@ -741,7 +819,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                             "voiced=$voiced hasSpeech=$hasSpeech " +
                             "partial=${_state.value.partial.length} maxPartial=$peakPartial " +
                             "src=${record.audioSource} rec=${record.recordingState} " +
-                            "gain=${"%.1f".format(inputGain)} " +
+                            "agc=${"%.1f".format(agc.gainDb)}dB " +
+                            "rms=${"%.3f".format(beatRms)} " +
+                            "rtf=${"%.2f".format(if (beatAudioMs > 0) beatDecodeMs.toFloat() / beatAudioMs else 0f)} " +
                             "rawPeak=${"%.2f".format(rawBeatPeak)} $route",
                     )
                     if (activeEngine == AsrEngine.Nemotron && !producedText) {
@@ -775,6 +855,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     peakLevel = 0f
                     peakPartial = 0
                     rawBeatPeak = 0f
+                    beatRms = 0f
+                    beatAudioMs = 0L
+                    beatDecodeMs = 0L
                 }
             }
             finish(engine, stream)
@@ -809,7 +892,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         var frames = 0
         val utterance = ArrayList<Float>(SAMPLE_RATE * 4)
         val preRoll = ArrayDeque<Float>()
+        val agc = InputAgc()
         CrashLog.note(context, TAG, "moonshine loop starting (source=${record.audioSource})")
+        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
         try {
             record.startRecording()
             if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
@@ -828,6 +913,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     if (!pausedClean) {
                         hasSpeech = false
                         vad?.reset()
+                        agc.reset()
                         utterance.clear()
                         preRoll.clear()
                         pausedClean = true
@@ -852,9 +938,15 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     continue
                 }
                 pausedClean = false
-                val samples = FloatArray(read) { buffer[it] / 32768.0f }
+                val raw = FloatArray(read) { buffer[it] / 32768.0f }
+                var energy = 0.0
+                for (sample in raw) energy += sample * sample
+                val frameRms = sqrt(energy / raw.size).toFloat()
+                val samples = agc.process(raw)
                 vad?.acceptWaveform(samples)
-                val voiced = vad?.isSpeechDetected() == true
+                // Energy fallback: Silero misses quiet phone speech.
+                val voiced = vad?.isSpeechDetected() == true ||
+                    frameRms >= RMS_SPEECH_THRESHOLD
                 val now = SystemClock.elapsedRealtime()
 
                 if (!hasSpeech) {
@@ -912,27 +1004,43 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     }
 
     /** Decode one buffered utterance with Moonshine and return the text. */
+    /**
+     * Re-decode the utterance with Moonshine while Nemotron supplied the live
+     * partials. Returns "" when Moonshine is not installed or the clip is too
+     * short to be a turn.
+     */
+    private fun refineWithMoonshine(samples: List<Float>): String {
+        if (samples.size < SAMPLE_RATE / 3) return ""
+        if (!MoonshineDownloader.isInstalled(context)) return ""
+        if (moonshine == null) {
+            runCatching { kotlinx.coroutines.runBlocking { ensureMoonshine() } }
+        }
+        return decodeOffline(samples)
+    }
+
     private fun decodeOffline(samples: List<Float>): String {
         val engine = moonshine ?: return ""
         if (samples.isEmpty()) return ""
         val started = SystemClock.elapsedRealtime()
-        val stream = engine.createStream()
-        return try {
-            stream.acceptWaveform(samples.toFloatArray(), SAMPLE_RATE)
-            engine.decode(stream)
-            val text = engine.getResult(stream).text.trim()
-            CrashLog.note(
-                context,
-                TAG,
-                "moonshine ${SystemClock.elapsedRealtime() - started}ms " +
-                    "(${samples.size / SAMPLE_RATE}s): ${text.take(120)}",
-            )
-            text
-        } catch (error: Exception) {
-            CrashLog.note(context, TAG, "moonshine decode failed: ${error.message}")
-            ""
-        } finally {
-            runCatching { stream.release() }
+        return synchronized(offlineDecodeLock) {
+            val stream = engine.createStream()
+            try {
+                stream.acceptWaveform(samples.toFloatArray(), SAMPLE_RATE)
+                engine.decode(stream)
+                val text = engine.getResult(stream).text.trim()
+                CrashLog.note(
+                    context,
+                    TAG,
+                    "moonshine ${SystemClock.elapsedRealtime() - started}ms " +
+                        "(${samples.size / SAMPLE_RATE}s): ${text.take(120)}",
+                )
+                text
+            } catch (error: Exception) {
+                CrashLog.note(context, TAG, "moonshine decode failed: ${error.message}")
+                ""
+            } finally {
+                runCatching { stream.release() }
+            }
         }
     }
 
@@ -1006,8 +1114,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 sileroVadModelConfig = SileroVadModelConfig(
                     model = modelFile.absolutePath,
                     // A van cabin and a phone in a cradle are quieter and
-                    // duller than a desk mic; 0.5 missed ordinary speech.
-                    threshold = 0.3f,
+                    // duller than a desk mic; 0.5 and 0.3 both missed quiet
+                    // speech, so lean sensitive and let RMS finish the turn.
+                    threshold = 0.25f,
                     minSilenceDuration = 0.3f,
                     minSpeechDuration = 0.15f,
                     windowSize = 512,
@@ -1022,7 +1131,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         }
             .onFailure { Log.w(TAG, "Silero VAD unavailable", it) }
             .getOrNull()
-            ?.also { CrashLog.note(context, TAG, "silero VAD ready (threshold=0.3)") }
+            ?.also { CrashLog.note(context, TAG, "silero VAD ready (threshold=0.25)") }
     }
 
     /** Copy the 640 KB VAD model out of assets once and return its path. */
@@ -1038,7 +1147,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     /** Push half a second of silence so the last words come out of the stream. */
     private fun finish(engine: OnlineRecognizer, stream: OnlineStream) {
-        stream.acceptWaveform(FloatArray(SAMPLE_RATE / 2), SAMPLE_RATE)
+        // Sherpa recommends 0.8 s of tail padding for Nemotron: the last
+        // chunk is otherwise incomplete and the final words vanish.
+        stream.acceptWaveform(FloatArray(SAMPLE_RATE * 4 / 5), SAMPLE_RATE)
         while (engine.isReady(stream)) engine.decode(stream)
         val text = engine.getResult(stream).text.trim()
         if (text.isNotEmpty()) {
@@ -1165,6 +1276,12 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
          * lets the thought finish before the stream is closed.
          */
         const val ENDPOINT_SILENCE_MS = 800L
+
+        /**
+         * Raw RMS that counts as speech even when Silero says no. Quiet phone
+         * audio arrives around -40 dBFS; room noise stays far below this.
+         */
+        const val RMS_SPEECH_THRESHOLD = 0.008f
 
         /** Audio kept before VAD reports speech, so the first word is not clipped. */
         const val PRE_ROLL_SAMPLES = SAMPLE_RATE * 4 / 10

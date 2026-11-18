@@ -67,6 +67,10 @@ enum class MicSource(val androidSource: Int, val label: String) {
         MediaRecorder.AudioSource.VOICE_RECOGNITION,
         "Best recognition (no barge-in)",
     ),
+    Mic(
+        MediaRecorder.AudioSource.MIC,
+        "Raw microphone (no noise processing)",
+    ),
 }
 
 object AssistantPreferences {
