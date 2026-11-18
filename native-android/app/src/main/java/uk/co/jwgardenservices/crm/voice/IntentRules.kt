@@ -33,8 +33,8 @@ object IntentRules {
             // the diary rules so "what's the forecast" is not a schedule query.
             text.containsAny("weather", "forecast") -> SpokenIntent.Weather
             text.startsWithAny(
-                "look up ", "search for ", "google ", "tell me about ",
-                "who is ", "who's ", "where is ",
+                "look up ", "search for ", "search the web for ", "google ",
+                "tell me about ", "find out about ", "who is ", "who's ", "where is ",
             ) -> SpokenIntent.Lookup
             text.startsWithAny("what is ", "what's ") &&
                 !text.containsAny(
@@ -222,17 +222,21 @@ object IntentRules {
         // Only a live quote/pricing question leaves the phone. Everything the
         // CRM already knows is answered locally, even when the same words
         // ("how much do they owe") sound like a price question.
-        val needsCloud = kind == SpokenIntent.Quote || text.containsAny(
-            "weather",
-            "forecast",
-            "traffic",
-            "supplier",
-            "live price",
-            "current price",
-            "price list",
-            "website",
-            "online",
-        )
+        // Weather and facts have a free, keyless path; marking them as cloud
+        // made the assistant refuse with "online answers are switched off"
+        // before it ever tried Open-Meteo or Wikipedia.
+        val needsCloud = when (kind) {
+            SpokenIntent.Weather, SpokenIntent.Lookup -> false
+            else -> kind == SpokenIntent.Quote || text.containsAny(
+                "traffic",
+                "supplier",
+                "live price",
+                "current price",
+                "price list",
+                "website",
+                "online",
+            )
+        }
         return IntentResult(kind, transcript.take(MAX_TOPIC), needsCloud)
     }
 

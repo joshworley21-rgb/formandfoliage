@@ -154,8 +154,9 @@ class FreeWebAnswers(private val context: Context) {
     private fun topicFrom(question: String): String {
         val trimmed = question.trim().trimEnd('.', '!', '?')
         val prefixes = listOf(
-            "look up ", "search for ", "search ", "google ", "tell me about ",
-            "what is ", "what's ", "who is ", "who's ", "where is ",
+            "look up ", "search for ", "search the web for ", "search ", "google ",
+            "tell me about ", "find out about ", "what is ", "what's ",
+            "who is ", "who's ", "where is ",
         )
         val lower = trimmed.lowercase(Locale.UK)
         prefixes.forEach { prefix ->
