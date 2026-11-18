@@ -166,6 +166,14 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     private var interjectionArmed = false
 
     private var echoCanceller: AcousticEchoCanceler? = null
+    /** The engine this listening session actually runs, for quiet-mic fallback. */
+    @Volatile
+    private var activeEngine = AsrEngine.Moonshine
+
+    /** False once the call pauses or ends, so a fallback restart cannot reopen the mic. */
+    @Volatile
+    private var listenWanted = false
+
     private var gainController: AutomaticGainControl? = null
 
     @Volatile
@@ -452,6 +460,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         if (!startLock.tryLock()) return
         try {
         if (released || listening) return
+        listenWanted = true
 
         val selected = engineOverride
             ?: AssistantPreferences.asrEngineFlow(context).first()
@@ -502,6 +511,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         paused = false
         _state.update { it.copy(phase = Phase.Listening, message = null, partial = "") }
 
+        activeEngine = if (offlineMode) AsrEngine.Moonshine else AsrEngine.Nemotron
         thread = if (offlineMode) {
             Thread({ processOffline(record) }, "moonshine-asr")
         } else {
@@ -515,6 +525,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     /** Close the mic; the last words are flushed before the thread ends. */
     fun stopListening() {
+        listenWanted = false
         if (!listening) return
         listening = false
         resumeAfterPause = false
@@ -579,6 +590,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         val stream = engine.createStream()
         val vad = createVad()
         var hasSpeech = false
+        var producedText = false
+        var quietSignalBeats = 0
         var lastVoiceAt = 0L
         var pausedClean = false
         CrashLog.note(context, TAG, "recognition loop starting (source=${record.audioSource})")
@@ -653,15 +666,16 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 rawBeatPeak = maxOf(rawBeatPeak, framePeak)
                 inputPeak = maxOf(inputPeak * 0.985f, framePeak)
                 // Measured on this phone: ordinary speech arrived at raw peaks
-                // of 0.05-0.12 in a cradle, and both recognisers decoded that
-                // to nothing. The ladder now lifts far more aggressively; it
-                // caps at x3.5 so pure noise is not turned into shouting.
+                // of 0.05-0.09 in a cradle, and both recognisers decoded that
+                // to nothing. The ladder lifts up to x5 so the VAD sees quiet
+                // speech; loud audio is left alone.
                 val inputGain = when {
-                    inputPeak < 0.08f -> 3.5f
-                    inputPeak < 0.15f -> 2.6f
-                    inputPeak < 0.25f -> 1.9f
-                    inputPeak < 0.40f -> 1.4f
-                    inputPeak < 0.55f -> 1.15f
+                    inputPeak < 0.05f -> 5f
+                    inputPeak < 0.10f -> 4f
+                    inputPeak < 0.16f -> 3f
+                    inputPeak < 0.25f -> 2.2f
+                    inputPeak < 0.40f -> 1.5f
+                    inputPeak < 0.55f -> 1.2f
                     else -> 1f
                 }
                 val samples = if (inputGain == 1f) {
@@ -676,6 +690,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     lastVoiceAt = SystemClock.elapsedRealtime()
                 }
                 val text = feed(engine, stream, samples)
+                if (text.isNotEmpty()) producedText = true
                 val vadEndpoint = vad != null && hasSpeech && !voiced &&
                     SystemClock.elapsedRealtime() - lastVoiceAt >= ENDPOINT_SILENCE_MS
                 val engineEndpoint = engine.isEndpoint(stream)
@@ -729,6 +744,34 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                             "gain=${"%.1f".format(inputGain)} " +
                             "rawPeak=${"%.2f".format(rawBeatPeak)} $route",
                     )
+                    if (activeEngine == AsrEngine.Nemotron && !producedText) {
+                        // Count signal-bearing beats, not consecutive ones: the
+                        // room dips between words, and resetting on a quiet beat
+                        // meant the fallback never fired.
+                        if (rawBeatPeak > 0.02f) quietSignalBeats++
+                        if (quietSignalBeats >= 3) {
+                            quietSignalBeats = 0
+                            CrashLog.note(
+                                context,
+                                TAG,
+                                "Nemotron saw signal but produced no words; restarting on Moonshine",
+                            )
+                            Thread({
+                                kotlinx.coroutines.runBlocking {
+                                    AssistantPreferences.setAsrEngine(context, AsrEngine.Moonshine)
+                                }
+                                // Wake the blocking read, then reopen on the
+                                // other engine. The loop's finally releases its
+                                // own AudioRecord; give it a moment first.
+                                listening = false
+                                runCatching { audioRecord?.stop() }
+                                Thread.sleep(700)
+                                if (!listenWanted) return@Thread
+                                runCatching { kotlinx.coroutines.runBlocking { startListening() } }
+                                    .onFailure { Log.w(TAG, "Moonshine restart failed", it) }
+                            }, "asr-fallback").start()
+                        }
+                    }
                     peakLevel = 0f
                     peakPartial = 0
                     rawBeatPeak = 0f

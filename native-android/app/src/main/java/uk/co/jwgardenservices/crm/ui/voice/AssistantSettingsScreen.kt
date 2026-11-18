@@ -614,9 +614,10 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 Text(
                     text = "NVIDIA Nemotron 3.5 Speech Streaming 0.6B, English (en) only, " +
                         "NVIDIA Open Model License (commercial use permitted). About 662 MB, " +
-                        "April 2026 560 ms export. True streaming: live partial words from a " +
-                        "model trained for noisy phone audio. While selected it holds about " +
-                        "650 MB in memory; switch back after comparing.",
+                        "April 2026 560 ms export. True streaming: live partial words. It is " +
+                        "less tolerant of a quiet phone mic than Moonshine, so if a call " +
+                        "produces no words the app switches the saved engine to Moonshine. " +
+                        "While selected it holds about 650 MB in memory.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -694,8 +695,9 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 Text(
                     text = "Moonshine v2 base English, MIT licence. About 135 MB. It is an " +
                         "offline model: there are no live partial words, just a transcript when " +
-                        "you stop speaking. Nemotron stays the option for live partial words; " +
-                        "client names are corrected after recognition on either engine.",
+                        "you stop speaking. In testing it transcribed quiet phone audio that " +
+                        "Nemotron missed entirely, so it is the recommended engine day to day. " +
+                        "Client names are corrected after recognition on either engine.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -735,8 +737,9 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         },
                     )
                     Text(
-                        text = "Takes effect on the next call. Moonshine keeps about 135 MB " +
-                            "in memory while selected; switch back to Zipformer after comparing.",
+                        text = "Takes effect on the next call. Recommended: Moonshine — it " +
+                            "copes far better with this phone's quiet microphone. Nemotron is " +
+                            "worth using only when you want live partial words.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
