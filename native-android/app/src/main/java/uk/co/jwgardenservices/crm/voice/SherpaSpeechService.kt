@@ -78,18 +78,29 @@ private class InputAgc {
     fun process(raw: FloatArray): FloatArray {
         if (raw.isEmpty()) return raw
         var energy = 0.0
-        for (sample in raw) energy += sample * sample
+        var peak = 0f
+        for (sample in raw) {
+            energy += sample * sample
+            peak = maxOf(peak, kotlin.math.abs(sample))
+        }
         val rms = sqrt(energy / raw.size)
         val rmsDb = (20 * log10(rms.coerceAtLeast(1e-5))).toFloat()
-        if (rmsDb < -58f) {
+        if (rmsDb < -55f) {
             // Silence: ease back rather than amplifying the noise floor.
-            gain = 1f + (gain - 1f) * 0.995f
+            gain = 1f + (gain - 1f) * 0.99f
             return FloatArray(raw.size) { (raw[it] * gain).coerceIn(-0.98f, 0.98f) }
         }
-        // -22 dBFS is a comfortable speech level for the feature extractor.
-        val desired = 10f.pow((-22f - rmsDb) / 20f).coerceIn(1f, 6f)
-        val coefficient = if (desired > gain) 0.35f else 0.12f
+        // Target the RMS *and* keep the peak below clipping. A Bluetooth car
+        // mic arrives at rms 0.14 but peaks 0.5; a boost-only AGC drove that
+        // into the limiter, and the distorted audio decoded to nothing.
+        val rmsTarget = 10f.pow((-24f - rmsDb) / 20f)
+        val peakTarget = 0.9f / peak.coerceAtLeast(0.001f)
+        val desired = minOf(rmsTarget, peakTarget).coerceIn(0.2f, 6f)
+        val coefficient = if (desired < gain) 0.6f else 0.25f
         gain += (desired - gain) * coefficient
+        // Hard guard: never let a transient clip the feature extractor.
+        val ceiling = 0.95f / peak.coerceAtLeast(0.001f)
+        if (gain > ceiling) gain = ceiling
         return FloatArray(raw.size) { (raw[it] * gain).coerceIn(-0.98f, 0.98f) }
     }
 
@@ -635,7 +646,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @SuppressLint("MissingPermission") // checked by startListening before this point
     private fun process(engine: OnlineRecognizer, record: AudioRecord) {
         val stream = engine.createStream()
-        val vad = createVad()
+        // A car's hands-free mic is noisier than a desk; a low threshold makes
+        // Silero hear road noise as speech for the whole journey.
+        val onBluetooth = record.routedDevice?.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+        val vad = createVad(if (onBluetooth) 0.5f else 0.25f)
         var hasSpeech = false
         var producedText = false
         var quietSignalBeats = 0
@@ -664,6 +678,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             var inputPeak = 0f
             var rawBeatPeak = 0f
             var beatRms = 0f
+            var noiseFloor = 0.008f
             var beatAudioMs = 0L
             var beatDecodeMs = 0L
             val agc = InputAgc()
@@ -731,6 +746,13 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 inputPeak = maxOf(inputPeak * 0.985f, framePeak)
                 val frameRms = sqrt(frameEnergy / raw.size).toFloat()
                 beatRms = maxOf(beatRms, frameRms)
+                // Track the noise floor: fast down, very slow up, so the car's
+                // steady rumble does not count as a person talking.
+                noiseFloor = if (frameRms < noiseFloor) {
+                    noiseFloor * 0.8f + frameRms * 0.2f
+                } else {
+                    noiseFloor * 0.999f + frameRms * 0.001f
+                }
                 // AGC, not a step ladder: it follows the voice instead of the
                 // quietest recent frame, and never attenuates loud speech.
                 val samples = agc.process(raw)
@@ -738,7 +760,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 val vadVoiced = vad?.isSpeechDetected() == true
                 // Silero misses quiet speech; raw RMS does not. Either is
                 // enough to open a turn, so a quiet sentence still endpoints.
-                val voiced = vadVoiced || frameRms >= RMS_SPEECH_THRESHOLD
+                val speechFloor = maxOf(RMS_SPEECH_THRESHOLD, noiseFloor * 2.2f)
+                val voiced = vadVoiced || frameRms >= speechFloor
                 if (voiced) {
                     if (!hasSpeech) {
                         // Keep the syllable before the detector fired.
@@ -821,6 +844,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                             "src=${record.audioSource} rec=${record.recordingState} " +
                             "agc=${"%.1f".format(agc.gainDb)}dB " +
                             "rms=${"%.3f".format(beatRms)} " +
+                            "floor=${"%.3f".format(noiseFloor)} " +
                             "rtf=${"%.2f".format(if (beatAudioMs > 0) beatDecodeMs.toFloat() / beatAudioMs else 0f)} " +
                             "rawPeak=${"%.2f".format(rawBeatPeak)} $route",
                     )
@@ -885,7 +909,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
      * endpoint. A 0.4 s pre-roll keeps the first syllable.
      */
     private fun processOffline(record: AudioRecord) {
-        val vad = createVad()
+        val onBluetooth = record.routedDevice?.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+        val vad = createVad(if (onBluetooth) 0.5f else 0.25f)
         var hasSpeech = false
         var lastVoiceAt = 0L
         var pausedClean = false
@@ -893,6 +918,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         val utterance = ArrayList<Float>(SAMPLE_RATE * 4)
         val preRoll = ArrayDeque<Float>()
         val agc = InputAgc()
+        var noiseFloor = 0.008f
         CrashLog.note(context, TAG, "moonshine loop starting (source=${record.audioSource})")
         android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
         try {
@@ -942,11 +968,17 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 var energy = 0.0
                 for (sample in raw) energy += sample * sample
                 val frameRms = sqrt(energy / raw.size).toFloat()
+                noiseFloor = if (frameRms < noiseFloor) {
+                    noiseFloor * 0.8f + frameRms * 0.2f
+                } else {
+                    noiseFloor * 0.999f + frameRms * 0.001f
+                }
                 val samples = agc.process(raw)
                 vad?.acceptWaveform(samples)
-                // Energy fallback: Silero misses quiet phone speech.
-                val voiced = vad?.isSpeechDetected() == true ||
-                    frameRms >= RMS_SPEECH_THRESHOLD
+                // Energy fallback: Silero misses quiet phone speech, but the
+                // floor keeps a car's road noise from opening a turn.
+                val speechFloor = maxOf(RMS_SPEECH_THRESHOLD, noiseFloor * 2.2f)
+                val voiced = vad?.isSpeechDetected() == true || frameRms >= speechFloor
                 val now = SystemClock.elapsedRealtime()
 
                 if (!hasSpeech) {
@@ -1102,7 +1134,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
      * on the recognizer's trailing-silence heuristic. Loaded from assets; if
      * it cannot be created, the recognizer's endpoint still ends the turn.
      */
-    private fun createVad(): Vad? {
+    private fun createVad(threshold: Float = 0.25f): Vad? {
         // Real file path, like the ASR model: the AssetManager buffer path is
         // unreliable and a wrong native path can abort the process.
         val modelFile = runCatching { copyVadAsset() }.getOrElse { error ->
@@ -1113,10 +1145,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             val config = VadModelConfig(
                 sileroVadModelConfig = SileroVadModelConfig(
                     model = modelFile.absolutePath,
-                    // A van cabin and a phone in a cradle are quieter and
-                    // duller than a desk mic; 0.5 and 0.3 both missed quiet
-                    // speech, so lean sensitive and let RMS finish the turn.
-                    threshold = 0.25f,
+                    threshold = threshold,
                     minSilenceDuration = 0.3f,
                     minSpeechDuration = 0.15f,
                     windowSize = 512,
@@ -1131,7 +1160,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         }
             .onFailure { Log.w(TAG, "Silero VAD unavailable", it) }
             .getOrNull()
-            ?.also { CrashLog.note(context, TAG, "silero VAD ready (threshold=0.25)") }
+            ?.also {
+                CrashLog.note(context, TAG, "silero VAD ready (threshold=${"%.2f".format(threshold)})")
+            }
     }
 
     /** Copy the 640 KB VAD model out of assets once and return its path. */

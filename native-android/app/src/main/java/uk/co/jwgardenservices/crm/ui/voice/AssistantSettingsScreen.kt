@@ -983,7 +983,9 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 Text(
                     text = "Barge-in needs VOICE_COMMUNICATION, which applies the phone's echo " +
                         "canceller. If words are still missed, choose Best recognition; the " +
-                        "assistant then cannot hear you over its own voice. Applies on the next call.",
+                        "assistant then cannot hear you over its own voice. On a Bluetooth car " +
+                        "kit the car's hands-free mic is used; if it struggles, try Raw " +
+                        "microphone with the phone nearer. Applies on the next call.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
