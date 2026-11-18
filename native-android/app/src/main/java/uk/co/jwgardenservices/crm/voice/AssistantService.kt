@@ -32,6 +32,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -91,6 +92,9 @@ class AssistantService : Service() {
     /** True while a heard sentence is being classified and acted on. */
     private val _thinking = MutableStateFlow(false)
     val thinking: StateFlow<Boolean> = _thinking.asStateFlow()
+
+    /** Delayed "let me check" clip, cancelled as soon as an answer is ready. */
+    private var thinkingMask: Job? = null
 
     /** True while a call is connected (mic on, or just paused between tabs). */
     private val _callActive = MutableStateFlow(false)
@@ -729,6 +733,8 @@ class AssistantService : Service() {
 
     private suspend fun say(text: String) {
         if (!_callActive.value) return
+        thinkingMask?.cancel()
+        thinkingMask = null
         // The pace marker is runner-internal: keep it for the TTS layer,
         // strip it before anything user-visible.
         val stripped = TtsProsody.extract(text).second.trim()
@@ -759,6 +765,21 @@ class AssistantService : Service() {
     }
 
     /**
+     * Play a cached "right, let me look" after a beat of genuine work. The
+     * caller keeps running; the clip is queued on the voice lock, so the real
+     * answer follows it without overlapping.
+     */
+    private fun startThinkingMask() {
+        thinkingMask?.cancel()
+        thinkingMask = scope.launch {
+            delay(320)
+            if (!_thinking.value || !_callActive.value) return@launch
+            CrashLog.note(this@AssistantService, TAG, "thinking filler")
+            runCatching { speaker.speakFiller(voice.speakerId, speed) }
+        }
+    }
+
+    /**
      * Speak a finished answer, optionally nudging the conversation along.
      * A reply that already ends in a question needs no prompt, and help or
      * small talk is left alone so it does not feel like a script.
@@ -767,9 +788,10 @@ class AssistantService : Service() {
         val clean = text.trim()
         if (clean.isNotEmpty() && askFollowUp && !clean.endsWith("?")) {
             val nudge = VoiceLines.pick(
-                "Anything else?",
-                "Anything else I can do?",
-                "What else?",
+                "Right — what next?",
+                "Go on.",
+                "What else can I do?",
+                "Anything else while I'm here?",
             )
             say("$clean $nudge")
         } else {
@@ -1132,6 +1154,10 @@ class AssistantService : Service() {
                 CrashLog.note(this, TAG, "noise rejected: ${text.take(30)}")
                 return@collect
             }
+            // A short turn should answer immediately; only cover a wait that
+            // is actually being felt. The clip plays on the voice thread while
+            // the coroutine continues the lookup.
+            if (!speech.fastPath && !pendingAnswer) startThinkingMask()
             // Interlock starts before the filler: from here until Kokoro's
             // last sample the microphone frames are discarded, so neither the
             // filler nor the confirmation can feed back into the recognizer.
@@ -1218,9 +1244,15 @@ class AssistantService : Service() {
             } catch (error: Exception) {
                 Log.w(TAG, "Kokoro playback failed", error)
             } finally {
+                thinkingMask?.cancel()
+                thinkingMask = null
                 _thinking.value = false
                 _speaking.value = false
                 if (wasListening) speech.resumeAfterSpeech()
+                // Open handoff: the line is never left closed after a reply.
+                if (_callActive.value && !_muted.value && !speech.isListening()) {
+                    speech.startListening()
+                }
             }
         }
     }
@@ -1314,22 +1346,7 @@ class AssistantService : Service() {
             // The function classifies and, for conversational turns, produces
             // the answer in the same response — so a sentence never costs two
             // requests and never waits for the removed local model.
-            val reply = runCatching {
-                coroutineScope {
-                    val pending = async { cloud.ask(text, context, _turns.value.takeLast(6)) }
-                    // Let a quick turn answer on its own; if it is slower than
-                    // a beat, cover the wait with a cached "Let me check."
-                    val quick = withTimeoutOrNull(300) { pending.await() }
-                    if (quick != null) {
-                        quick
-                    } else {
-                        if (!onlineVoice) {
-                            runCatching { speaker.speakFiller(voice.speakerId, speed) }
-                        }
-                        pending.await()
-                    }
-                }
-            }
+            val reply = runCatching { cloud.ask(text, context, _turns.value.takeLast(6)) }
                 .onFailure { CrashLog.note(this, TAG, "cloud failed: ${it.message}") }
                 .getOrNull()
 
@@ -1425,6 +1442,15 @@ class AssistantService : Service() {
 
     /** Carry out a local intent and speak its result. */
     private suspend fun runIntent(text: String, intent: IntentResult) {
+        if (intent.intent == SpokenIntent.Continue) {
+            val next = actions.continueReadAll("go on")
+            if (next != null) {
+                sayAnswer(next)
+            } else {
+                sayAnswer(VoiceLines.pick("Go on.", "I'm listening.", "Right — what next?"))
+            }
+            return
+        }
         val executed = runCatching { actions.run(text, intent) }
             .onFailure { CrashLog.note(this, TAG, "action failed: ${it.message}") }
             .getOrNull()
@@ -1762,6 +1788,7 @@ private fun confirmationFor(intent: IntentResult): String {
         SpokenIntent.WeeklyEarnings -> "Checking this week's earnings."
         SpokenIntent.Quote ->
             if (topic.isEmpty()) "Preparing your quote." else "Preparing a quote for $topic."
+        SpokenIntent.Continue -> "Go on."
         SpokenIntent.Other ->
             "I can log hours, check your diary, add a note, or tell you who owes you."
     }

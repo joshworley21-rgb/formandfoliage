@@ -22,6 +22,13 @@ object IntentRules {
                 "pardon",
             ) -> SpokenIntent.SayAgain
 
+            // Open-handoff fillers. These keep the floor with the assistant
+            // instead of being mistaken for a new command or a client name.
+            text.trim().trimEnd('.', '!', '?', ',') in setOf(
+                "go on", "go on then", "carry on", "keep going", "continue",
+                "what else", "what next", "and then", "then what",
+            ) -> SpokenIntent.Continue
+
             // Deliberately narrow: "just wrapping up at the Smiths" is the
             // answer to the call briefing, not a request to reconcile the day.
             text.containsAny(

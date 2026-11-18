@@ -130,7 +130,7 @@ class VoiceActionRunner(
         return when {
             yes -> {
                 pendingReadAll = null
-                slow("Right — ${items.joinToString("; ")}.")
+                slow("Right — ${spokenJoin(items)}.")
             }
             no -> {
                 pendingReadAll = null
@@ -1337,6 +1337,14 @@ class VoiceActionRunner(
         )
     }
 
+    /** "a, b and c": the way a person reads a short list aloud. */
+    private fun spokenJoin(items: List<String>): String = when (items.size) {
+        0 -> ""
+        1 -> items[0]
+        2 -> "${items[0]} and ${items[1]}"
+        else -> items.dropLast(1).joinToString(", ") + " and " + items.last()
+    }
+
     private fun format(value: Double): String =
         if (value % 1.0 == 0.0) value.toInt().toString() else value.toString()
 
@@ -1348,7 +1356,7 @@ class VoiceActionRunner(
         lead: String,
         items: List<String>,
     ): String {
-        if (items.size <= 3) return "$lead ${items.joinToString("; ")}."
+        if (items.size <= 3) return "$lead ${spokenJoin(items)}."
         pendingReadAll = items
         return "$lead Starting with ${items[0]} and ${items[1]}, plus " +
             "${items.size - 2} others. Want me to read them all?"
@@ -1899,6 +1907,7 @@ class VoiceActionRunner(
         val SEND_YES = setOf(
             "send", "sent", "email", "post", "yes", "yeah", "yep", "yup",
             "go", "ahead", "do", "it", "please", "now",
+            "carry", "continue", "keep", "on", "more",
         )
 
         val SEND_NO = setOf(
