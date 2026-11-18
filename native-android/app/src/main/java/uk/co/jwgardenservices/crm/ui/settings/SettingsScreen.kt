@@ -280,6 +280,10 @@ fun SettingsScreen(
         }
 
         item {
+            CalendarSyncSection()
+        }
+
+        item {
             SectionCard(title = "Business details") {
                 Column(
                     modifier = Modifier.padding(20.dp),

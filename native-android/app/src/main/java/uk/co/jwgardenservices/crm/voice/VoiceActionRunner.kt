@@ -693,7 +693,16 @@ class VoiceActionRunner(
             val day = starts.localDate()
             !day.isBefore(range.from) && !day.isAfter(range.to)
         }
-        if (jobs.isEmpty()) return VoiceLines.pick(
+        // Google/device calendars are read live. Business events keep their
+        // titles; personal calendars only contribute anonymous busy blocks.
+        val calendarEvents = if (ServiceLocator.isInitialised()) {
+            runCatching {
+                CalendarSync.events(ServiceLocator.appContext, range.from, range.to)
+            }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+        if (jobs.isEmpty() && calendarEvents.isEmpty()) return VoiceLines.pick(
             "Nothing booked ${range.label}, ${VoiceLines.OWNER_NAME}.",
             "Clear diary ${range.label}.",
             "Nothing on ${range.label} — free run at it.",
@@ -712,16 +721,25 @@ class VoiceActionRunner(
                 "$day you're at $name at $time"
             }
         }
-        val intro = when (jobs.size) {
-            1 -> "Just the one ${range.label}, Josh"
-            else -> "${numberWord(jobs.size)} ${range.label}, Josh"
+        val calendarItems = calendarEvents.map { event ->
+            val start = event.start.atZone(zone)
+            val day = if (start.toLocalDate() == LocalDate.now()) {
+                ""
+            } else {
+                start.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.UK) +
+                    " "
+            }
+            val whenText = if (event.allDay) "all day" else "at ${spokenClock(start.toLocalTime())}"
+            val what = if (event.business) event.title else "personal, busy"
+            "$day$whenText — $what"
         }
-        val joined = when (items.size) {
-            1 -> items[0]
-            2 -> "${items[0]}, then ${items[1]}"
-            else -> items.dropLast(1).joinToString(", ") + ", then " + items.last()
+        val allItems = items + calendarItems
+        val intro = when {
+            jobs.isEmpty() -> "Your calendar ${range.label}, Josh"
+            jobs.size == 1 && calendarItems.isEmpty() -> "Just the one ${range.label}, Josh"
+            else -> "${numberWord(allItems.size)} ${range.label}, Josh"
         }
-        return slow("$intro — $joined.")
+        return slow("$intro — ${spokenJoin(allItems)}.")
     }
 
     /** "eight", "half past nine", "quarter to five": how a person says a slot. */
