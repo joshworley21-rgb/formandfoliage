@@ -74,10 +74,11 @@ fun CalendarSyncSection() {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "Calendar is read-only. Tag a whole calendar once — every event in " +
-                    "it then follows the same rule. Business events are read with their " +
-                    "titles; personal events only block the time and never reveal what they " +
-                    "are. Google edits appear live, with no sync to wait for.",
+                text = "Calendar is read-only. Tag a whole calendar once: Business reads " +
+                    "titles, Personal becomes anonymous busy blocks, and Mixed keeps a single " +
+                    "calendar for both — prefix personal events with \"Personal:\" or " +
+                    "\"Private:\" and leave business titles unprefixed. Google edits appear " +
+                    "live, with no sync to wait for.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

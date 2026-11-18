@@ -42,6 +42,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,6 +71,8 @@ import uk.co.jwgardenservices.crm.data.model.SeriesEditInput
 import uk.co.jwgardenservices.crm.data.model.Visit
 import uk.co.jwgardenservices.crm.data.model.VisitDraft
 import uk.co.jwgardenservices.crm.domain.BillingSource
+import uk.co.jwgardenservices.crm.voice.CalendarEvent
+import uk.co.jwgardenservices.crm.voice.CalendarSync
 import uk.co.jwgardenservices.crm.domain.Frequency
 import uk.co.jwgardenservices.crm.domain.SeriesJob
 import uk.co.jwgardenservices.crm.domain.editableVisits
@@ -118,7 +121,27 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
     val claimedVisitIds = remember(state.jobs) {
         state.jobs.mapNotNull { it.visitId }.toSet()
     }
-    val hasAny = jobsByDay.values.any { it.isNotEmpty() }
+
+    // Google/device calendars, read live. Business events keep their titles;
+    // personal ones only appear as blocked time.
+    val calendarContext = LocalContext.current
+    var calendarEvents by remember { mutableStateOf<List<CalendarEvent>>(emptyList()) }
+    LaunchedEffect(selectedDay, focusedDay) {
+        val from = focusedDay ?: selectedDay
+        calendarEvents = if (CalendarSync.hasPermission(calendarContext)) {
+            runCatching { CalendarSync.events(calendarContext, from, from.plusDays(20)) }
+                .getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+    }
+    val eventsByDay: Map<LocalDate, List<CalendarEvent>> = remember(calendarEvents) {
+        calendarEvents
+            .groupBy { it.start.localDate() }
+            .mapValues { (_, events) -> events.sortedBy { it.start } }
+    }
+    val hasAny = jobsByDay.values.any { it.isNotEmpty() } ||
+        eventsByDay.values.any { it.isNotEmpty() }
 
     var booking by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<ScheduledJob?>(null) }
@@ -276,7 +299,8 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
 
         days.forEach { day ->
             val jobs = jobsByDay[day].orEmpty().sortedBy { it.startsAt }
-            if (day == selectedDay || jobs.isNotEmpty()) {
+            val events = eventsByDay[day].orEmpty()
+            if (day == selectedDay || jobs.isNotEmpty() || events.isNotEmpty()) {
                 item(key = "day-$day") { DayHeading(day = day, isToday = day == today) }
                 if (day == selectedDay && jobs.isNotEmpty()) {
                     val stops = jobs.map { job ->
@@ -304,7 +328,7 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
                         }
                     }
                 }
-                if (jobs.isEmpty()) {
+                if (jobs.isEmpty() && events.isEmpty()) {
                     item(key = "empty-$day") {
                         Text(
                             text = "Nothing booked on this day.",
@@ -314,6 +338,9 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
                         )
                     }
                 } else {
+                    items(events, key = { "cal-${it.eventId}-${it.start.epochSecond}" }) { event ->
+                        CalendarEventRow(event)
+                    }
                     items(jobs, key = { it.id }) { job ->
                         JobRow(
                             job = job,
@@ -640,6 +667,43 @@ private fun DayHeading(day: LocalDate, isToday: Boolean) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp),
         )
+    }
+}
+
+@Composable
+private fun CalendarEventRow(event: CalendarEvent) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = if (event.allDay) "All day" else event.start.formatTime(),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.width(64.dp),
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = event.title,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    text = if (event.business) {
+                        "${event.calendarName} · Google Calendar"
+                    } else {
+                        "Personal · busy only"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 

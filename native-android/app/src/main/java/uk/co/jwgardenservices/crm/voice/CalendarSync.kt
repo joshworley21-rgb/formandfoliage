@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 enum class CalendarTag(val storage: String, val label: String) {
     Business("business", "Business"),
     Personal("personal", "Personal (busy only)"),
+    Mixed("mixed", "Mixed (Personal: prefix)"),
     Ignore("ignore", "Ignore"),
 }
 
@@ -98,6 +99,16 @@ object CalendarSync {
             }
             preferences[TAGS_KEY] = current.joinToString("\n")
         }
+    }
+
+    /**
+     * In a Mixed calendar, personal events are the ones prefixed "Personal"
+     * or "Private". Everything else is business, so a single calendar can
+     * hold both without leaking personal titles.
+     */
+    private fun isPersonalTitle(title: String?): Boolean {
+        val lower = title?.trim()?.lowercase() ?: return false
+        return lower.startsWith("personal") || lower.startsWith("private")
     }
 
     /** Calendars the user can tag. Empty without permission. */
@@ -200,14 +211,20 @@ object CalendarSync {
                         val calendarId = cursor.getLong(calendarIndex)
                         val tag = tags[calendarId]
                         if (tag != null && tag != CalendarTag.Ignore) {
-                            val business = tag == CalendarTag.Business
+                            val rawTitle = cursor.getString(titleIndex)
+                            val business = when (tag) {
+                                CalendarTag.Business -> true
+                                CalendarTag.Personal -> false
+                                CalendarTag.Mixed -> !isPersonalTitle(rawTitle)
+                                CalendarTag.Ignore -> false
+                            }
                             add(
                                 CalendarEvent(
                                     eventId = cursor.getLong(eventIndex),
                                     calendarId = calendarId,
                                     calendarName = cursor.getString(calendarNameIndex) ?: "Calendar",
                                     title = if (business) {
-                                        cursor.getString(titleIndex)?.takeIf { it.isNotBlank() }
+                                        rawTitle?.takeIf { it.isNotBlank() }
                                             ?: "Business meeting"
                                     } else {
                                         "Personal"
