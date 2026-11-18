@@ -38,6 +38,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -733,7 +734,9 @@ class AssistantService : Service() {
 
     private suspend fun say(text: String) {
         if (!_callActive.value) return
-        thinkingMask?.cancel()
+        // Wait for a filler that has already started: the online voice does
+        // not share Kokoro's audio lock, so it could otherwise talk over it.
+        thinkingMask?.cancelAndJoin()
         thinkingMask = null
         // The pace marker is runner-internal: keep it for the TTS layer,
         // strip it before anything user-visible.
