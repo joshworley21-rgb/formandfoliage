@@ -73,6 +73,7 @@ import uk.co.jwgardenservices.crm.data.model.VisitDraft
 import uk.co.jwgardenservices.crm.domain.BillingSource
 import uk.co.jwgardenservices.crm.voice.CalendarEvent
 import uk.co.jwgardenservices.crm.voice.CalendarSync
+import uk.co.jwgardenservices.crm.voice.CalendarTag
 import uk.co.jwgardenservices.crm.domain.Frequency
 import uk.co.jwgardenservices.crm.domain.SeriesJob
 import uk.co.jwgardenservices.crm.domain.editableVisits
@@ -125,8 +126,11 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
     // Google/device calendars, read live. Business events keep their titles;
     // personal ones only appear as blocked time.
     val calendarContext = LocalContext.current
+    val calendarTags by CalendarSync.tagsFlow(calendarContext)
+        .collectAsStateWithLifecycle(initialValue = emptyMap())
     var calendarEvents by remember { mutableStateOf<List<CalendarEvent>>(emptyList()) }
-    LaunchedEffect(selectedDay, focusedDay) {
+    // Re-read when the day changes or a calendar is tagged in Settings.
+    LaunchedEffect(selectedDay, focusedDay, calendarTags) {
         val from = focusedDay ?: selectedDay
         calendarEvents = if (CalendarSync.hasPermission(calendarContext)) {
             runCatching { CalendarSync.events(calendarContext, from, from.plusDays(20)) }
@@ -292,7 +296,16 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
                 EmptyState(
                     icon = Icons.Outlined.EventAvailable,
                     title = "Nothing booked",
-                    body = "Book the first job with the button above. Repeating runs go on the calendar all at once.",
+                    body = when {
+                        !CalendarSync.hasPermission(calendarContext) ->
+                            "Allow calendar access in Settings → Google Calendar to show " +
+                                "Google events here. Jobs booked in the app still appear."
+                        calendarTags.values.none { it != CalendarTag.Ignore } ->
+                            "Calendar access is on, but no calendar is tagged yet. In Settings " +
+                                "→ Google Calendar set yours to Mixed (Personal: prefix)."
+                        else -> "Book the first job with the button above. Repeating runs go on " +
+                            "the calendar all at once."
+                    },
                 )
             }
         }

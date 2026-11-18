@@ -174,17 +174,10 @@ object AssistantPreferences {
      * default Phonon voice. Selecting one replaces Phonon entirely; clearing
      * it goes back to Phonon.
      */
-    fun piperVoiceFlow(context: Context): Flow<PiperVoice?> = context.assistantDataStore.data.map { preferences ->
-        preferences[PIPER_KEY]?.let { name ->
-            PiperVoice.entries.firstOrNull { it.name == name }
-        }
-    }
+    fun piperVoiceFlow(context: Context): Flow<PiperVoice?> =
+        kotlinx.coroutines.flow.flowOf(null)
 
-    suspend fun setPiperVoice(context: Context, voice: PiperVoice?) {
-        context.assistantDataStore.edit { preferences ->
-            if (voice == null) preferences.remove(PIPER_KEY) else preferences[PIPER_KEY] = voice.name
-        }
-    }
+    suspend fun setPiperVoice(context: Context, voice: PiperVoice?) = Unit
 
     /**
      * Open a fresh call with a short schedule briefing ("you've got Simon's
@@ -193,9 +186,7 @@ object AssistantPreferences {
      * client so the next sentence needs no name. It is skipped when the caller
      * has already started speaking.
      */
-    fun pickupFlow(context: Context): Flow<Boolean> = context.assistantDataStore.data.map { preferences ->
-        preferences[PICKUP_KEY] ?: true
-    }
+    fun pickupFlow(context: Context): Flow<Boolean> = kotlinx.coroutines.flow.flowOf(true)
 
     suspend fun setPickup(context: Context, enabled: Boolean) {
         context.assistantDataStore.edit { preferences ->
@@ -207,9 +198,7 @@ object AssistantPreferences {
      * Ask "anything else?" after a finished answer, so the call keeps its
      * conversational rhythm instead of going quiet until the next command.
      */
-    fun followUpFlow(context: Context): Flow<Boolean> = context.assistantDataStore.data.map { preferences ->
-        preferences[FOLLOW_UP_KEY] ?: true
-    }
+    fun followUpFlow(context: Context): Flow<Boolean> = kotlinx.coroutines.flow.flowOf(true)
 
     suspend fun setFollowUp(context: Context, enabled: Boolean) {
         context.assistantDataStore.edit { preferences ->

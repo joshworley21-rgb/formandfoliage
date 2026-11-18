@@ -470,147 +470,48 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
-        SectionCard(title = "Local voices (Piper & Supertonic)") {
+        SectionCard(title = "Kokoro 82M (fallback)") {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "On-device voices. The ones marked included ship inside the app, " +
-                        "so Install copies one locally in seconds; any others are downloaded " +
-                        "once over Wi-Fi. A chosen voice replaces Phonon until it is cleared. " +
-                        "Pocket clones the short reference voice bundled with the app.",
+                    text = "Kokoro speaks when Phonon is off or fails. These are the eight " +
+                        "British Kokoro voices; they are expressive but heavier than Phonon, " +
+                        "so Phonon remains the first choice for a call.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-
-                val working = piperState as? PiperVoiceDownloader.State.Working
-                if (working != null) {
-                    LinearProgressIndicator(
-                        progress = { working.progress },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = "${working.voice.label}: ${working.phase.name.lowercase()} " +
-                            "${working.done / MEGABYTE} of ${working.total / MEGABYTE} MB",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    TextButton(onClick = { PiperVoiceDownloader.cancel() }) { Text("Cancel") }
-                }
-
-                // Going back to Phonon is always available.
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Phonon (default)", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            text = "Streaming 31m voice, about 62 MB",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    if (localVoice == null) {
-                        Text(
-                            text = "In use",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    } else {
-                        OutlinedButton(
-                            onClick = {
-                                scope.launch {
-                                    AssistantPreferences.setPiperVoice(context, null)
-                                    KokoroEngine.get(context).reload()
-                                }
-                            },
-                        ) { Text("Use") }
-                    }
-                }
-
-                PiperVoice.entries.forEach { voice ->
-                    val installed = localInstalled[voice] == true
-                    val bundled = localBundled[voice] == true
-                    val selected = localVoice == voice
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(voice.label, style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                text = if (bundled) {
-                                    "${voice.bytes / MEGABYTE} MB, included in the app"
-                                } else {
-                                    "${voice.bytes / MEGABYTE} MB, on-device"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                OptionPicker(
+                    options = KokoroVoice.entries,
+                    selected = voice,
+                    label = { it?.label ?: KokoroVoice.BmFable.label },
+                    onSelect = { selected ->
+                        scope.launch {
+                            AssistantPreferences.setVoice(context, selected)
+                            KokoroEngine.get(context).reload()
                         }
-                        val remove = {
-                            scope.launch {
-                                if (selected) {
-                                    AssistantPreferences.setPiperVoice(context, null)
-                                }
-                                PiperVoiceDownloader.remove(context, voice)
-                                localInstalled = PiperVoice.entries.associateWith {
-                                    PiperVoiceDownloader.isInstalled(context, it)
-                                }
-                                KokoroEngine.get(context).reload()
-                            }
-                            Unit
-                        }
-                        val audition = {
-                            scope.launch {
-                                AssistantPreferences.setPiperVoice(context, voice)
-                                KokoroEngine.get(context).reload()
-                                runCatching {
-                                    KokoroEngine.get(context).speak(PREVIEW_TEXT, 0, draftSpeed)
-                                }
-                            }
-                            Unit
-                        }
-                        val use = {
-                            scope.launch {
-                                AssistantPreferences.setPiperVoice(context, voice)
-                                KokoroEngine.get(context).reload()
-                            }
-                            Unit
-                        }
-                        when {
-                            selected -> {
-                                Text(
-                                    text = "In use",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.primary,
+                    },
+                )
+                TextButton(
+                    onClick = {
+                        previewingVoice = true
+                        scope.launch {
+                            try {
+                                KokoroEngine.get(context).speak(
+                                    PREVIEW_TEXT,
+                                    voice.speakerId,
+                                    draftSpeed,
                                 )
-                                IconButton(onClick = audition) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.VolumeUp,
-                                        contentDescription = "Preview ${voice.label}",
-                                    )
-                                }
-                                TextButton(onClick = remove) { Text("Remove") }
+                            } catch (_: Exception) {
+                                // The reply path reports its own errors.
+                            } finally {
+                                previewingVoice = false
                             }
-                            installed -> {
-                                OutlinedButton(onClick = use) { Text("Use") }
-                                IconButton(onClick = audition) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.VolumeUp,
-                                        contentDescription = "Preview ${voice.label}",
-                                    )
-                                }
-                                TextButton(onClick = remove) { Text("Remove") }
-                            }
-                            working == null -> OutlinedButton(
-                                onClick = { PiperVoiceDownloader.start(context, voice) },
-                            ) { Text(if (bundled) "Install" else "Download") }
                         }
-                    }
-                }
-
-                (piperState as? PiperVoiceDownloader.State.Failed)?.let { failure ->
-                    Text(
-                        text = "${failure.voice.label}: ${failure.message}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
+                    },
+                ) {
+                    Text(if (previewingVoice) "Playing sample…" else "Preview Kokoro voice")
                 }
             }
         }
@@ -859,49 +760,14 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         }
 
         SectionCard(title = "Call") {
-            Column(
+            Text(
+                text = "Calls always open with \"Hello Josh, how can I help?\" and today's " +
+                    "schedule, then leave the line open with a short hand-off after each " +
+                    "answer. Those are on by design and no longer have switches.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Switch(
-                        checked = pickupGreeting,
-                        onCheckedChange = { enabled ->
-                            scope.launch { AssistantPreferences.setPickup(context, enabled) }
-                        },
-                    )
-                    Text(
-                        text = "Brief me on today's schedule when a call connects",
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
-                }
-                Text(
-                    text = "A fresh call opens with the first job on today's schedule (or the " +
-                        "one you are on now) before the microphone opens, so \"log four hours " +
-                        "and mark it done\" already knows the client. Turning it off makes the " +
-                        "assistant listen immediately.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Switch(
-                        checked = followUp,
-                        onCheckedChange = { enabled ->
-                            scope.launch { AssistantPreferences.setFollowUp(context, enabled) }
-                        },
-                    )
-                    Text(
-                        text = "Ask \"anything else?\" after each answer",
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
-                }
-                Text(
-                    text = "A finished answer ends with a short nudge so the call keeps its " +
-                        "rhythm. Replies that already ask a question are left alone.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            )
         }
 
         SectionCard(title = "Conversation & memory") {

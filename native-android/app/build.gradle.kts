@@ -435,7 +435,7 @@ val bundleVoices = tasks.register("bundleVoices") {
     }
 }
 
-if (providers.gradleProperty("bundleVoices").orNull != "false") {
+if (providers.gradleProperty("bundleVoices").orNull == "true") {
     android.sourceSets.getByName("main").assets.srcDir(voiceAssetsDir)
     tasks.named("preBuild") { dependsOn(bundleVoices) }
 }

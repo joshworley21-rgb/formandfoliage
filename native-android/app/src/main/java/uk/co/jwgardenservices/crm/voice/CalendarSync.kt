@@ -153,6 +153,8 @@ object CalendarSync {
                     }
                 }
             } ?: emptyList()
+        }.onFailure {
+            android.util.Log.w("CalendarSync", "calendar list failed", it)
         }.getOrDefault(emptyList())
     }
 
@@ -244,6 +246,8 @@ object CalendarSync {
                     }
                 }
             } ?: emptyList()
+        }.onFailure {
+            android.util.Log.w("CalendarSync", "calendar events failed", it)
         }.getOrDefault(emptyList())
     }
 }

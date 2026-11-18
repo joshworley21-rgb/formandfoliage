@@ -34,7 +34,7 @@ class FreeWebAnswers(private val context: Context) {
 
     suspend fun answer(question: String, intent: SpokenIntent): String? =
         withContext(Dispatchers.IO) {
-            runCatching {
+            val result = runCatching {
                 when (intent) {
                     SpokenIntent.Weather -> weather(question)
                     SpokenIntent.Lookup -> lookup(question)
@@ -43,21 +43,40 @@ class FreeWebAnswers(private val context: Context) {
             }.onFailure {
                 CrashLog.note(context, TAG, "free web failed: ${it.message}")
             }.getOrNull()
+            CrashLog.note(
+                context,
+                TAG,
+                "free web ${intent.wire}: ${if (result == null) "no answer" else result.take(80)}",
+            )
+            result
         }
 
     // --- weather ---------------------------------------------------------
 
     private suspend fun weather(question: String): String? {
-        val place = placeFrom(question) ?: defaultPlace() ?: "Aylesbury"
-        val geo = get(
-            "https://geocoding-api.open-meteo.com/v1/search?name=" +
-                "${URLEncoder.encode(place, "UTF-8")}&count=1&language=en&format=json",
-        ) ?: return null
-        val hit = geo.jsonObject["results"]?.jsonArray?.firstOrNull()?.jsonObject
-            ?: return null
-        val name = hit["name"]?.jsonPrimitive?.content ?: place
-        val latitude = hit["latitude"]?.jsonPrimitive?.content ?: return null
-        val longitude = hit["longitude"]?.jsonPrimitive?.content ?: return null
+        // Try the named place, then the business address, then a known town.
+        // A postcode-only address otherwise makes geocoding return nothing.
+        val candidates = listOfNotNull(placeFrom(question), defaultPlace(), "Aylesbury")
+            .distinct()
+        var hit: JsonObject? = null
+        var fallback = "Aylesbury"
+        for (candidate in candidates) {
+            val geo = get(
+                "https://geocoding-api.open-meteo.com/v1/search?name=" +
+                    "${URLEncoder.encode(candidate, "UTF-8")}&count=1&language=en&format=json",
+            )
+            val found = geo?.jsonObject?.get("results")?.jsonArray?.firstOrNull()?.jsonObject
+            if (found != null) {
+                hit = found
+                fallback = candidate
+                break
+            }
+            CrashLog.note(context, TAG, "geocoding found nothing for \"$candidate\"")
+        }
+        val resolved = hit ?: return null
+        val name = resolved["name"]?.jsonPrimitive?.content ?: fallback
+        val latitude = resolved["latitude"]?.jsonPrimitive?.content ?: return null
+        val longitude = resolved["longitude"]?.jsonPrimitive?.content ?: return null
 
         val forecast = get(
             "https://api.open-meteo.com/v1/forecast?latitude=$latitude&longitude=$longitude" +
@@ -65,8 +84,12 @@ class FreeWebAnswers(private val context: Context) {
                 "&daily=weather_code,temperature_2m_max,temperature_2m_min," +
                 "precipitation_probability_max&timezone=auto&forecast_days=2",
         ) ?: return null
-        val current = forecast.jsonObject["current"]?.jsonObject ?: return null
-        val daily = forecast.jsonObject["daily"]?.jsonObject ?: return null
+        val current = forecast.jsonObject["current"]?.jsonObject
+        val daily = forecast.jsonObject["daily"]?.jsonObject
+        if (current == null || daily == null) {
+            CrashLog.note(context, TAG, "weather payload missing current/daily")
+            return null
+        }
         val temp = current["temperature_2m"]?.jsonPrimitive?.content?.round() ?: return null
         val code = current["weather_code"]?.jsonPrimitive?.content?.toIntOrNull() ?: -1
         val wind = current["wind_speed_10m"]?.jsonPrimitive?.content?.toDoubleOrNull()
@@ -182,9 +205,14 @@ class FreeWebAnswers(private val context: Context) {
             .header("User-Agent", "FormAndFoliage/2.0 (garden CRM assistant)")
             .build()
         return client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) return null
+            if (!response.isSuccessful) {
+                CrashLog.note(context, TAG, "HTTP ${response.code} for ${url.take(60)}")
+                return null
+            }
             val body = response.body?.string() ?: return null
-            json.parseToJsonElement(body).jsonObject
+            runCatching { json.parseToJsonElement(body).jsonObject }
+                .onFailure { CrashLog.note(context, TAG, "bad JSON: ${it.message}") }
+                .getOrNull()
         }
     }
 
