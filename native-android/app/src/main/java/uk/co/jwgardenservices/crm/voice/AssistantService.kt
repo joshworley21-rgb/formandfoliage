@@ -82,6 +82,8 @@ class AssistantService : Service() {
         OpenAiCloudRouter(onEvent = { CrashLog.note(this, CLOUD_TAG, it) })
     }
 
+    private val freeWeb by lazy { FreeWebAnswers(this) }
+
     /** Writes spoken commands into the same Room cache the screens use. */
     private val actions by lazy {
         VoiceActionRunner(sendInvoice = { invoiceId -> sendInvoiceByVoice(invoiceId) })
@@ -1445,6 +1447,21 @@ class AssistantService : Service() {
 
     /** Carry out a local intent and speak its result. */
     private suspend fun runIntent(text: String, intent: IntentResult) {
+        if (intent.intent == SpokenIntent.Weather || intent.intent == SpokenIntent.Lookup) {
+            val lookedUp = freeWeb.answer(text, intent.intent)
+            if (lookedUp != null) {
+                sayAnswer(lookedUp)
+            } else {
+                sayAnswer(
+                    if (intent.intent == SpokenIntent.Weather) {
+                        "I couldn't reach the forecast. Check your connection."
+                    } else {
+                        "I couldn't find that online. Check your connection."
+                    },
+                )
+            }
+            return
+        }
         if (intent.intent == SpokenIntent.Continue) {
             val next = actions.continueReadAll("go on")
             if (next != null) {
@@ -1792,6 +1809,8 @@ private fun confirmationFor(intent: IntentResult): String {
         SpokenIntent.Quote ->
             if (topic.isEmpty()) "Preparing your quote." else "Preparing a quote for $topic."
         SpokenIntent.Continue -> "Go on."
+        SpokenIntent.Weather -> "Checking the forecast."
+        SpokenIntent.Lookup -> "Looking that up."
         SpokenIntent.Other ->
             "I can log hours, check your diary, add a note, or tell you who owes you."
     }

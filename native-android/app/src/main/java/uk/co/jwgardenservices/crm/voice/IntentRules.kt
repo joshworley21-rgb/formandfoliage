@@ -29,6 +29,19 @@ object IntentRules {
                 "what else", "what next", "and then", "then what",
             ) -> SpokenIntent.Continue
 
+            // Free lookups: weather and facts need no cloud key. Placed before
+            // the diary rules so "what's the forecast" is not a schedule query.
+            text.containsAny("weather", "forecast") -> SpokenIntent.Weather
+            text.startsWithAny(
+                "look up ", "search for ", "google ", "tell me about ",
+                "who is ", "who's ", "where is ",
+            ) -> SpokenIntent.Lookup
+            text.startsWithAny("what is ", "what's ") &&
+                !text.containsAny(
+                    "on today", "on tomorrow", "booked", "schedule", "diary",
+                    "next", "my ", "owing", "unpaid", "invoice",
+                ) -> SpokenIntent.Lookup
+
             // Deliberately narrow: "just wrapping up at the Smiths" is the
             // answer to the call briefing, not a request to reconcile the day.
             text.containsAny(
@@ -224,6 +237,9 @@ object IntentRules {
     }
 
     private fun String.containsAny(vararg needles: String): Boolean = needles.any { contains(it) }
+
+    private fun String.startsWithAny(vararg prefixes: String): Boolean =
+        prefixes.any { startsWith(it) }
     /**
      * Kinds the rules are reliably right about, used as a fast path so common
      * commands do not wait for the language model. Mark-done and quote are

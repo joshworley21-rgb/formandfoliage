@@ -35,6 +35,8 @@ enum class SpokenIntent(val wire: String) {
     NextVisitNote("next_visit_note"),
     SayAgain("say_again"),
     Continue("continue"),
+    Weather("weather"),
+    Lookup("lookup"),
     Quote("quote"),
     Other("other"),
 }
