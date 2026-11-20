@@ -1493,6 +1493,7 @@ class AssistantService : Service() {
                 LocalLlm.generate(this@AssistantService, localPrompt(), text)
             }
             if (!answer.isNullOrBlank()) {
+                CrashLog.note(this, TAG, "local answer: ${answer.take(120)}")
                 sayAnswer(spokenLocalAnswer(answer))
                 return
             }

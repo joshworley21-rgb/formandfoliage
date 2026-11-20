@@ -64,23 +64,26 @@ class CallBriefing(
         } else {
             emptyList()
         }
-        if (todayJobs.isEmpty() && calendarToday.isNotEmpty()) {
-            val items = calendarToday.map { event ->
+        // Keep the opener short. A full calendar read is a briefing, not a
+        // greeting: it took 14 seconds here and timed out the speech engine.
+        // All-day entries are skipped (birthdays, "Gta 6", etc.).
+        val briefingEvents = calendarToday
+            .filter { !it.allDay }
+            .sortedBy { it.start }
+        if (todayJobs.isEmpty() && briefingEvents.isNotEmpty()) {
+            val shown = briefingEvents.take(2)
+            val items = shown.map { event ->
                 val start = event.start.atZone(zone)
-                val whenText = if (event.allDay) {
-                    "all day"
-                } else {
-                    "at ${spokenTime(start.toLocalTime())}"
-                }
                 val what = if (event.business) event.title else "personal time"
-                "$what $whenText"
+                "$what at ${spokenTime(start.toLocalTime())}"
             }
             val joined = when (items.size) {
                 1 -> items[0]
-                2 -> "${items[0]} and ${items[1]}"
-                else -> items.dropLast(1).joinToString(", ") + " and " + items.last()
+                else -> "${items[0]} and ${items[1]}"
             }
-            return "You've got $joined."
+            val more = briefingEvents.size - shown.size
+            val tail = if (more > 0) " And $more more later." else ""
+            return "You've got $joined.$tail"
         }
 
         // Standing in the middle of a booked window.
