@@ -62,7 +62,7 @@ enum class AsrEngine(val label: String) {
 enum class MicSource(val androidSource: Int, val label: String) {
     Communication(
         MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-        "Barge-in (echo cancelling)",
+        "Barge-in (may be silent on some phones)",
     ),
     Recognition(
         MediaRecorder.AudioSource.VOICE_RECOGNITION,
@@ -119,7 +119,9 @@ object AssistantPreferences {
 
     fun micSourceFlow(context: Context): Flow<MicSource> = context.assistantDataStore.data.map { preferences ->
         MicSource.entries.firstOrNull { it.name == preferences[MIC_SOURCE_KEY] }
-            ?: MicSource.Communication
+            // Communication is silent on this Samsung (raw peak 0.00); Recognition
+            // is the reliable default. Communication stays available for barge-in.
+            ?: MicSource.Recognition
     }
 
     suspend fun setMicSource(context: Context, source: MicSource) {

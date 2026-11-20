@@ -108,7 +108,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     val followUp by AssistantPreferences.followUpFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
     val micSource by AssistantPreferences.micSourceFlow(context)
-        .collectAsStateWithLifecycle(initialValue = MicSource.Communication)
+        .collectAsStateWithLifecycle(initialValue = MicSource.Recognition)
     val phononEnabled by AssistantPreferences.phononFlow(context)
         .collectAsStateWithLifecycle(initialValue = false)
     val phononState by PhononDownloader.state.collectAsStateWithLifecycle()
@@ -940,11 +940,12 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     },
                 )
                 Text(
-                    text = "Barge-in needs VOICE_COMMUNICATION, which applies the phone's echo " +
-                        "canceller. If words are still missed, choose Best recognition; the " +
-                        "assistant then cannot hear you over its own voice. On a Bluetooth car " +
-                        "kit the car's hands-free mic is used; if it struggles, try Raw " +
-                        "microphone with the phone nearer. Applies on the next call.",
+                    text = "Best recognition is the reliable default. Barge-in uses " +
+                        "VOICE_COMMUNICATION, which applies echo cancellation but is silent " +
+                        "on this Samsung — choose it only if you need to talk over the voice. " +
+                        "On a Bluetooth car kit the car's hands-free mic is used; if it " +
+                        "struggles, try Raw microphone with the phone nearer. Applies on the " +
+                        "next call.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

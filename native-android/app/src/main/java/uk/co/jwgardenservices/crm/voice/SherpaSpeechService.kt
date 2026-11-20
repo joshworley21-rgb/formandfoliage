@@ -647,6 +647,25 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     // --- audio loop -------------------------------------------------------
 
+    /**
+     * Communication (VOICE_COMMUNICATION) is silent on this Samsung when the
+     * built-in mic is used: peaks stay at 0.00 while Recognition hears normally.
+     * Switch and persist Recognition rather than leaving the call deaf.
+     */
+    private fun healSilentCommunication(record: AudioRecord) {
+        CrashLog.note(context, TAG, "Communication mic silent; switching to Recognition")
+        Thread({
+            kotlinx.coroutines.runBlocking {
+                AssistantPreferences.setMicSource(context, MicSource.Recognition)
+            }
+            listening = false
+            runCatching { record.stop() }
+            Thread.sleep(700)
+            if (!listenWanted) return@Thread
+            runCatching { kotlinx.coroutines.runBlocking { startListening() } }
+        }, "mic-heal").start()
+    }
+
     @SuppressLint("MissingPermission") // checked by startListening before this point
     private fun process(engine: OnlineRecognizer, record: AudioRecord) {
         val stream = engine.createStream()
@@ -687,6 +706,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             var beatDecodeMs = 0L
             var speechStartedAt = 0L
             var lastBackchannelAt = 0L
+            val checkCommunication = record.audioSource == MediaRecorder.AudioSource.VOICE_COMMUNICATION &&
+                record.routedDevice?.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_MIC
+            var earlyFrames = 0
+            var earlyPeak = 0f
             val wired = record.routedDevice?.type in setOf(
                 android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
                 android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
@@ -756,6 +779,14 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 }
                 rawBeatPeak = maxOf(rawBeatPeak, framePeak)
                 inputPeak = maxOf(inputPeak * 0.985f, framePeak)
+                if (checkCommunication && earlyFrames < 400) {
+                    earlyFrames++
+                    earlyPeak = maxOf(earlyPeak, framePeak)
+                    if (earlyFrames == 400 && earlyPeak < 0.004f) {
+                        healSilentCommunication(record)
+                        return
+                    }
+                }
                 val frameRms = sqrt(frameEnergy / raw.size).toFloat()
                 beatRms = maxOf(beatRms, frameRms)
                 // Track the noise floor: fast down, very slow up, so the car's
@@ -949,6 +980,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         var noiseFloor = 0.008f
         var speechStartedAt = 0L
         var lastBackchannelAt = 0L
+        val checkCommunication = record.audioSource == MediaRecorder.AudioSource.VOICE_COMMUNICATION &&
+            record.routedDevice?.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_MIC
+        var earlyFrames = 0
+        var earlyPeak = 0f
         val wired = record.routedDevice?.type in setOf(
             android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
             android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
@@ -1004,6 +1039,14 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 var energy = 0.0
                 for (sample in raw) energy += sample * sample
                 val frameRms = sqrt(energy / raw.size).toFloat()
+                if (checkCommunication && earlyFrames < 400) {
+                    earlyFrames++
+                    earlyPeak = maxOf(earlyPeak, kotlin.math.abs(raw.maxOrNull() ?: 0f))
+                    if (earlyFrames == 400 && earlyPeak < 0.004f) {
+                        healSilentCommunication(record)
+                        return
+                    }
+                }
                 noiseFloor = if (frameRms < noiseFloor) {
                     noiseFloor * 0.8f + frameRms * 0.2f
                 } else {
