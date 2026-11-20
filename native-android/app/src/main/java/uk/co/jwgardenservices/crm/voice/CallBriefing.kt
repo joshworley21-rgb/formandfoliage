@@ -57,6 +57,31 @@ class CallBriefing(
             .mapNotNull { job -> parseTimestamp(job.startsAt)?.let { job to it } }
             .sortedBy { (_, starts) -> starts }
         val todayJobs = scheduled.filter { (_, starts) -> starts.localDate(zone) == today }
+        val calendarToday = if (ServiceLocator.isInitialised()) {
+            runCatching {
+                CalendarSync.events(ServiceLocator.appContext, today, today)
+            }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+        if (todayJobs.isEmpty() && calendarToday.isNotEmpty()) {
+            val items = calendarToday.map { event ->
+                val start = event.start.atZone(zone)
+                val whenText = if (event.allDay) {
+                    "all day"
+                } else {
+                    "at ${spokenTime(start.toLocalTime())}"
+                }
+                val what = if (event.business) event.title else "personal time"
+                "$what $whenText"
+            }
+            val joined = when (items.size) {
+                1 -> items[0]
+                2 -> "${items[0]} and ${items[1]}"
+                else -> items.dropLast(1).joinToString(", ") + " and " + items.last()
+            }
+            return "You've got $joined."
+        }
 
         // Standing in the middle of a booked window.
         todayJobs.firstOrNull { (job, starts) ->

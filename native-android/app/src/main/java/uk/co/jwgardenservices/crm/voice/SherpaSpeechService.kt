@@ -819,7 +819,11 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     // same buffered audio, gives the final sentence. That is the
                     // hybrid: streaming feel without the NeMo low-energy misses.
                     val refined = refineWithMoonshine(utterance)
-                    val finalText = refined.ifBlank { text }
+                    // Nemotron keeps the final when it produced words. The
+                    // hybrid exists to rescue a silent/low-energy NeMo turn,
+                    // not to replace a good streaming transcript with a worse
+                    // offline one (it wrote "No tech look at the schedule").
+                    val finalText = text.ifBlank { refined }
                     CrashLog.note(
                         context,
                         TAG,

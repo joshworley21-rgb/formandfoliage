@@ -1462,6 +1462,23 @@ class AssistantService : Service() {
             null
         }
 
+        // Anything that looks like a general question gets a free Wikipedia/
+        // instant-answer attempt before the help line. It is not an LLM, but it
+        // covers facts, definitions and "how does X work" questions at no cost.
+        if (
+            quick.intent == SpokenIntent.Other &&
+            chatter == null &&
+            memo == null &&
+            !lowBattery &&
+            looksLikeQuestion(text)
+        ) {
+            val web = freeWeb.answer(text, SpokenIntent.Lookup)
+            if (web != null) {
+                sayAnswer(web)
+                return
+            }
+        }
+
         when {
             quick.requiresCloud -> say(
                 when {
@@ -1576,6 +1593,13 @@ class AssistantService : Service() {
             "same again", "same as last time", "do that again", "the usual",
             "same as before", "run that again",
         )
+    }
+
+    /** A general question, as opposed to a command or a fragment. */
+    private fun looksLikeQuestion(text: String): Boolean {
+        val lower = text.lowercase().trim()
+        return Regex("^(who|what|when|where|why|how|which|is|are|does|do|can|could)\\b")
+            .containsMatchIn(lower) && lower.split(Regex("\\s+")).size >= 3
     }
 
     /** "Hang on", "one sec": keep the line open without treating it as a command. */

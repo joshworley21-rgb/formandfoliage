@@ -73,6 +73,7 @@ private data class DragState(val job: ScheduledJob, val position: Offset)
 @Composable
 fun MonthCalendar(
     jobs: Map<LocalDate, List<ScheduledJob>>,
+    calendarEventDays: Map<LocalDate, Int> = emptyMap(),
     month: YearMonth,
     selectedDay: LocalDate,
     onMonthChange: (YearMonth) -> Unit,
@@ -196,6 +197,15 @@ fun MonthCalendar(
                                         else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
                                     },
                                 )
+                                val eventCount = calendarEventDays[day] ?: 0
+                                if (eventCount > 0) {
+                                    Text(
+                                        text = "•".repeat(eventCount.coerceIn(1, 3)),
+                                        style = MaterialTheme.typography.labelSmall
+                                            .copy(fontSize = 7.sp),
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
                                 dayJobs.take(3).forEach { job ->
                                     JobChip(
                                         job = job,

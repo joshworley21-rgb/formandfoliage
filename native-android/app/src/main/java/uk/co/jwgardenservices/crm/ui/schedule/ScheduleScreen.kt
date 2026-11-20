@@ -248,6 +248,7 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
         item {
             MonthCalendar(
                 jobs = jobsByDay,
+                calendarEventDays = eventsByDay.mapValues { (_, events) -> events.size },
                 month = monthCursor,
                 selectedDay = selectedDay,
                 onMonthChange = { monthCursor = it },
