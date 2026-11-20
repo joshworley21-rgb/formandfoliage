@@ -58,6 +58,7 @@ import uk.co.jwgardenservices.crm.voice.AssistantPreferences
 import uk.co.jwgardenservices.crm.voice.KokoroHqDownloader
 import uk.co.jwgardenservices.crm.voice.KokoroEngine
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
+import uk.co.jwgardenservices.crm.voice.LocalLlm
 import uk.co.jwgardenservices.crm.voice.MicSource
 import uk.co.jwgardenservices.crm.voice.MicTest
 import uk.co.jwgardenservices.crm.voice.MoonshineDownloader
@@ -97,6 +98,11 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = false)
     val onlineVoice by AssistantPreferences.onlineVoiceFlow(context)
         .collectAsStateWithLifecycle(initialValue = false)
+    val localThinking by AssistantPreferences.localThinkingFlow(context)
+        .collectAsStateWithLifecycle(initialValue = true)
+    val localLlmState by LocalLlm.state.collectAsStateWithLifecycle()
+    var localLlmInstalled by remember { mutableStateOf(LocalLlm.isInstalled(context)) }
+    var localLlmSaved by remember { mutableLongStateOf(LocalLlm.savedBytes(context)) }
     val pickupGreeting by AssistantPreferences.pickupFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
     val followUp by AssistantPreferences.followUpFlow(context)
@@ -138,6 +144,18 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     val asrEngine by AssistantPreferences.asrEngineFlow(context)
         .collectAsStateWithLifecycle(initialValue = AsrEngine.Moonshine)
 
+    LaunchedEffect(localLlmState) {
+        when (val snapshot = localLlmState) {
+            is LocalLlm.State.Done -> {
+                localLlmInstalled = true
+                localLlmSaved = 0
+                LocalLlm.clearResult()
+            }
+            is LocalLlm.State.Working -> localLlmSaved = snapshot.done
+            is LocalLlm.State.Failed -> localLlmSaved = LocalLlm.savedBytes(context)
+            else -> localLlmSaved = LocalLlm.savedBytes(context)
+        }
+    }
     LaunchedEffect(piperState) {
         when (val snapshot = piperState) {
             is PiperVoiceDownloader.State.Done -> {
@@ -829,6 +847,80 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        SectionCard(title = "Local thinking (free)") {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "Qwen2.5 0.5B runs on this phone with no key and no cost. " +
+                        "It loads only when a question needs it, then closes after a minute " +
+                        "idle so the speech models keep their memory. 521 MB, downloaded once.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(
+                        checked = localThinking,
+                        onCheckedChange = { enabled ->
+                            scope.launch { AssistantPreferences.setLocalThinking(context, enabled) }
+                        },
+                    )
+                    Text(
+                        text = "Use the local model for general questions",
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+                val working = localLlmState as? LocalLlm.State.Working
+                if (working != null) {
+                    LinearProgressIndicator(
+                        progress = { working.progress },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "Downloading ${working.done / MEGABYTE} of " +
+                            "${working.total / MEGABYTE} MB",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = { LocalLlm.cancel() }) { Text("Cancel") }
+                } else if (localLlmInstalled) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Installed — loads on demand",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(
+                            onClick = {
+                                LocalLlm.remove(context)
+                                localLlmInstalled = false
+                                localLlmSaved = 0
+                            },
+                        ) { Text("Remove") }
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = { LocalLlm.start(context) },
+                    ) {
+                        Text(
+                            if (localLlmSaved > 0) {
+                                "Resume download (${localLlmSaved / MEGABYTE} MB saved)"
+                            } else {
+                                "Download local model (521 MB)"
+                            },
+                        )
+                    }
+                }
+                (localLlmState as? LocalLlm.State.Failed)?.let { failure ->
+                    Text(
+                        text = failure.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
         }

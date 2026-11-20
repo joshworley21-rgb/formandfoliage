@@ -40,6 +40,7 @@ private val MIC_SOURCE_KEY = stringPreferencesKey("mic_source")
 private val PHONON_KEY = booleanPreferencesKey("phonon_enabled")
 private val PICKUP_KEY = booleanPreferencesKey("pickup_greeting")
 private val USED_KEY = booleanPreferencesKey("assistant_used")
+private val LOCAL_THINKING_KEY = booleanPreferencesKey("local_thinking")
 private val PHONON_VOICE_KEY = stringPreferencesKey("phonon_voice")
 private val ASR_ENGINE_KEY = stringPreferencesKey("asr_engine")
 private val FOLLOW_UP_KEY = booleanPreferencesKey("follow_up")
@@ -186,6 +187,15 @@ object AssistantPreferences {
      * client so the next sentence needs no name. It is skipped when the caller
      * has already started speaking.
      */
+    /** Free on-device answers; the model loads only when a question needs it. */
+    fun localThinkingFlow(context: Context): Flow<Boolean> =
+        context.assistantDataStore.data.map { it[LOCAL_THINKING_KEY] ?: true }
+
+    suspend fun setLocalThinking(context: Context, enabled: Boolean) {
+        context.assistantDataStore.edit { it[LOCAL_THINKING_KEY] = enabled }
+        if (!enabled) LocalLlm.release()
+    }
+
     fun pickupFlow(context: Context): Flow<Boolean> = kotlinx.coroutines.flow.flowOf(true)
 
     suspend fun setPickup(context: Context, enabled: Boolean) {

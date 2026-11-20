@@ -162,6 +162,8 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
     implementation(libs.androidx.exifinterface)
+    // On-device LLM runtime for the free "local thinking" fallback.
+    implementation("com.google.mediapipe:tasks-genai:0.10.27")
 
     coreLibraryDesugaring(libs.desugar.jdk.libs)
 

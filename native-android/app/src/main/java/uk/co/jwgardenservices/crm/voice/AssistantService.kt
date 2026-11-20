@@ -130,6 +130,7 @@ class AssistantService : Service() {
 
     private var foreground = false
     private var cloudConversation = true
+    private var localThinking = true
     private var onlineVoice = false
 
     /** True while the battery is under 15% and unplugged: cloud features off. */
@@ -271,6 +272,10 @@ class AssistantService : Service() {
         registerTelephonyDefense()
         scope.launch {
             AssistantMemory.cloudConversationFlow(this@AssistantService).collect { cloudConversation = it }
+        }
+        scope.launch {
+            AssistantPreferences.localThinkingFlow(this@AssistantService)
+                .collect { localThinking = it }
         }
         scope.launch {
             AssistantPreferences.onlineVoiceFlow(this@AssistantService).collect { onlineVoice = it }
@@ -1462,6 +1467,27 @@ class AssistantService : Service() {
             null
         }
 
+        // Free local thinking: a 0.5B model, loaded only when a turn reaches
+        // this fallback and closed again after a minute idle. It can reason
+        // about short questions; live facts still prefer the free web APIs.
+        if (
+            quick.intent == SpokenIntent.Other &&
+            chatter == null &&
+            memo == null &&
+            !lowBattery &&
+            localThinking &&
+            LocalLlm.isInstalled(this) &&
+            !looksLikeFactualQuestion(text)
+        ) {
+            val answer = withTimeoutOrNull(25_000) {
+                LocalLlm.generate(this@AssistantService, localPrompt(text))
+            }
+            if (!answer.isNullOrBlank()) {
+                sayAnswer(spokenLocalAnswer(answer))
+                return
+            }
+        }
+
         // Anything that looks like a general question gets a free Wikipedia/
         // instant-answer attempt before the help line. It is not an LLM, but it
         // covers facts, definitions and "how does X work" questions at no cost.
@@ -1593,6 +1619,42 @@ class AssistantService : Service() {
             "same again", "same as last time", "do that again", "the usual",
             "same as before", "run that again",
         )
+    }
+
+    private suspend fun localPrompt(question: String): String {
+        val snapshot = businessContext()
+        return """
+            <|im_start|>system
+            You are the voice assistant on Josh's UK gardening business phone.
+            Answer in at most two short spoken sentences. Use British English.
+            Do not use lists, markdown or stage directions. If you are unsure, say so briefly.
+            $snapshot
+            <|im_end|>
+            <|im_start|>user
+            $question
+            <|im_end|>
+            <|im_start|>assistant
+        """.trimIndent()
+    }
+
+    private fun spokenLocalAnswer(text: String): String {
+        val clean = text
+            .replace(Regex("<\\|[^>]*\\|>"), "")
+            .replace("\n", " ")
+            .trim()
+        val sentences = clean.split(Regex("(?<=[.!?])\\s+"))
+            .filter { it.isNotBlank() }
+            .take(2)
+            .joinToString(" ")
+        return sentences.ifBlank { clean }.take(360)
+    }
+
+    /** Weather/facts should go to the web APIs rather than a 0.5B model. */
+    private fun looksLikeFactualQuestion(text: String): Boolean {
+        val lower = text.lowercase()
+        return listOf("weather", "forecast", "who is", "what is", "where is", "how tall").any {
+            lower.contains(it)
+        }
     }
 
     /** A general question, as opposed to a command or a fragment. */
@@ -1728,6 +1790,7 @@ class AssistantService : Service() {
         _muted.value = false
         _speakerOn.value = false
         ringback.stop()
+        LocalLlm.release()
         abandonAudioFocus()
         releaseCallAudio()
         runCatching { mediaSession?.release() }
