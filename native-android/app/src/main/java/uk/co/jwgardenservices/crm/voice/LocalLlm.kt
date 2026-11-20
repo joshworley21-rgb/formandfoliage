@@ -2,7 +2,13 @@ package uk.co.jwgardenservices.crm.voice
 
 import android.app.ActivityManager
 import android.content.Context
-import com.google.mediapipe.tasks.genai.llminference.LlmInference
+import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Content
+import com.google.ai.edge.litertlm.Contents
+import com.google.ai.edge.litertlm.ConversationConfig
+import com.google.ai.edge.litertlm.Engine
+import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.SamplerConfig
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -32,11 +38,11 @@ import uk.co.jwgardenservices.crm.core.CrashLog
 object LocalLlm {
     private const val TAG = "LocalLlm"
     private const val DIR = "local-llm"
-    private const val FILE = "qwen2.5-0.5b-instruct.task"
+    private const val FILE = "qwen3-0.6b-int4.litertlm"
     private const val URL =
-        "https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/resolve/main/" +
-            "Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task"
-    const val BYTES = 546_660_344L
+        "https://huggingface.co/litert-community/Qwen3-0.6B-int4/resolve/main/" +
+            "qwen3_0.6b_nothink_q4_block32_ekv1280.litertlm"
+    const val BYTES = 347_251_840L
     private const val IDLE_CLOSE_MS = 300_000L
     private const val MIN_FREE_MB = 900L
 
@@ -56,7 +62,7 @@ object LocalLlm {
 
     private var job: Job? = null
     private var idleJob: Job? = null
-    private var engine: LlmInference? = null
+    private var engine: Engine? = null
     private val loadLock = Any()
 
     fun file(context: Context): File = File(File(context.filesDir, DIR), FILE)
@@ -96,7 +102,11 @@ object LocalLlm {
         _state.value = State.Idle
     }
 
-    suspend fun generate(context: Context, prompt: String): String? = withContext(Dispatchers.Default) {
+    suspend fun generate(
+        context: Context,
+        system: String,
+        question: String,
+    ): String? = withContext(Dispatchers.Default) {
         val app = context.applicationContext
         if (!isInstalled(app)) return@withContext null
         if (!hasHeadroom(app)) {
@@ -106,12 +116,14 @@ object LocalLlm {
         val llm = synchronized(loadLock) {
             engine ?: runCatching {
                 val started = System.currentTimeMillis()
-                val options = LlmInference.LlmInferenceOptions.builder()
-                    .setModelPath(file(app).absolutePath)
-                    .setMaxTokens(220)
-                    .setMaxTopK(40)
-                    .build()
-                LlmInference.createFromOptions(app, options).also {
+                Engine(
+                    EngineConfig(
+                        modelPath = file(app).absolutePath,
+                        backend = Backend.CPU(),
+                        cacheDir = app.cacheDir.path,
+                    ),
+                ).also {
+                    it.initialize()
                     CrashLog.note(
                         app,
                         TAG,
@@ -123,9 +135,29 @@ object LocalLlm {
             }.getOrNull()?.also { engine = it }
         } ?: return@withContext null
 
-        val answer = runCatching { llm.generateResponse(prompt) }
-            .onFailure { CrashLog.note(app, TAG, "generate failed: ${it.message}") }
-            .getOrNull()?.trim()
+        val answer: String? = runCatching {
+            val conversation: com.google.ai.edge.litertlm.Conversation =
+                llm.createConversation(
+                    ConversationConfig(
+                        systemInstruction = Contents.of(system),
+                        samplerConfig = SamplerConfig(
+                            topK = 40,
+                            topP = 0.95,
+                            temperature = 0.4,
+                        ),
+                    ),
+                )
+            try {
+                val message = conversation.sendMessage(question)
+                message.contents.contents
+                    .filterIsInstance<Content.Text>()
+                    .joinToString(" ") { it.text }
+            } finally {
+                runCatching { conversation.close() }
+            }
+        }.onFailure {
+            CrashLog.note(app, TAG, "generate failed: ${it.message}")
+        }.getOrNull()?.trim()
         scheduleIdleClose()
         answer?.takeIf { it.isNotBlank() }
     }

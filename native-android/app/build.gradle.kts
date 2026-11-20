@@ -89,6 +89,8 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+        // LiteRT-LM ships Kotlin 2.3 metadata; the APIs used here are stable.
+        freeCompilerArgs += "-Xskip-metadata-version-check"
     }
 
     buildFeatures {
@@ -163,7 +165,7 @@ dependencies {
     implementation(libs.coil.network.okhttp)
     implementation(libs.androidx.exifinterface)
     // On-device LLM runtime for the free "local thinking" fallback.
-    implementation("com.google.mediapipe:tasks-genai:0.10.27")
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.16.1")
 
     coreLibraryDesugaring(libs.desugar.jdk.libs)
 

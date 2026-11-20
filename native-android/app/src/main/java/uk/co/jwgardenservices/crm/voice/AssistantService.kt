@@ -1490,7 +1490,7 @@ class AssistantService : Service() {
             !looksLikeFactualQuestion(text)
         ) {
             val answer = withTimeoutOrNull(25_000) {
-                LocalLlm.generate(this@AssistantService, localPrompt(text))
+                LocalLlm.generate(this@AssistantService, localPrompt(), text)
             }
             if (!answer.isNullOrBlank()) {
                 sayAnswer(spokenLocalAnswer(answer))
@@ -1631,19 +1631,13 @@ class AssistantService : Service() {
         )
     }
 
-    private suspend fun localPrompt(question: String): String {
+    private suspend fun localPrompt(): String {
         val snapshot = businessContext()
         return """
-            <|im_start|>system
             You are the voice assistant on Josh's UK gardening business phone.
             Answer in at most two short spoken sentences. Use British English.
             Do not use lists, markdown or stage directions. If you are unsure, say so briefly.
             $snapshot
-            <|im_end|>
-            <|im_start|>user
-            $question
-            <|im_end|>
-            <|im_start|>assistant
         """.trimIndent()
     }
 

@@ -857,10 +857,10 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "Qwen2.5 0.5B runs on this phone with no key and no cost. " +
+                    text = "Qwen3 0.6B runs on this phone with no key and no cost. " +
                         "It loads only when a question needs it, stays warm for five minutes " +
                         "of conversation, then closes so the speech models get the memory " +
-                        "back. 521 MB, downloaded once.",
+                        "back. 331 MB, downloaded once.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -911,7 +911,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                             if (localLlmSaved > 0) {
                                 "Resume download (${localLlmSaved / MEGABYTE} MB saved)"
                             } else {
-                                "Download local model (521 MB)"
+                                "Download local model (331 MB)"
                             },
                         )
                     }
