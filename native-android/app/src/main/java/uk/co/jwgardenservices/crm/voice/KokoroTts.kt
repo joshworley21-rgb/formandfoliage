@@ -854,6 +854,8 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             "One second.",
             "Just pulling that up.",
             "Bear with me.",
+            "Let me think about that.",
+            "Right, getting my thoughts together.",
             "Having a look now.",
         )
     }

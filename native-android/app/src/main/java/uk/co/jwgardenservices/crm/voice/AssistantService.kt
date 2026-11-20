@@ -806,10 +806,20 @@ class AssistantService : Service() {
     private fun startThinkingMask() {
         thinkingMask?.cancel()
         thinkingMask = scope.launch {
-            delay(320)
-            if (!_thinking.value || !_callActive.value) return@launch
-            CrashLog.note(this@AssistantService, TAG, "thinking filler")
-            runCatching { speaker.speakFiller(voice.speakerId, speed) }
+            // A beat first: a local rule answer should not be preceded by
+            // "let me check" when it is already ready.
+            delay(220)
+            var rounds = 0
+            while (_thinking.value && _callActive.value) {
+                CrashLog.note(this@AssistantService, TAG, "thinking filler ${rounds + 1}")
+                runCatching { speaker.speakFiller(voice.speakerId, speed) }
+                if (!_thinking.value || !_callActive.value) break
+                rounds++
+                // Keep the line alive while a 0.5B model loads or a cloud
+                // turn thinks. Short gaps early, longer ones later, so it
+                // sounds like thinking rather than a chatter loop.
+                delay(if (rounds < 2) 450L else 1_300L)
+            }
         }
     }
 

@@ -37,7 +37,7 @@ object LocalLlm {
         "https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/resolve/main/" +
             "Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task"
     const val BYTES = 546_660_344L
-    private const val IDLE_CLOSE_MS = 90_000L
+    private const val IDLE_CLOSE_MS = 300_000L
     private const val MIN_FREE_MB = 900L
 
     sealed interface State {

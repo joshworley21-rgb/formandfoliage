@@ -858,8 +858,9 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             ) {
                 Text(
                     text = "Qwen2.5 0.5B runs on this phone with no key and no cost. " +
-                        "It loads only when a question needs it, then closes after a minute " +
-                        "idle so the speech models keep their memory. 521 MB, downloaded once.",
+                        "It loads only when a question needs it, stays warm for five minutes " +
+                        "of conversation, then closes so the speech models get the memory " +
+                        "back. 521 MB, downloaded once.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
