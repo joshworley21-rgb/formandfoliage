@@ -81,7 +81,7 @@ class FreeWebAnswers(private val context: Context) {
         val forecast = get(
             "https://api.open-meteo.com/v1/forecast?latitude=$latitude&longitude=$longitude" +
                 "&current=temperature_2m,weather_code,wind_speed_10m" +
-                "&daily=time,weather_code,temperature_2m_max,temperature_2m_min," +
+                "&daily=weather_code,temperature_2m_max,temperature_2m_min," +
                 "precipitation_probability_max&timezone=auto&forecast_days=7",
         ) ?: return null
         val current = forecast.jsonObject["current"]?.jsonObject
@@ -103,14 +103,11 @@ class FreeWebAnswers(private val context: Context) {
         val condition = conditionFor(code)
         val lower = question.lowercase()
         if (lower.contains("next week") || lower.contains("week ahead")) {
-            val dates = daily["time"]?.jsonArray ?: return null
-            val codes = daily["weather_code"]?.jsonArray ?: return null
             val highs = daily["temperature_2m_max"]?.jsonArray ?: return null
             val rains = daily["precipitation_probability_max"]?.jsonArray
-            val parts = (0 until minOf(3, dates.size)).map { index ->
-                val date = runCatching {
-                    java.time.LocalDate.parse(dates[index].jsonPrimitive.content)
-                }.getOrNull() ?: return@map null
+            val today = java.time.LocalDate.now()
+            val parts = (1..minOf(3, highs.size - 1)).map { index ->
+                val date = today.plusDays(index.toLong())
                 val day = date.dayOfWeek.getDisplayName(
                     java.time.format.TextStyle.FULL,
                     Locale.UK,
@@ -165,7 +162,12 @@ class FreeWebAnswers(private val context: Context) {
         val place = match.groupValues[1].trim()
         return place.takeIf {
             it.isNotBlank() &&
-                it.lowercase() !in setOf("here", "the morning", "the afternoon", "today", "tomorrow")
+                it.lowercase() !in setOf(
+                    "here", "the morning", "the afternoon", "today", "tomorrow",
+                    "next week", "this week", "the weekend", "next weekend",
+                    "monday", "tuesday", "wednesday", "thursday", "friday",
+                    "saturday", "sunday",
+                )
         }
     }
 

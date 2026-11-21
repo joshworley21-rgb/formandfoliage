@@ -99,9 +99,9 @@ object TtsProsody {
         }
     }
 
-    /** Lead-in shaping, safe for every engine. */
+    /** Lead-in shaping and local pronunciations, safe for every engine. */
     fun smooth(text: String): String {
-        val trimmed = text.trim()
+        val trimmed = Pronunciation.apply(text.trim())
         if (trimmed.isEmpty()) return trimmed
         val match = leadIn.find(trimmed) ?: return trimmed
         val rest = trimmed.substring(match.range.last + 1).trimStart()
