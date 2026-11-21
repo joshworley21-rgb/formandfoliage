@@ -816,7 +816,14 @@ class AssistantService : Service() {
             var rounds = 0
             while (_thinking.value && _callActive.value) {
                 CrashLog.note(this@AssistantService, TAG, "thinking filler ${rounds + 1}")
+                val fillerStarted = System.currentTimeMillis()
                 runCatching { speaker.speakFiller(voice.speakerId, speed) }
+                CrashLog.note(
+                    this@AssistantService,
+                    TAG,
+                    "thinking filler ${rounds + 1} done in " +
+                        "${System.currentTimeMillis() - fillerStarted}ms",
+                )
                 if (!_thinking.value || !_callActive.value) break
                 rounds++
                 // Keep the line alive while a 0.5B model loads or a cloud

@@ -166,8 +166,14 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     ) {
         if (closed) return
         if (phononActive()) {
-            runCatching { phononSpeech().speak(FILLER_TEXTS[0]) }
-            return
+            val spoken = runCatching { phononSpeech().speak(FILLER_TEXTS[0]) }
+                .onFailure { CrashLog.note(context, TAG, "filler Phonon threw: ${it.message}") }
+                .getOrDefault(false)
+            CrashLog.note(context, TAG, "filler Phonon spoken=$spoken")
+            if (spoken) return
+            // Phonon can report success while producing nothing, or fail on
+            // very short text. Fall through to the local cached clip rather
+            // than leaving dead air.
         }
         speakLock.withLock {
             if (closed) return@withLock
@@ -179,7 +185,8 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                 generate(engine, FILLER_TEXTS[index], sid, speed)
             }.also { fillers[index] = it }
             stopRequested = false
-            play(audio)
+            val played = play(audio)
+            CrashLog.note(context, TAG, "filler local played=$played text=${FILLER_TEXTS[index]}")
         }
     }
 
