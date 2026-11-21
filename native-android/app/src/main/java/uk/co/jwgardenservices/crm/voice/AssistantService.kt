@@ -466,7 +466,14 @@ class AssistantService : Service() {
             }
             val extra = listOfNotNull(briefing?.takeIf { it.isNotBlank() }, batteryLine)
                 .joinToString(" ")
-            val greeting = if (extra.isEmpty()) PICKUP_TEXT else "$PICKUP_TEXT $extra"
+            // Lead with the diary when there is one; the fixed "how can I
+            // help" opener made him wait through a greeting before hearing
+            // what was actually on.
+            val greeting = if (extra.isEmpty()) {
+                PICKUP_TEXT
+            } else {
+                "Hello Josh. $extra How are you today?"
+            }
             AssistantMemory.lastSpokenReply = greeting
             CrashLog.note(this, TAG, "pickup greeting: $greeting")
             val started = System.currentTimeMillis()
@@ -487,14 +494,14 @@ class AssistantService : Service() {
                 // Long enough for a Phonon hiccup and the local fallback to
                 // load; the drain in PhononSpeech caps its own wait.
                 withTimeoutOrNull(12_000) {
-                    // The cached opener goes first, so even a slow schedule or
-                    // a Phonon hiccup cannot swallow "how can I help?". The
-                    // briefing, if any, follows as its own sentence.
-                    val opened = speaker.speakPickup(speakerId, speed)
-                    if (opened && extra.isNotEmpty()) {
-                        speaker.speakStreaming(extra, speakerId, speed)
+                    if (extra.isEmpty()) {
+                        // Cached hello when there is no schedule line.
+                        speaker.speakPickup(speakerId, speed)
+                    } else {
+                        // One utterance: schedule first, friendly check-in last.
+                        speaker.speakStreaming(greeting, speakerId, speed)
+                        true
                     }
-                    opened
                 } ?: false
             } catch (error: Exception) {
                 CrashLog.note(this, TAG, "pickup failed: ${error.message}")
@@ -1644,12 +1651,17 @@ class AssistantService : Service() {
     }
 
     private suspend fun localPrompt(): String {
-        val snapshot = businessContext()
+        // Keep the 0.6B context tight: facts only. Old turns were making it
+        // answer a previous weather question instead of the current one.
+        val facts = runCatching { AssistantMemory.facts(this).map { it.text } }
+            .getOrDefault(emptyList())
+            .take(8)
         return """
             You are the voice assistant on Josh's UK gardening business phone.
-            Answer in at most two short spoken sentences. Use British English.
-            Do not use lists, markdown or stage directions. If you are unsure, say so briefly.
-            $snapshot
+            Answer only the user's question, in at most two short spoken sentences.
+            Use British English. No lists, markdown or stage directions.
+            If unsure, say so briefly. Do not invent facts from previous calls.
+            Business facts: ${facts.joinToString("; ").ifBlank { "a UK gardening business" }}
         """.trimIndent()
     }
 

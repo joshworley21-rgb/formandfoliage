@@ -149,6 +149,7 @@ object LocalLlm {
                             topP = 0.95,
                             temperature = 0.4,
                         ),
+                        maxOutputToken = 80,
                     ),
                 )
             try {
