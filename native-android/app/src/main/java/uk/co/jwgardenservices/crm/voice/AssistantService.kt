@@ -794,6 +794,7 @@ class AssistantService : Service() {
             // Kokoro rather than leaving the assistant silent.
             val spokenOnline = onlineVoice && !lowBattery &&
                 runCatching { onlineSpeaker().speak(stripped) }.getOrDefault(false)
+            CrashLog.note(this, TAG, "reply speech starting: ${stripped.take(80)}")
             if (!spokenOnline) {
                 // Short confirmations brisk; anything with a figure or money
                 // a shade slower so it is heard once.
@@ -806,6 +807,7 @@ class AssistantService : Service() {
             }
         } finally {
             if (focused) abandonAudioFocus()
+            CrashLog.note(this, TAG, "reply speech finished")
         }
     }
 
@@ -1505,6 +1507,7 @@ class AssistantService : Service() {
             !lowBattery &&
             localThinking &&
             LocalLlm.isInstalled(this) &&
+            looksLikeQuestion(text) &&
             !looksLikeFactualQuestion(text)
         ) {
             val answer = withTimeoutOrNull(25_000) {
@@ -1515,6 +1518,19 @@ class AssistantService : Service() {
                 sayAnswer(spokenLocalAnswer(answer))
                 return
             }
+        }
+
+        if (quick.intent == SpokenIntent.Other && chatter == null && !looksLikeQuestion(text) &&
+            text.split(Regex("\\s+")).size < 6
+        ) {
+            sayAnswer(
+                VoiceLines.pick(
+                    "Sorry, I didn't catch that — say it again?",
+                    "I didn't quite get that one. Go on?",
+                    "Say that once more for me?",
+                ),
+            )
+            return
         }
 
         // Anything that looks like a general question gets a free Wikipedia/
@@ -1688,7 +1704,10 @@ class AssistantService : Service() {
     /** A general question, as opposed to a command or a fragment. */
     private fun looksLikeQuestion(text: String): Boolean {
         val lower = text.lowercase().trim()
-        return Regex("^(who|what|when|where|why|how|which|is|are|does|do|can|could)\\b")
+        return Regex(
+            "^(who|what|when|where|why|how|which|is|are|does|do|can|could|" +
+                "tell|say|give|have|has|will|would|should)\\b",
+        )
             .containsMatchIn(lower) && lower.split(Regex("\\s+")).size >= 3
     }
 

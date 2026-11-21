@@ -87,6 +87,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         if (closed || clean.isEmpty()) return
         if (phononActive()) {
             val spoken = runCatching { phononSpeech().speak(clean) }.getOrDefault(false)
+            CrashLog.note(context, TAG, "Phonon reply spoken=$spoken text=${clean.take(50)}")
             if (spoken) return
             CrashLog.note(context, TAG, "Phonon failed; falling back to the local voice")
         }
