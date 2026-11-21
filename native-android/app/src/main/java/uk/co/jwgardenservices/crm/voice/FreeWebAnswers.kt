@@ -106,7 +106,11 @@ class FreeWebAnswers(private val context: Context) {
             val highs = daily["temperature_2m_max"]?.jsonArray ?: return null
             val rains = daily["precipitation_probability_max"]?.jsonArray
             val today = java.time.LocalDate.now()
-            val parts = (1..minOf(3, highs.size - 1)).map { index ->
+            val start = today.with(
+                java.time.temporal.TemporalAdjusters.nextOrSame(java.time.DayOfWeek.MONDAY),
+            )
+            val offset = java.time.temporal.ChronoUnit.DAYS.between(today, start).toInt()
+            val parts = (offset until minOf(offset + 3, highs.size)).map { index ->
                 val date = today.plusDays(index.toLong())
                 val day = date.dayOfWeek.getDisplayName(
                     java.time.format.TextStyle.FULL,
@@ -164,7 +168,8 @@ class FreeWebAnswers(private val context: Context) {
             it.isNotBlank() &&
                 it.lowercase() !in setOf(
                     "here", "the morning", "the afternoon", "today", "tomorrow",
-                    "next week", "this week", "the weekend", "next weekend",
+                    "next week", "the next week", "this week", "the week ahead",
+                    "the weekend", "next weekend",
                     "monday", "tuesday", "wednesday", "thursday", "friday",
                     "saturday", "sunday",
                 )

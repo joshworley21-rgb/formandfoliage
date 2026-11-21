@@ -166,9 +166,16 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     ) {
         if (closed) return
         if (phononActive()) {
-            val spoken = runCatching { phononSpeech().speak(FILLER_TEXTS[0]) }
-                .onFailure { CrashLog.note(context, TAG, "filler Phonon threw: ${it.message}") }
-                .getOrDefault(false)
+            val spoken = try {
+                phononSpeech().speak(FILLER_TEXTS[0])
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                // The answer became ready before the filler started; that is
+                // normal, not an error.
+                throw cancelled
+            } catch (error: Exception) {
+                CrashLog.note(context, TAG, "filler Phonon threw: ${error.message}")
+                false
+            }
             CrashLog.note(context, TAG, "filler Phonon spoken=$spoken")
             if (spoken) return
             // Phonon can report success while producing nothing, or fail on
