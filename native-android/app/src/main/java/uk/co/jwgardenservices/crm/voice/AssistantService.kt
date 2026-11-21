@@ -278,6 +278,10 @@ class AssistantService : Service() {
                 .collect { localThinking = it }
         }
         scope.launch {
+            AssistantPreferences.pronunciationsFlow(this@AssistantService)
+                .collect { Pronunciation.userEntries = it }
+        }
+        scope.launch {
             AssistantPreferences.onlineVoiceFlow(this@AssistantService).collect { onlineVoice = it }
         }
         scope.launch {

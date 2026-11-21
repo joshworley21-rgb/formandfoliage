@@ -41,6 +41,7 @@ private val PHONON_KEY = booleanPreferencesKey("phonon_enabled")
 private val PICKUP_KEY = booleanPreferencesKey("pickup_greeting")
 private val USED_KEY = booleanPreferencesKey("assistant_used")
 private val LOCAL_THINKING_KEY = booleanPreferencesKey("local_thinking")
+private val PRONUNCIATION_KEY = stringPreferencesKey("pronunciation")
 private val PHONON_VOICE_KEY = stringPreferencesKey("phonon_voice")
 private val ASR_ENGINE_KEY = stringPreferencesKey("asr_engine")
 private val FOLLOW_UP_KEY = booleanPreferencesKey("follow_up")
@@ -196,6 +197,46 @@ object AssistantPreferences {
     suspend fun setLocalThinking(context: Context, enabled: Boolean) {
         context.assistantDataStore.edit { it[LOCAL_THINKING_KEY] = enabled }
         if (!enabled) LocalLlm.release()
+    }
+
+    /** User pronunciation overrides: lower-case word -> how it should sound. */
+    fun pronunciationsFlow(context: Context): Flow<Map<String, String>> =
+        context.assistantDataStore.data.map { preferences ->
+            preferences[PRONUNCIATION_KEY]
+                ?.lineSequence()
+                ?.mapNotNull { line ->
+                    val word = line.substringBefore('=', "").trim()
+                    val sound = line.substringAfter('=', "").trim()
+                    if (word.isBlank() || sound.isBlank()) null else word.lowercase() to sound
+                }
+                ?.toMap()
+                ?: emptyMap()
+        }
+
+    suspend fun addPronunciation(context: Context, word: String, soundsLike: String) {
+        val cleanWord = word.trim().lowercase()
+        val cleanSound = soundsLike.trim()
+        if (cleanWord.isBlank() || cleanSound.isBlank()) return
+        context.assistantDataStore.edit { preferences ->
+            val current = preferences[PRONUNCIATION_KEY]
+                ?.lineSequence()
+                ?.filterNot { it.substringBefore('=').trim().equals(cleanWord, true) }
+                ?.toMutableList()
+                ?: mutableListOf()
+            current.add("$cleanWord=$cleanSound")
+            preferences[PRONUNCIATION_KEY] = current.joinToString("\n")
+        }
+    }
+
+    suspend fun removePronunciation(context: Context, word: String) {
+        context.assistantDataStore.edit { preferences ->
+            val current = preferences[PRONUNCIATION_KEY]
+                ?.lineSequence()
+                ?.filterNot { it.substringBefore('=').trim().equals(word, true) }
+                ?.toList()
+                ?: return@edit
+            preferences[PRONUNCIATION_KEY] = current.joinToString("\n")
+        }
     }
 
     fun pickupFlow(context: Context): Flow<Boolean> = kotlinx.coroutines.flow.flowOf(true)

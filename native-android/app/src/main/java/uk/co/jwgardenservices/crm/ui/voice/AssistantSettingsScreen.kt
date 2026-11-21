@@ -26,6 +26,8 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -68,6 +70,7 @@ import uk.co.jwgardenservices.crm.voice.PunctuationDownloader
 import uk.co.jwgardenservices.crm.voice.PhononVoice
 import uk.co.jwgardenservices.crm.voice.PiperVoice
 import uk.co.jwgardenservices.crm.voice.PiperVoiceDownloader
+import uk.co.jwgardenservices.crm.voice.Pronunciation
 import uk.co.jwgardenservices.crm.voice.SpeechEngine
 
 /**
@@ -100,6 +103,9 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = false)
     val localThinking by AssistantPreferences.localThinkingFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
+    val pronunciations by AssistantPreferences.pronunciationsFlow(context)
+        .collectAsStateWithLifecycle(initialValue = emptyMap())
+    LaunchedEffect(pronunciations) { Pronunciation.userEntries = pronunciations }
     val localLlmState by LocalLlm.state.collectAsStateWithLifecycle()
     var localLlmInstalled by remember { mutableStateOf(LocalLlm.isInstalled(context)) }
     var localLlmSaved by remember { mutableLongStateOf(LocalLlm.savedBytes(context)) }
@@ -922,6 +928,68 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
+                }
+            }
+        }
+
+        SectionCard(title = "Pronunciation") {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "Teach the voice how to say a word. Enter the spelling, then how it " +
+                        "should sound: Bierton → Beerton, Aideen → Aydeen. The transcript keeps " +
+                        "the real spelling; only the speech changes.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                var word by remember { mutableStateOf("") }
+                var soundsLike by remember { mutableStateOf("") }
+                OutlinedTextField(
+                    value = word,
+                    onValueChange = { word = it },
+                    label = { Text("Word") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = soundsLike,
+                    onValueChange = { soundsLike = it },
+                    label = { Text("Sounds like") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    enabled = word.isNotBlank() && soundsLike.isNotBlank(),
+                    onClick = {
+                        scope.launch {
+                            AssistantPreferences.addPronunciation(context, word, soundsLike)
+                            word = ""
+                            soundsLike = ""
+                        }
+                    },
+                ) { Text("Add pronunciation") }
+                pronunciations.forEach { (key, value) ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "$key → $value",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(
+                            onClick = {
+                                scope.launch {
+                                    AssistantPreferences.removePronunciation(context, key)
+                                }
+                            },
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Delete,
+                                contentDescription = "Remove $key",
+                            )
+                        }
+                    }
                 }
             }
         }

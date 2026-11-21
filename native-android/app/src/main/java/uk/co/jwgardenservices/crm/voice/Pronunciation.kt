@@ -11,7 +11,7 @@ package uk.co.jwgardenservices.crm.voice
 object Pronunciation {
     private val spoken = linkedMapOf(
         // Buckinghamshire places seen in the diary.
-        "bierton" to "Byerton",
+        "bierton" to "Beerton",
         "aylesbury" to "Ailsbury",
         "hazlemere" to "Hazelmeer",
         "hazelemere" to "Hazelmeer",
@@ -28,13 +28,19 @@ object Pronunciation {
         "hp22" to "H P twenty two",
     )
 
-    private val pattern = Regex(
-        "\\b(" + spoken.keys.joinToString("|") { Regex.escape(it) } + ")\\b",
-        RegexOption.IGNORE_CASE,
-    )
+    /** User additions from Settings, lower-case word -> sounds-like. */
+    @Volatile
+    var userEntries: Map<String, String> = emptyMap()
 
-    fun apply(text: String): String =
-        pattern.replace(text) { match ->
-            spoken[match.value.lowercase()] ?: match.value
+    fun apply(text: String): String {
+        val all = spoken + userEntries
+        if (all.isEmpty()) return text
+        val pattern = Regex(
+            "\\b(" + all.keys.joinToString("|") { Regex.escape(it) } + ")\\b",
+            RegexOption.IGNORE_CASE,
+        )
+        return pattern.replace(text) { match ->
+            all[match.value.lowercase()] ?: match.value
         }
+    }
 }
