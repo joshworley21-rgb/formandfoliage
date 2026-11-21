@@ -1795,7 +1795,9 @@ class AssistantService : Service() {
         _muted.value = false
         _speakerOn.value = false
         ringback.stop()
-        LocalLlm.release()
+        // The local model has its own idle close. Closing it here races a
+        // load/generate that is still finishing and produced "Engine is not
+        // initialized" after the call ended.
         abandonAudioFocus()
         releaseCallAudio()
         runCatching { mediaSession?.release() }

@@ -721,7 +721,19 @@ class VoiceActionRunner(
                 "$day you're at $name at $time"
             }
         }
-        val calendarItems = calendarEvents.map { event ->
+        // A Google event and an imported CRM job are often the same visit.
+        // Drop the calendar copy when the client name and start time match.
+        val filteredEvents = calendarEvents
+            .distinctBy { it.eventId to it.start }
+            .filterNot { event ->
+                jobs.any { (job, starts) ->
+                    starts == event.start &&
+                        clients.firstOrNull { it.id == job.clientId }?.name?.let {
+                            event.title.contains(it, ignoreCase = true)
+                        } == true
+                }
+            }
+        val calendarItems = filteredEvents.map { event ->
             val start = event.start.atZone(zone)
             val day = if (start.toLocalDate() == LocalDate.now()) {
                 ""
@@ -739,7 +751,9 @@ class VoiceActionRunner(
             jobs.size == 1 && calendarItems.isEmpty() -> "Just the one ${range.label}, Josh"
             else -> "${numberWord(allItems.size)} ${range.label}, Josh"
         }
-        return slow("$intro — ${spokenJoin(allItems)}.")
+        // Never read nine entries aloud. chunkedList stores the rest and asks
+        // "want me to read them all?", which is a single yes to continue.
+        return slow(chunkedList("$intro —", allItems))
     }
 
     /** "eight", "half past nine", "quarter to five": how a person says a slot. */

@@ -108,6 +108,10 @@ object LocalLlm {
         question: String,
     ): String? = withContext(Dispatchers.Default) {
         val app = context.applicationContext
+        // A new question cancels the pending idle close; otherwise the timer
+        // could shut the engine down mid-generation.
+        idleJob?.cancel()
+        idleJob = null
         if (!isInstalled(app)) return@withContext null
         if (!hasHeadroom(app)) {
             CrashLog.note(app, TAG, "not enough memory for local model")

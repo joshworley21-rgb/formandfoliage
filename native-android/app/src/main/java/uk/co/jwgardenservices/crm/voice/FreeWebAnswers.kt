@@ -81,8 +81,8 @@ class FreeWebAnswers(private val context: Context) {
         val forecast = get(
             "https://api.open-meteo.com/v1/forecast?latitude=$latitude&longitude=$longitude" +
                 "&current=temperature_2m,weather_code,wind_speed_10m" +
-                "&daily=weather_code,temperature_2m_max,temperature_2m_min," +
-                "precipitation_probability_max&timezone=auto&forecast_days=2",
+                "&daily=time,weather_code,temperature_2m_max,temperature_2m_min," +
+                "precipitation_probability_max&timezone=auto&forecast_days=7",
         ) ?: return null
         val current = forecast.jsonObject["current"]?.jsonObject
         val daily = forecast.jsonObject["daily"]?.jsonObject
@@ -101,6 +101,51 @@ class FreeWebAnswers(private val context: Context) {
             ?.jsonPrimitive?.content?.toIntOrNull()
 
         val condition = conditionFor(code)
+        val lower = question.lowercase()
+        if (lower.contains("next week") || lower.contains("week ahead")) {
+            val dates = daily["time"]?.jsonArray ?: return null
+            val codes = daily["weather_code"]?.jsonArray ?: return null
+            val highs = daily["temperature_2m_max"]?.jsonArray ?: return null
+            val rains = daily["precipitation_probability_max"]?.jsonArray
+            val parts = (0 until minOf(3, dates.size)).map { index ->
+                val date = runCatching {
+                    java.time.LocalDate.parse(dates[index].jsonPrimitive.content)
+                }.getOrNull() ?: return@map null
+                val day = date.dayOfWeek.getDisplayName(
+                    java.time.format.TextStyle.FULL,
+                    Locale.UK,
+                )
+                val high = highs[index].jsonPrimitive.content.round()
+                val rainChance = rains?.getOrNull(index)?.jsonPrimitive?.content
+                    ?.toIntOrNull() ?: 0
+                val wet = if (rainChance >= 40) " with rain" else ""
+                "$day $high degrees$wet"
+            }.filterNotNull()
+            if (parts.isNotEmpty()) {
+                return "Next week in $name: ${parts.joinToString(", then ")}."
+            }
+        }
+        if (lower.contains("tomorrow")) {
+            val codes = daily["weather_code"]?.jsonArray
+            val highs = daily["temperature_2m_max"]?.jsonArray
+            val lows = daily["temperature_2m_min"]?.jsonArray
+            val rains = daily["precipitation_probability_max"]?.jsonArray
+            val tomorrowHigh = highs?.getOrNull(1)?.jsonPrimitive?.content?.round()
+            val tomorrowLow = lows?.getOrNull(1)?.jsonPrimitive?.content?.round()
+            val tomorrowRain = rains?.getOrNull(1)?.jsonPrimitive?.content?.toIntOrNull()
+            val tomorrowCode = codes?.getOrNull(1)?.jsonPrimitive?.content?.toIntOrNull()
+            if (tomorrowHigh != null) {
+                val tomorrowCondition = tomorrowCode?.let { conditionFor(it) } ?: condition
+                return buildString {
+                    append("Tomorrow in $name: $tomorrowCondition, top of $tomorrowHigh")
+                    if (tomorrowLow != null) append(", down to $tomorrowLow")
+                    append(".")
+                    if (tomorrowRain != null && tomorrowRain >= 35) {
+                        append(" About a $tomorrowRain per cent chance of rain.")
+                    }
+                }
+            }
+        }
         val opening = "It's $temp degrees and $condition in $name."
         val detail = buildString {
             if (high != null && low != null) append(" Today's top is $high, down to $low.")
@@ -131,7 +176,7 @@ class FreeWebAnswers(private val context: Context) {
             ?: return@runCatching null
         // "12 High Street, Aylesbury, HP20" -> Aylesbury: the town is the
         // useful geocoding term, not the house number or postcode.
-        address.split(',')
+        address.split(',', '\n')
             .map { it.trim() }
             .firstOrNull { part ->
                 part.length > 2 && part.any { it.isLetter() } && part.none { it.isDigit() }
