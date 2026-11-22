@@ -117,27 +117,7 @@ object LocalLlm {
             CrashLog.note(app, TAG, "not enough memory for local model")
             return@withContext null
         }
-        val llm = synchronized(loadLock) {
-            engine ?: runCatching {
-                val started = System.currentTimeMillis()
-                Engine(
-                    EngineConfig(
-                        modelPath = file(app).absolutePath,
-                        backend = Backend.CPU(),
-                        cacheDir = app.cacheDir.path,
-                    ),
-                ).also {
-                    it.initialize()
-                    CrashLog.note(
-                        app,
-                        TAG,
-                        "loaded in ${System.currentTimeMillis() - started} ms",
-                    )
-                }
-            }.onFailure {
-                CrashLog.note(app, TAG, "load failed: ${it.message}")
-            }.getOrNull()?.also { engine = it }
-        } ?: return@withContext null
+        val llm = load(app) ?: return@withContext null
 
         val answer: String? = runCatching {
             val conversation: com.google.ai.edge.litertlm.Conversation =
@@ -165,6 +145,41 @@ object LocalLlm {
         }.getOrNull()?.trim()
         scheduleIdleClose()
         answer?.takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * Load in the background while the call is already open, so the first
+     * question does not wait ~12 s for the engine. Still call-scoped: it is
+     * never loaded at app start, and it closes on the usual idle timer.
+     */
+    suspend fun warm(context: Context) = withContext(Dispatchers.Default) {
+        val app = context.applicationContext
+        if (!isInstalled(app) || !hasHeadroom(app)) return@withContext
+        idleJob?.cancel()
+        idleJob = null
+        runCatching { load(app) }
+    }
+
+    private fun load(app: Context): Engine? = synchronized(loadLock) {
+        engine ?: runCatching {
+            val started = System.currentTimeMillis()
+            Engine(
+                EngineConfig(
+                    modelPath = file(app).absolutePath,
+                    backend = Backend.CPU(),
+                    cacheDir = app.cacheDir.path,
+                ),
+            ).also {
+                it.initialize()
+                CrashLog.note(
+                    app,
+                    TAG,
+                    "loaded in ${System.currentTimeMillis() - started} ms",
+                )
+            }
+        }.onFailure {
+            CrashLog.note(app, TAG, "load failed: ${it.message}")
+        }.getOrNull()?.also { engine = it }
     }
 
     fun release() {

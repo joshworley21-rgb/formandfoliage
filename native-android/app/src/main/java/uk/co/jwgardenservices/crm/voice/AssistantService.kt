@@ -524,6 +524,13 @@ class AssistantService : Service() {
         speech.startListening()
         setNotification(LISTENING_TEXT)
         startSilenceWatch()
+        // Warm the local model after the line is open, not at app startup.
+        // The first question then does not pay the 10-12 s engine load.
+        scope.launch {
+            if (localThinking && LocalLlm.isInstalled(this@AssistantService)) {
+                LocalLlm.warm(this@AssistantService)
+            }
+        }
     }
 
     /**
@@ -1360,6 +1367,22 @@ class AssistantService : Service() {
         // "log four hours for Smiths, then mark Smiths done" is two actions.
         // Run the recognised parts in order and speak one combined reply. This
         // is free and local by design; nothing multi-step goes to the cloud.
+        val lowerText = text.lowercase()
+        if (lowerText.contains("search online") || lowerText.contains("search the web")) {
+            val web = freeWeb.answer(text, SpokenIntent.Lookup)
+            sayAnswer(
+                web ?: "I can look things up, but I can't compare live shop prices. " +
+                    "Name the product and I'll find what's known about it.",
+            )
+            return
+        }
+        if (
+            quickIsVagueLook(lowerText)
+        ) {
+            sayAnswer("At what?")
+            return
+        }
+
         val parts = splitMultiCommand(text)
         if (parts.size > 1) {
             val replies = mutableListOf<String>()
@@ -1665,6 +1688,10 @@ class AssistantService : Service() {
             "same as before", "run that again",
         )
     }
+
+    private fun quickIsVagueLook(lower: String): Boolean =
+        Regex("^(can you |could you )?(have a look|take a look|look|check|check that)[?.!]*$")
+            .matches(lower.trim())
 
     private suspend fun localPrompt(): String {
         // Keep the 0.6B context tight: facts only. Old turns were making it
