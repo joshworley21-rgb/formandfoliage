@@ -1716,12 +1716,18 @@ class AssistantService : Service() {
         val facts = runCatching { AssistantMemory.facts(this).map { it.text } }
             .getOrDefault(emptyList())
             .take(8)
+        val now = java.time.ZonedDateTime.now()
+        val clock = now.format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM, HH:mm"))
         return """
-            You are the voice assistant on Josh's UK gardening business phone.
-            Answer only the user's question, in at most two short spoken sentences.
-            Use British English. No lists, markdown or stage directions.
-            If unsure, say so briefly. Do not invent facts from previous calls.
-            Business facts: ${facts.joinToString("; ").ifBlank { "a UK gardening business" }}
+            You are Josh's personal secretary for a UK gardening business, speaking
+            on the phone. Be calm, warm and efficient, like a good British secretary.
+            Use contractions. Answer only the question in one or two short spoken
+            sentences, then offer a useful next step if it helps.
+            Never call yourself an AI, voice assistant, chatbot, model or assistant
+            programme. If asked how you are, answer like a person and ask how his day
+            is going. Address him as Josh occasionally, not in every sentence.
+            If you do not know, say so briefly and suggest what would help.
+            It is $clock. Business facts: ${facts.joinToString("; ").ifBlank { "a UK gardening business" }}
         """.trimIndent()
     }
 
@@ -1740,6 +1746,14 @@ class AssistantService : Service() {
     /** Weather/facts should go to the web APIs rather than a 0.5B model. */
     private fun looksLikeFactualQuestion(text: String): Boolean {
         val lower = text.lowercase()
+        if (
+            listOf(
+                "chance", "likely", "will it", "do you think", "should i",
+                "this winter", "this year", "next year",
+            ).any { lower.contains(it) }
+        ) {
+            return false
+        }
         return listOf("weather", "forecast", "who is", "what is", "where is", "how tall").any {
             lower.contains(it)
         }
@@ -1780,7 +1794,7 @@ class AssistantService : Service() {
         // Punctuated input ("No thanks.") must still match the plain forms.
         val lower = text.lowercase().trim().trimEnd('.', '!', '?', ',')
         return when {
-            Regex("^(hi|hello|hey|morning|afternoon|evening|good morning|good afternoon|good evening)\b")
+            Regex("^(hi|hello|hey|morning|afternoon|evening|good morning|good afternoon|good evening)\\b")
                 .containsMatchIn(lower) -> VoiceLines.pick(
                 "Hello ${VoiceLines.OWNER_NAME} — what do you need?",
                 "Hey — go on then.",
@@ -1789,8 +1803,14 @@ class AssistantService : Service() {
             )
             Regex("\\b(you alright|you ok|how's it going|hows it going|how are you)\\b")
                 .containsMatchIn(lower) -> VoiceLines.pick(
-                "All good, thanks — what do you need?",
-                "Can't complain. What's next?",
+                "All good, thanks. How's your day going?",
+                "Can't complain — how are you keeping?",
+                "Not bad at all. What's next for you?",
+            )
+            Regex("^(good|not bad|i'm good|im good|fine|okay|ok)\\b.*(thanks|thank you)?$")
+                .containsMatchIn(lower) -> VoiceLines.pick(
+                "Glad to hear it. What's next?",
+                "Good stuff. What are we doing?",
             )
             lower in setOf(
                 "no", "no thanks", "nothing", "that's all", "thats all", "all done",
