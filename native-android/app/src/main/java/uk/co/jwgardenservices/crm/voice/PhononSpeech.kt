@@ -125,6 +125,12 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
                 // Some Phonon/voice combinations finish without emitting a
                 // single sample. Reporting success here made the caller skip
                 // the Kokoro fallback, so the line was silent.
+                CrashLog.note(
+                    context,
+                    TAG,
+                    "played samples=${samples.get()} head=${player.playbackHeadPosition} " +
+                        "gain=${"%.2f".format(TtsGain.current)}",
+                )
                 samples.get() > 0
             } finally {
                 runCatching { player.stop() }

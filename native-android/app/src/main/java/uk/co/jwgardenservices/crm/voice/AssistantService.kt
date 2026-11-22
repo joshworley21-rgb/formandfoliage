@@ -778,6 +778,9 @@ class AssistantService : Service() {
         // not share Kokoro's audio lock, so it could otherwise talk over it.
         thinkingMask?.cancelAndJoin()
         thinkingMask = null
+        // Samsung can mute assistant output while AudioRecord is open. Close
+        // the mic before speech; the caller/finally reopens listening.
+        if (speech.isListening()) speech.stopListening()
         // The pace marker is runner-internal: keep it for the TTS layer,
         // strip it before anything user-visible.
         val stripped = TtsProsody.extract(text).second.trim()
@@ -815,6 +818,9 @@ class AssistantService : Service() {
         } finally {
             if (focused) abandonAudioFocus()
             CrashLog.note(this, TAG, "reply speech finished")
+            if (_callActive.value && !_muted.value && !speech.isListening()) {
+                speech.startListening()
+            }
         }
     }
 
@@ -833,7 +839,18 @@ class AssistantService : Service() {
             while (_thinking.value && _callActive.value) {
                 CrashLog.note(this@AssistantService, TAG, "thinking filler ${rounds + 1}")
                 val fillerStarted = System.currentTimeMillis()
-                runCatching { speaker.speakFiller(voice.speakerId, speed) }
+                // Samsung can mute assistant output while AudioRecord is open.
+                // Close the microphone for the clip; the answer/finally reopens.
+                if (speech.isListening()) speech.stopListening()
+                // Fillers used to play without audio focus, unlike greetings
+                // and replies. If another app or the car held focus the clip
+                // could render to nothing while Phonon still reported samples.
+                val fillerFocus = requestAudioFocus()
+                try {
+                    runCatching { speaker.speakFiller(voice.speakerId, speed) }
+                } finally {
+                    if (fillerFocus) abandonAudioFocus()
+                }
                 CrashLog.note(
                     this@AssistantService,
                     TAG,
