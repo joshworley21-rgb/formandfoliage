@@ -87,7 +87,20 @@ fun AppRoot(
     val lockEnabled by AppLock.enabled.collectAsStateWithLifecycle()
 
     when (authState) {
-        AuthState.Loading -> SplashScreen()
+        AuthState.Loading -> when (workspace) {
+            // Offline start: the session is still revalidating but the last
+            // known workspace is on disk, so show the cached CRM instead of
+            // an endless "Opening your workspace…" splash.
+            WorkspaceState.Owner -> MainScaffold(
+                onSignOut = appViewModel::signOut,
+                isStaff = false,
+            )
+            WorkspaceState.Staff -> MainScaffold(
+                onSignOut = appViewModel::signOut,
+                isStaff = true,
+            )
+            else -> SplashScreen()
+        }
         AuthState.SignedOut -> AuthScreen()
         is AuthState.SignedIn ->
             if (locked && lockEnabled) {

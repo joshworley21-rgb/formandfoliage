@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import uk.co.jwgardenservices.crm.core.CrashLog
+import uk.co.jwgardenservices.crm.core.OfflineSession
 import uk.co.jwgardenservices.crm.data.repository.AuthRepository
 import uk.co.jwgardenservices.crm.data.repository.AuthState
 import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
@@ -45,8 +47,20 @@ class AppViewModel(
         initialValue = cachedAuth ?: AuthState.Loading,
     )
 
+    private val savedRole = runCatching {
+        if (ServiceLocator.isInitialised()) {
+            OfflineSession.role(ServiceLocator.appContext)
+        } else {
+            null
+        }
+    }.getOrNull()
+
     private val _workspace = MutableStateFlow(
-        cachedWorkspace ?: WorkspaceState.Loading,
+        cachedWorkspace ?: when (savedRole) {
+            "owner" -> WorkspaceState.Owner
+            "staff" -> WorkspaceState.Staff
+            else -> WorkspaceState.Loading
+        },
     )
     val workspace: StateFlow<WorkspaceState> = _workspace.asStateFlow()
 
@@ -92,10 +106,40 @@ class AppViewModel(
                 WorkspaceState.Owner
             }
             cachedWorkspace = _workspace.value
+            runCatching {
+                OfflineSession.save(
+                    ServiceLocator.appContext,
+                    authState.value.let { (it as? AuthState.SignedIn)?.userId.orEmpty() },
+                    (authState.value as? AuthState.SignedIn)?.email,
+                    role,
+                )
+            }
+            CrashLog.note(ServiceLocator.appContext, "Workspace", "loaded role=$role")
         } catch (error: Exception) {
-            _workspace.value = WorkspaceState.Error(
-                error.message ?: "Could not load your workspace",
-            )
+            // The workspace RPC needs the network; the CRM cache does not.
+            // Open the last known role rather than trapping the owner on an
+            // error screen with no signal.
+            val offlineRole = runCatching {
+                OfflineSession.role(ServiceLocator.appContext)
+            }.getOrNull()
+            if (offlineRole != null) {
+                ServiceLocator.workspaceRole = offlineRole
+                _workspace.value = if (offlineRole == "staff") {
+                    WorkspaceState.Staff
+                } else {
+                    WorkspaceState.Owner
+                }
+                cachedWorkspace = _workspace.value
+                CrashLog.note(
+                    ServiceLocator.appContext,
+                    "Workspace",
+                    "offline: using cached role=$offlineRole (${error.message})",
+                )
+            } else {
+                _workspace.value = WorkspaceState.Error(
+                    error.message ?: "Could not load your workspace",
+                )
+            }
         }
     }
 
@@ -106,6 +150,7 @@ class AppViewModel(
             ServiceLocator.workspaceRole = "owner"
             cachedAuth = null
             cachedWorkspace = null
+            runCatching { OfflineSession.clear(ServiceLocator.appContext) }
             _workspace.value = WorkspaceState.Loading
         }
     }
