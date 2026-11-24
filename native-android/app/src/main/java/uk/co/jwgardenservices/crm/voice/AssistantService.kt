@@ -86,7 +86,9 @@ class AssistantService : Service() {
 
     /** Writes spoken commands into the same Room cache the screens use. */
     private val actions by lazy {
-        VoiceActionRunner(sendInvoice = { invoiceId -> sendInvoiceByVoice(invoiceId) })
+        VoiceActionRunner(
+            sendInvoice = { invoiceId, message -> sendInvoiceByVoice(invoiceId, message) },
+        )
     }
 
     private val _speaking = MutableStateFlow(false)
@@ -946,7 +948,8 @@ class AssistantService : Service() {
      * Invoices screen shares, hand it to the email function, and report what
      * happened. Every failure leaves the invoice in drafts.
      */
-    private suspend fun sendInvoiceByVoice(invoiceId: String): String = runCatching {
+    private suspend fun sendInvoiceByVoice(invoiceId: String, message: String? = null): String =
+        runCatching {
         withContext(Dispatchers.IO) { ServiceLocator.syncEngine.syncNow() }
         val repository = ServiceLocator.crmRepository
         val invoice = repository.observeInvoices().first().firstOrNull { it.id == invoiceId }
@@ -965,7 +968,7 @@ class AssistantService : Service() {
         val base64 = withContext(Dispatchers.IO) {
             Base64.encodeToString(pdf.readBytes(), Base64.NO_WRAP)
         }
-        val result = repository.sendInvoice(invoiceId, base64)
+        val result = repository.sendInvoice(invoiceId, base64, message = message)
         if (result.sent) {
             // Sent money cannot be un-sent; the card row stays, undoless.
             CallLedger.record("Invoice emailed to ${result.to ?: client.name}")

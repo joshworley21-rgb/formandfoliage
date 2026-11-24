@@ -145,6 +145,9 @@ object IntentRules {
             // "invoice" rule below. The draft is always read back for review;
             // nothing is emailed by voice.
             text.containsAny(
+                "sort out an invoice",
+                "sort an invoice",
+                "invoice for",
                 "raise an invoice",
                 "raise a invoice",
                 "raise invoice",

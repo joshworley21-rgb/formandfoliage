@@ -50,7 +50,7 @@ class VoiceActionRunner(
      * Builds the PDF and emails a draft invoice. Supplied by the service,
      * which owns the Context; null only in tests, where sending is refused.
      */
-    private val sendInvoice: (suspend (String) -> String)? = null,
+    private val sendInvoice: (suspend (String, String?) -> String)? = null,
 ) {
 
     private data class PendingLog(
@@ -150,6 +150,7 @@ class VoiceActionRunner(
         val invoiceId: String,
         val clientName: String,
         val total: Double,
+        val message: String? = null,
     )
 
     private var pendingSend: PendingSend? = null
@@ -1273,11 +1274,25 @@ class VoiceActionRunner(
 
         val visitsText = if (visits.size == 1) "one visit" else "${visits.size} visits"
         val totalValue = if (made.total > 0.0) made.total else expected
-        pendingSend = PendingSend(made.invoiceId, client.name, totalValue)
+        val lowerText = text.lowercase()
+        val wantsMessage = lowerText.contains("message") || lowerText.contains("email") ||
+            lowerText.contains("drop them a line") || lowerText.contains("write to them")
+        val drafted = if (wantsMessage) {
+            draftInvoiceMessage(client, visits.size, totalValue)
+        } else {
+            null
+        }
+        pendingSend = PendingSend(made.invoiceId, client.name, totalValue, drafted)
         CallLedger.record("Draft invoice for ${client.name}, ${money(totalValue)}") {
             runCatching { repository.deleteInvoice(made.invoiceId) }
             pendingSend = null
             "That draft invoice is gone."
+        }
+        if (drafted != null) {
+            return slow(
+                "Draft invoice for ${client.name} — $visitsText, ${money(totalValue)}. " +
+                    "Message: \"$drafted\". Send it, or leave it in drafts?",
+            )
         }
         return slow(
             VoiceLines.pick(
@@ -1289,6 +1304,22 @@ class VoiceActionRunner(
                     "Send it, or leave it there?",
             ),
         )
+    }
+
+    /** A short, human email body for the invoice read-back. */
+    private suspend fun draftInvoiceMessage(
+        client: Client,
+        visits: Int,
+        total: Double,
+    ): String {
+        val business = runCatching { repository.getSettings()?.businessName }
+            .getOrNull()
+            ?.takeIf { it.isNotBlank() }
+            ?: "Form & Foliage"
+        val firstName = client.name.substringBefore(' ').ifBlank { client.name }
+        val work = if (visits == 1) "last week's visit" else "the last $visits visits"
+        return "Hi $firstName, here's the invoice for $work — ${money(total)} in total. " +
+            "Give me a shout if anything needs checking. Thanks, $business."
     }
 
     /**
@@ -1357,7 +1388,7 @@ class VoiceActionRunner(
             yes -> {
                 pendingSend = null
                 val sender = sendInvoice ?: return "Open the invoice to send it — I can't attach the PDF from here."
-                sender(pending.invoiceId)
+                sender(pending.invoiceId, pending.message)
             }
             no -> {
                 pendingSend = null
