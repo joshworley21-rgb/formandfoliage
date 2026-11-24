@@ -119,6 +119,7 @@ class AssistantService : Service() {
 
     /** Loudspeaker route, best effort per device. */
     private val _speakerOn = MutableStateFlow(false)
+    private var audioRouteJob: Job? = null
     val speakerOn: StateFlow<Boolean> = _speakerOn.asStateFlow()
 
     /** True from the green button until the line is ready and the assistant answers. */
@@ -332,6 +333,7 @@ class AssistantService : Service() {
         // exists does the phone's own bottom mic stay in play.
         routeCallAudio()
         watchAudioDevices()
+        startAudioRouteWatch()
         startInForeground(if (fresh) CALLING_TEXT else LISTENING_TEXT)
         scope.launch { AssistantPreferences.markUsed(this@AssistantService) }
         // A fresh call resets the dead-air clock; the watcher itself starts
@@ -1166,8 +1168,27 @@ class AssistantService : Service() {
         }
     }
 
+    /**
+     * Bluetooth HFP can drop a few seconds after the call opens (the car
+     * re-negotiates the link). Device callbacks fire once; this slow check
+     * puts the hands-free route back while the owner has not chosen the
+     * loudspeaker.
+     */
+    private fun startAudioRouteWatch() {
+        audioRouteJob?.cancel()
+        audioRouteJob = scope.launch {
+            while (_callActive.value) {
+                delay(2_500)
+                if (!_callActive.value) break
+                if (!_speakerOn.value) routeCallAudio()
+            }
+        }
+    }
+
     /** Undo [routeCallAudio] and [watchAudioDevices] when the call is over. */
     private fun releaseCallAudio() {
+        audioRouteJob?.cancel()
+        audioRouteJob = null
         deviceCallback?.let { callback ->
             runCatching { getSystemService(AudioManager::class.java)?.unregisterAudioDeviceCallback(callback) }
         }
@@ -1900,6 +1921,8 @@ class AssistantService : Service() {
         _connectedAt.value = 0
         _muted.value = false
         _speakerOn.value = false
+        audioRouteJob?.cancel()
+        audioRouteJob = null
         ringback.stop()
         // The local model has its own idle close. Closing it here races a
         // load/generate that is still finishing and produced "Engine is not
