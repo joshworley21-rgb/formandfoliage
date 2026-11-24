@@ -1313,14 +1313,12 @@ class VoiceActionRunner(
         visits: Int,
         total: Double,
     ): String {
-        val business = runCatching { repository.getSettings()?.businessName }
-            .getOrNull()
-            ?.takeIf { it.isNotBlank() }
-            ?: "Form & Foliage"
+        // Personal sign-off from Josh, not the app/business branding. The
+        // formal invoice PDF still carries the business name.
         val firstName = client.name.substringBefore(' ').ifBlank { client.name }
         val work = if (visits == 1) "last week's visit" else "the last $visits visits"
         return "Hi $firstName, here's the invoice for $work — ${money(total)} in total. " +
-            "Give me a shout if anything needs checking. Thanks, $business."
+            "Give me a shout if anything needs checking. Thanks, ${VoiceLines.OWNER_NAME}."
     }
 
     /**

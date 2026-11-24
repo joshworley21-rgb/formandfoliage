@@ -1003,9 +1003,8 @@ class AssistantService : Service() {
             )
         }
         val text = message?.takeIf { it.isNotBlank() } ?: run {
-            val business = repository.getSettings()?.businessName ?: "Form & Foliage"
             "Hi ${client.name.substringBefore(' ')}, here's invoice ${invoice.number} " +
-                "for ${money(invoice.total)}. Thanks, $business."
+                "for ${money(invoice.total)}. Thanks, ${VoiceLines.OWNER_NAME}."
         }
         withContext(Dispatchers.Main) {
             PdfSharing.shareViaWhatsApp(this@AssistantService, pdf, text)
