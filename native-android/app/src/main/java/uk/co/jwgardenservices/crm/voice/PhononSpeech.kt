@@ -86,7 +86,7 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
                             samples.addAndGet(pcm.size)
                             // Environmental gain: boost over a lawnmower,
                             // leave a quiet garden alone.
-                            val gain = TtsGain.current
+                            val gain = TtsGain.effective
                             if (gain != 1f) {
                                 val scaled = FloatArray(pcm.size) {
                                     (pcm[it] * gain).coerceIn(-1f, 1f)
@@ -129,7 +129,7 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
                     context,
                     TAG,
                     "played samples=${samples.get()} head=${player.playbackHeadPosition} " +
-                        "gain=${"%.2f".format(TtsGain.current)}",
+                        "gain=${"%.2f".format(TtsGain.effective)}",
                 )
                 samples.get() > 0
             } finally {

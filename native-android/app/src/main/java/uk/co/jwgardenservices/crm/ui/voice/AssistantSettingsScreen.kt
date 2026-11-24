@@ -103,6 +103,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = false)
     val localThinking by AssistantPreferences.localThinkingFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
+    val drivingMode by AssistantPreferences.drivingModeFlow(context)
+        .collectAsStateWithLifecycle(initialValue = false)
     val pronunciations by AssistantPreferences.pronunciationsFlow(context)
         .collectAsStateWithLifecycle(initialValue = emptyMap())
     LaunchedEffect(pronunciations) { Pronunciation.userEntries = pronunciations }
@@ -784,14 +786,34 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         }
 
         SectionCard(title = "Call") {
-            Text(
-                text = "Calls always open with \"Hello Josh, how can I help?\" and today's " +
-                    "schedule, then leave the line open with a short hand-off after each " +
-                    "answer. Those are on by design and no longer have switches.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Column(
                 modifier = Modifier.padding(20.dp),
-            )
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "Calls open with the diary, then a friendly check-in, and leave the " +
+                        "line open after each answer.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(
+                        checked = drivingMode,
+                        onCheckedChange = { enabled ->
+                            scope.launch { AssistantPreferences.setDrivingMode(context, enabled) }
+                        },
+                    )
+                    Column(modifier = Modifier.padding(start = 8.dp)) {
+                        Text("Driving mode")
+                        Text(
+                            text = "Shorter turn-taking, slightly slower speech, louder output " +
+                                "and no \"anything else?\" nudge.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
         }
 
         SectionCard(title = "Conversation & memory") {

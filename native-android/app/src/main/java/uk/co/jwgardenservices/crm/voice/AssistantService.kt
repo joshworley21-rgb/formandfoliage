@@ -54,7 +54,9 @@ import uk.co.jwgardenservices.crm.core.CrashLog
 import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
 import uk.co.jwgardenservices.crm.data.repository.invoiceItems
 import uk.co.jwgardenservices.crm.data.repository.sendInvoice
+import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.domain.money
+import uk.co.jwgardenservices.crm.ui.common.Messaging
 import uk.co.jwgardenservices.crm.ui.invoices.InvoicePdf
 import uk.co.jwgardenservices.crm.ui.invoices.PdfSharing
 
@@ -139,7 +141,11 @@ class AssistantService : Service() {
     private var foreground = false
     private var cloudConversation = true
     private var localThinking = true
+    private var drivingMode = false
     private var onlineVoice = false
+
+    /** Waiting for the text of a "message X on WhatsApp" turn. */
+    private var pendingWhatsApp: Client? = null
 
     /** True while the battery is under 15% and unplugged: cloud features off. */
     @Volatile
@@ -284,6 +290,12 @@ class AssistantService : Service() {
         scope.launch {
             AssistantPreferences.localThinkingFlow(this@AssistantService)
                 .collect { localThinking = it }
+        }
+        scope.launch {
+            AssistantPreferences.drivingModeFlow(this@AssistantService).collect {
+                drivingMode = it
+                TtsGain.boost = if (it) 1.12f else 1f
+            }
         }
         scope.launch {
             AssistantPreferences.pronunciationsFlow(this@AssistantService)
@@ -822,7 +834,12 @@ class AssistantService : Service() {
                     Regex("\\d").containsMatchIn(stripped) -> 0.96f
                     else -> 1f
                 }
-                speaker.speakStreaming(text.trim(), voice.speakerId, speed * naturalPace)
+                val drivingPace = if (drivingMode) 0.94f else 1f
+                speaker.speakStreaming(
+                    text.trim(),
+                    voice.speakerId,
+                    speed * naturalPace * drivingPace,
+                )
             }
         } finally {
             if (focused) abandonAudioFocus()
@@ -887,7 +904,7 @@ class AssistantService : Service() {
         val lead = correctionLead
         correctionLead = null
         val clean = text.trim().let { if (lead != null) "$lead$it" else it }
-        if (clean.isNotEmpty() && askFollowUp && !clean.endsWith("?")) {
+        if (clean.isNotEmpty() && askFollowUp && !drivingMode && !clean.endsWith("?")) {
             val nudge = VoiceLines.pick(
                 "Right — what next?",
                 "Go on.",
@@ -1303,6 +1320,37 @@ class AssistantService : Service() {
                 )
             } else {
                 null
+            }
+            pendingWhatsApp?.let { client ->
+                pendingWhatsApp = null
+                if (heard.contains("cancel") || heard.contains("forget it")) {
+                    say("Cancelled that message.")
+                    return@collect
+                }
+                val opened = Messaging.whatsapp(this, client.phone.orEmpty(), text.trim())
+                say(
+                    if (opened) {
+                        "Opened WhatsApp for ${client.name} — tap send."
+                    } else {
+                        "I don't have a mobile number for ${client.name}, so I couldn't open WhatsApp."
+                    },
+                )
+                return@collect
+            }
+            whatsAppRecipient(heard)?.let { spokenName ->
+                val clients = runCatching { ServiceLocator.crmRepository.observeClients().first() }
+                    .getOrDefault(emptyList())
+                val client = clients.firstOrNull {
+                    it.name.equals(spokenName, ignoreCase = true) ||
+                        it.name.contains(spokenName, ignoreCase = true)
+                }
+                if (client == null) {
+                    say("I couldn't find a client called $spokenName.")
+                } else {
+                    pendingWhatsApp = client
+                    say("What shall I say to ${client.name}?")
+                }
+                return@collect
             }
             if (waitRequested(heard)) {
                 say("No rush — take your time.")
@@ -1827,6 +1875,20 @@ class AssistantService : Service() {
             .containsMatchIn(lower) && lower.split(Regex("\\s+")).size >= 3
     }
 
+    /** "Message Louisa on WhatsApp" -> Louisa; null for "send it on WhatsApp". */
+    private fun whatsAppRecipient(text: String): String? {
+        val lower = text.lowercase().trim().trimEnd('.', '!', '?', ',')
+        if (lower.startsWith("send it") || lower.startsWith("send that")) return null
+        val match = Regex(
+            "^(?:send (?:a )?(?:whatsapp|message|text) to|whatsapp|message|text)\\s+(.+?)(?:\\s+on\\s+whatsapp)?$",
+        ).find(lower) ?: return null
+        val name = match.groupValues[1]
+            .removeSuffix(" on whatsapp")
+            .trim()
+        if (name.isBlank() || name in setOf("it", "that", "this", "me", "him", "her")) return null
+        return name
+    }
+
     /** "Hang on", "one sec": keep the line open without treating it as a command. */
     private fun waitRequested(text: String): Boolean {
         val lower = text.lowercase().trim().trimEnd('.', '!', '?', ',')
@@ -1958,6 +2020,8 @@ class AssistantService : Service() {
         _connectedAt.value = 0
         _muted.value = false
         _speakerOn.value = false
+        pendingWhatsApp = null
+        TtsGain.boost = 1f
         audioRouteJob?.cancel()
         audioRouteJob = null
         ringback.stop()

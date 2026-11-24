@@ -17,6 +17,13 @@ object TtsGain {
     var current: Float = 1f
         private set
 
+    /** Driving mode raises the output a touch over road noise. */
+    @Volatile
+    var boost: Float = 1f
+
+    val effective: Float
+        get() = current * boost
+
     /**
      * [ambient] is the rolling average of the recogniser's 0..1 level meter.
      * Quiet rooms sit near 0.02; a moving van's road noise around 0.15-0.3.

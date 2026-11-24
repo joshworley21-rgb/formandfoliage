@@ -42,6 +42,7 @@ private val PICKUP_KEY = booleanPreferencesKey("pickup_greeting")
 private val USED_KEY = booleanPreferencesKey("assistant_used")
 private val LOCAL_THINKING_KEY = booleanPreferencesKey("local_thinking")
 private val PRONUNCIATION_KEY = stringPreferencesKey("pronunciation")
+private val DRIVING_KEY = booleanPreferencesKey("driving_mode")
 private val PHONON_VOICE_KEY = stringPreferencesKey("phonon_voice")
 private val ASR_ENGINE_KEY = stringPreferencesKey("asr_engine")
 private val FOLLOW_UP_KEY = booleanPreferencesKey("follow_up")
@@ -200,6 +201,14 @@ object AssistantPreferences {
     }
 
     /** User pronunciation overrides: lower-case word -> how it should sound. */
+    /** Concise, slower, no follow-up nudge: for use in the van. */
+    fun drivingModeFlow(context: Context): Flow<Boolean> =
+        context.assistantDataStore.data.map { it[DRIVING_KEY] ?: false }
+
+    suspend fun setDrivingMode(context: Context, enabled: Boolean) {
+        context.assistantDataStore.edit { it[DRIVING_KEY] = enabled }
+    }
+
     fun pronunciationsFlow(context: Context): Flow<Map<String, String>> =
         context.assistantDataStore.data.map { preferences ->
             preferences[PRONUNCIATION_KEY]

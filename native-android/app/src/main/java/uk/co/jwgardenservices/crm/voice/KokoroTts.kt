@@ -787,7 +787,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             return false
         }
         // Environmental gain: louder over engine noise, normal when quiet.
-        val gain = TtsGain.current * volume
+        val gain = TtsGain.effective * volume
         val pcm = ShortArray(samples.size) { index ->
             ((samples[index] * gain).coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt().toShort()
         }

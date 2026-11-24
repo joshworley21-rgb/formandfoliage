@@ -20,6 +20,7 @@ object Messaging {
         val number = normalize(phone) ?: return false
         val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$number")).apply {
             putExtra("sms_body", message)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         return launch(context, intent, "No messaging app found")
     }
@@ -29,7 +30,7 @@ object Messaging {
         val intent = Intent(
             Intent.ACTION_VIEW,
             Uri.parse("https://wa.me/$number?text=${Uri.encode(message)}"),
-        )
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return launch(context, intent, "WhatsApp is not available on this phone")
     }
 
