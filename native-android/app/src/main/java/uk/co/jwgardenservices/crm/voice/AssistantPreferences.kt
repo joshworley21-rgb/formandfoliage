@@ -43,6 +43,7 @@ private val USED_KEY = booleanPreferencesKey("assistant_used")
 private val LOCAL_THINKING_KEY = booleanPreferencesKey("local_thinking")
 private val PRONUNCIATION_KEY = stringPreferencesKey("pronunciation")
 private val DRIVING_KEY = booleanPreferencesKey("driving_mode")
+private val AUTO_DRIVING_KEY = booleanPreferencesKey("auto_driving_mode")
 private val PHONON_VOICE_KEY = stringPreferencesKey("phonon_voice")
 private val ASR_ENGINE_KEY = stringPreferencesKey("asr_engine")
 private val FOLLOW_UP_KEY = booleanPreferencesKey("follow_up")
@@ -207,6 +208,14 @@ object AssistantPreferences {
 
     suspend fun setDrivingMode(context: Context, enabled: Boolean) {
         context.assistantDataStore.edit { it[DRIVING_KEY] = enabled }
+    }
+
+    /** Switch driving mode on automatically while a Bluetooth car kit is connected. */
+    fun autoDrivingModeFlow(context: Context): Flow<Boolean> =
+        context.assistantDataStore.data.map { it[AUTO_DRIVING_KEY] ?: true }
+
+    suspend fun setAutoDrivingMode(context: Context, enabled: Boolean) {
+        context.assistantDataStore.edit { it[AUTO_DRIVING_KEY] = enabled }
     }
 
     fun pronunciationsFlow(context: Context): Flow<Map<String, String>> =

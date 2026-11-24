@@ -142,6 +142,9 @@ class AssistantService : Service() {
     private var cloudConversation = true
     private var localThinking = true
     private var drivingMode = false
+    private var manualDrivingMode = false
+    private var autoDrivingMode = true
+    private var bluetoothDriving = false
     private var onlineVoice = false
 
     /** Waiting for the text of a "message X on WhatsApp" turn. */
@@ -293,8 +296,14 @@ class AssistantService : Service() {
         }
         scope.launch {
             AssistantPreferences.drivingModeFlow(this@AssistantService).collect {
-                drivingMode = it
-                TtsGain.boost = if (it) 1.12f else 1f
+                manualDrivingMode = it
+                refreshDrivingMode()
+            }
+        }
+        scope.launch {
+            AssistantPreferences.autoDrivingModeFlow(this@AssistantService).collect {
+                autoDrivingMode = it
+                refreshBluetoothDriving()
             }
         }
         scope.launch {
@@ -352,6 +361,7 @@ class AssistantService : Service() {
         // exists does the phone's own bottom mic stay in play.
         routeCallAudio()
         watchAudioDevices()
+        refreshBluetoothDriving()
         startAudioRouteWatch()
         startInForeground(if (fresh) CALLING_TEXT else LISTENING_TEXT)
         scope.launch { AssistantPreferences.markUsed(this@AssistantService) }
@@ -1234,9 +1244,41 @@ class AssistantService : Service() {
             while (_callActive.value) {
                 delay(2_500)
                 if (!_callActive.value) break
+                refreshBluetoothDriving()
                 if (!_speakerOn.value) routeCallAudio()
             }
         }
+    }
+
+    /** Auto driving mode follows the car kit rather than a manual switch. */
+    private fun refreshBluetoothDriving() {
+        val manager = getSystemService(AudioManager::class.java)
+        val types = manager?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            ?.map { it.type }
+            ?.toSet()
+            ?: emptySet()
+        val connected = AudioDeviceInfo.TYPE_BLUETOOTH_SCO in types ||
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP in types ||
+            AudioDeviceInfo.TYPE_BLE_HEADSET in types ||
+            manager?.communicationDevice?.type in setOf(
+                AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                AudioDeviceInfo.TYPE_BLE_HEADSET,
+            )
+        bluetoothDriving = connected
+        refreshDrivingMode()
+    }
+
+    private fun refreshDrivingMode() {
+        val effective = manualDrivingMode || (autoDrivingMode && bluetoothDriving)
+        if (drivingMode == effective) return
+        drivingMode = effective
+        TtsGain.boost = if (effective) 1.12f else 1f
+        CrashLog.note(
+            this,
+            TAG,
+            "driving mode=${if (effective) "on" else "off"} " +
+                "(manual=$manualDrivingMode auto=$autoDrivingMode bluetooth=$bluetoothDriving)",
+        )
     }
 
     /** Undo [routeCallAudio] and [watchAudioDevices] when the call is over. */
@@ -2021,6 +2063,8 @@ class AssistantService : Service() {
         _muted.value = false
         _speakerOn.value = false
         pendingWhatsApp = null
+        bluetoothDriving = false
+        drivingMode = false
         TtsGain.boost = 1f
         audioRouteJob?.cancel()
         audioRouteJob = null

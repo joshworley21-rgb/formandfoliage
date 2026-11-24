@@ -105,6 +105,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = true)
     val drivingMode by AssistantPreferences.drivingModeFlow(context)
         .collectAsStateWithLifecycle(initialValue = false)
+    val autoDrivingMode by AssistantPreferences.autoDrivingModeFlow(context)
+        .collectAsStateWithLifecycle(initialValue = true)
     val pronunciations by AssistantPreferences.pronunciationsFlow(context)
         .collectAsStateWithLifecycle(initialValue = emptyMap())
     LaunchedEffect(pronunciations) { Pronunciation.userEntries = pronunciations }
@@ -808,6 +810,25 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         Text(
                             text = "Shorter turn-taking, slightly slower speech, louder output " +
                                 "and no \"anything else?\" nudge.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(
+                        checked = autoDrivingMode,
+                        onCheckedChange = { enabled ->
+                            scope.launch {
+                                AssistantPreferences.setAutoDrivingMode(context, enabled)
+                            }
+                        },
+                    )
+                    Column(modifier = Modifier.padding(start = 8.dp)) {
+                        Text("Turn on automatically in the car")
+                        Text(
+                            text = "Uses the Bluetooth car connection as the trigger; the " +
+                                "manual switch above still works when this is off.",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
