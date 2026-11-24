@@ -1134,6 +1134,26 @@ class VoiceActionRunner(
             else -> "Materials — $note"
         }
 
+        // If there is already a visit today for this client, attach the
+        // expense to it rather than creating a separate zero-hour visit.
+        val existing = repository.observeVisits().first()
+            .filter {
+                it.clientId == client.id &&
+                    it.visitDate == LocalDate.now().toString() &&
+                    !it.billed &&
+                    it.invoiceId == null
+            }
+            .maxByOrNull { it.createdAt ?: it.visitDate }
+        if (existing != null) {
+            val last = VoiceVisit(
+                id = existing.id,
+                clientId = existing.clientId,
+                clientName = client.name,
+                materials = existing.materialsCost,
+            )
+            return repriced(last, existing.materialsCost + amount, note)
+        }
+
         val draft = VisitDraft(
             clientId = client.id,
             visitDate = LocalDate.now().toString(),
