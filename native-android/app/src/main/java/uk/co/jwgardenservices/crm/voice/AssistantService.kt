@@ -54,7 +54,9 @@ import uk.co.jwgardenservices.crm.core.CrashLog
 import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
 import uk.co.jwgardenservices.crm.data.repository.invoiceItems
 import uk.co.jwgardenservices.crm.data.repository.sendInvoice
+import uk.co.jwgardenservices.crm.domain.money
 import uk.co.jwgardenservices.crm.ui.invoices.InvoicePdf
+import uk.co.jwgardenservices.crm.ui.invoices.PdfSharing
 
 /**
  * Keeps the Assistant microphone alive as a foreground service.
@@ -88,6 +90,9 @@ class AssistantService : Service() {
     private val actions by lazy {
         VoiceActionRunner(
             sendInvoice = { invoiceId, message -> sendInvoiceByVoice(invoiceId, message) },
+            shareWhatsApp = { invoiceId, message ->
+                shareInvoiceWhatsAppByVoice(invoiceId, message)
+            },
         )
     }
 
@@ -977,6 +982,36 @@ class AssistantService : Service() {
             result.reason ?: "Email isn't set up yet, so it's still in drafts."
         }
     }.getOrElse { "I couldn't send it: ${it.message ?: "unknown error"}." }
+
+    /** Share the invoice PDF plus drafted message through WhatsApp. */
+    private suspend fun shareInvoiceWhatsAppByVoice(
+        invoiceId: String,
+        message: String?,
+    ): String = runCatching {
+        val repository = ServiceLocator.crmRepository
+        val invoice = repository.observeInvoices().first().firstOrNull { it.id == invoiceId }
+            ?: return@runCatching "That draft isn't here any more."
+        val client = repository.observeClients().first().firstOrNull { it.id == invoice.clientId }
+            ?: return@runCatching "That invoice's client is missing."
+        val pdf = withContext(Dispatchers.IO) {
+            InvoicePdf.build(
+                this@AssistantService,
+                invoice,
+                client,
+                repository.invoiceItems(invoiceId),
+                repository.getSettings(),
+            )
+        }
+        val text = message?.takeIf { it.isNotBlank() } ?: run {
+            val business = repository.getSettings()?.businessName ?: "Form & Foliage"
+            "Hi ${client.name.substringBefore(' ')}, here's invoice ${invoice.number} " +
+                "for ${money(invoice.total)}. Thanks, $business."
+        }
+        withContext(Dispatchers.Main) {
+            PdfSharing.shareViaWhatsApp(this@AssistantService, pdf, text)
+        }
+        "Opened WhatsApp — choose ${client.name}'s chat and send."
+    }.getOrElse { "I couldn't open WhatsApp: ${it.message ?: "unknown error"}." }
 
     /** Close the microphone but keep the service (and the loaded model) alive. */
     fun pauseListening() {

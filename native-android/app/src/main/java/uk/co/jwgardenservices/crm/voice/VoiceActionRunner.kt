@@ -51,6 +51,7 @@ class VoiceActionRunner(
      * which owns the Context; null only in tests, where sending is refused.
      */
     private val sendInvoice: (suspend (String, String?) -> String)? = null,
+    private val shareWhatsApp: (suspend (String, String?) -> String)? = null,
 ) {
 
     private data class PendingLog(
@@ -1384,6 +1385,14 @@ class VoiceActionRunner(
             .filter { it.isNotBlank() }
         val yes = words.any { it in SEND_YES } && words.none { it in SEND_NO }
         val no = words.any { it in SEND_NO }
+        if (lower.contains("whatsapp") || lower.contains("whats app") ||
+            lower.contains("what's app")
+        ) {
+            pendingSend = null
+            val share = shareWhatsApp
+                ?: return "Open the invoice to share it on WhatsApp."
+            return share(pending.invoiceId, pending.message)
+        }
         return when {
             yes -> {
                 pendingSend = null
