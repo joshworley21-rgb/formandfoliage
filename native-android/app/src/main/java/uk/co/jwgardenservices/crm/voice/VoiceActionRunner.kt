@@ -1240,7 +1240,14 @@ class VoiceActionRunner(
 
     private suspend fun raiseInvoice(text: String): String {
         val clients = repository.observeClients().first()
-        val client = clientFor(clients, text) ?: inferredClient(clients)
+        val lower = text.lowercase()
+        val named = clientFor(clients, text)
+        val wantsAll = lower.contains("all") || lower.contains("unbilled") ||
+            lower.contains("invoices")
+        if (named == null && wantsAll) {
+            return raiseAllUnbilled(clients)
+        }
+        val client = named ?: inferredClient(clients)
             ?: return "Which client is the invoice for?"
 
         val visits = repository.observeVisits().first()
@@ -1281,6 +1288,50 @@ class VoiceActionRunner(
                 "In drafts: ${client.name}, $visitsText, ${money(totalValue)}. " +
                     "Send it, or leave it there?",
             ),
+        )
+    }
+
+    /**
+     * "Raise invoices for all the unbilled work" — one draft per client. A
+     * single client uses the normal read-back/send flow above.
+     */
+    private suspend fun raiseAllUnbilled(clients: List<Client>): String {
+        val visits = repository.observeVisits().first()
+            .filter { !it.missed && !it.billed && it.invoiceId == null && it.hours > 0.0 }
+        if (visits.isEmpty()) return "Nothing unbilled to invoice."
+        val groups = visits.groupBy { it.clientId }
+            .toList()
+            .sortedByDescending { (_, rows) -> rows.sumOf { it.amount } }
+        val made = mutableListOf<String>()
+        val failures = mutableListOf<String>()
+        var total = 0.0
+        for ((clientId, rows) in groups) {
+            val name = clients.firstOrNull { it.id == clientId }?.name ?: "a client"
+            val result = runCatching {
+                repository.createInvoice(
+                    NewInvoiceInput(clientId = clientId, visitIds = rows.map { it.id }),
+                )
+            }.getOrNull()
+            if (result == null) {
+                failures += name
+            } else {
+                made += name
+                total += result.total.takeIf { it > 0.0 } ?: rows.sumOf { it.amount }
+            }
+        }
+        if (made.isEmpty()) {
+            return "I couldn't raise them without signal. The work is still waiting in " +
+                "ready to bill."
+        }
+        val draftWord = if (made.size == 1) "draft invoice" else "draft invoices"
+        val tail = if (failures.isEmpty()) {
+            ""
+        } else {
+            " ${failures.size} couldn't be raised yet: ${failures.joinToString(", ")}."
+        }
+        return slow(
+            "Raised ${made.size} $draftWord totalling ${money(total)}: " +
+                "${made.joinToString(", ")}.$tail Review them in Invoices.",
         )
     }
 

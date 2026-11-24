@@ -148,11 +148,18 @@ object IntentRules {
                 "raise an invoice",
                 "raise a invoice",
                 "raise invoice",
+                "raise invoices",
                 "create an invoice",
                 "create invoice",
+                "create invoices",
                 "make an invoice",
                 "draft invoice",
+                "draft invoices",
                 "start an invoice",
+                "invoice all",
+                "invoice the unbilled",
+                "bill all",
+                "bill the unbilled",
             ) -> SpokenIntent.RaiseInvoice
 
             // Corrections to the visit just logged: "add £40 for green
