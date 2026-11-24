@@ -57,6 +57,8 @@ class VoiceActionRunner(
         val client: Client?,
         val date: LocalDate,
         val hours: Double?,
+        /** Waiting for just the name of a new client. */
+        val creatingClient: Boolean = false,
     )
 
     private var pending: PendingLog? = null
@@ -282,6 +284,36 @@ class VoiceActionRunner(
     private suspend fun continuePendingImpl(transcript: String): String? {
         val pending = pending ?: return null
         val text = transcript.lowercase()
+        if (
+            text.contains("cancel") || text.contains("forget it") ||
+            text.contains("stop that") || text.trim() == "stop"
+        ) {
+            this.pending = null
+            return "Right, dropped that one."
+        }
+
+        if (pending.creatingClient) {
+            val name = newClientName(transcript)
+            if (name.isBlank()) {
+                this.pending = pending.copy(creatingClient = true)
+                return "What's the client's name?"
+            }
+            val draft = ClientDraft(name = name)
+            repository.createClient(draft)
+            val created = repository.observeClients().first()
+                .firstOrNull { it.name.equals(name, ignoreCase = true) }
+            this.pending = null
+            if (created == null) {
+                return "I couldn't save $name. Try again from the Clients tab?"
+            }
+            val hours = pending.hours ?: spokenHours(text)
+            if (hours == null) {
+                this.pending = PendingLog(created, pending.date, null)
+                return "How many hours for $name?"
+            }
+            return saveHours(created, hours, pending.date, transcript)
+        }
+
         val hours = spokenHours(text) ?: pending.hours
         val clients = repository.observeClients().first()
         val client = pending.client ?: clientFor(clients, text)
@@ -294,12 +326,40 @@ class VoiceActionRunner(
             this.pending = pending.copy(client = client)
             return "How many hours for ${client!!.name}?"
         }
+        if (client == null && (
+                text.contains("new client") || text.contains("add a client") ||
+                    text.contains("create a client")
+                )
+        ) {
+            this.pending = pending.copy(creatingClient = true)
+            return "What's the client's name?"
+        }
         if (client == null) {
             this.pending = pending.copy(hours = hours)
-            return "Which client was that for?"
+            return "Which client was that for? Say a name, or 'new client'."
         }
         this.pending = null
         return saveHours(client, hours, pending.date, transcript)
+    }
+
+    /** A spoken new-client name, with the command words removed. */
+    private fun newClientName(transcript: String): String {
+        var name = transcript.trim().trimEnd('.', '!', '?', ',')
+        val marker = listOf("called ", "named ", "call it ", "name is ")
+            .firstOrNull { name.lowercase().contains(it) }
+        if (marker != null) {
+            name = name.substringAfter(marker, "")
+        }
+        val fillers = setOf(
+            "can", "you", "could", "please", "add", "a", "an", "new", "client",
+            "create", "it", "is", "the", "for", "my", "name", "called", "call",
+            "um", "uh", "or", "and", "just",
+        )
+        return name.split(Regex("\\s+"))
+            .filter { it.isNotBlank() && it.lowercase() !in fillers }
+            .joinToString(" ")
+            .trim()
+            .take(60)
     }
 
     // --- end-of-day wrap-up ----------------------------------------------
