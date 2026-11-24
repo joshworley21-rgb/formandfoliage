@@ -1363,6 +1363,10 @@ class AssistantService : Service() {
             } else {
                 null
             }
+            runningLateMinutes(heard)?.let { minutes ->
+                say(openRunningLateWhatsApp(minutes))
+                return@collect
+            }
             pendingWhatsApp?.let { client ->
                 pendingWhatsApp = null
                 if (heard.contains("cancel") || heard.contains("forget it")) {
@@ -1916,6 +1920,43 @@ class AssistantService : Service() {
         )
             .containsMatchIn(lower) && lower.split(Regex("\\s+")).size >= 3
     }
+
+    /** "I'm running late" / "20 minutes late" -> delay in minutes. */
+    private fun runningLateMinutes(text: String): Int? {
+        val lower = text.lowercase()
+        if (!lower.contains("running late") && !lower.contains("late for")) return null
+        val parsed = Regex("(\\d+)\\s*(?:minutes?|mins?)").find(lower)
+            ?.groupValues?.get(1)?.toIntOrNull()
+        return (parsed ?: 15).coerceIn(5, 120)
+    }
+
+    /** Open a ready-to-send WhatsApp apology to the next booked client. */
+    private suspend fun openRunningLateWhatsApp(minutes: Int): String = runCatching {
+        val repository = ServiceLocator.crmRepository
+        val now = java.time.Instant.now()
+        val jobs = repository.observeJobs().first()
+            .filter { it.status == "scheduled" }
+            .mapNotNull { job ->
+                runCatching { java.time.Instant.parse(job.startsAt) }.getOrNull()?.let { job to it }
+            }
+            .filter { (_, starts) -> !starts.isBefore(now) }
+            .sortedBy { (_, starts) -> starts }
+        val next = jobs.firstOrNull() ?: return@runCatching "Nothing else is booked."
+        val clients = repository.observeClients().first()
+        val client = clients.firstOrNull { it.id == next.first.clientId }
+            ?: return@runCatching "That job's client is missing."
+        val phone = client.phone?.takeIf { it.isNotBlank() }
+            ?: return@runCatching "I have no mobile number for ${client.name}."
+        val firstName = client.name.substringBefore(' ')
+        val message = "Hi $firstName, running about $minutes minutes late — see you shortly. " +
+            "Thanks, ${VoiceLines.OWNER_NAME}."
+        val opened = Messaging.whatsapp(this, phone, message)
+        if (opened) {
+            "Opened WhatsApp for ${client.name} — tap send."
+        } else {
+            "I couldn't open WhatsApp for ${client.name}."
+        }
+    }.getOrElse { "I couldn't open that message: ${it.message ?: "unknown error"}." }
 
     /** "Message Louisa on WhatsApp" -> Louisa; null for "send it on WhatsApp". */
     private fun whatsAppRecipient(text: String): String? {
