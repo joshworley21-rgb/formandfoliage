@@ -2,27 +2,43 @@ package uk.co.jwgardenservices.crm.ui.quotes
 
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Cancel
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.HowToReg
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.RequestQuote
+import androidx.compose.material.icons.outlined.Send
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -46,13 +62,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.LocalDate
+import kotlin.math.abs
 import kotlinx.coroutines.launch
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.Quote
@@ -65,6 +85,7 @@ import uk.co.jwgardenservices.crm.domain.displayQuoteStatus
 import uk.co.jwgardenservices.crm.domain.formatDayMonthYear
 import uk.co.jwgardenservices.crm.domain.lineAmount
 import uk.co.jwgardenservices.crm.domain.money
+import uk.co.jwgardenservices.crm.domain.moneyCompact
 import uk.co.jwgardenservices.crm.domain.parseDate
 import uk.co.jwgardenservices.crm.domain.quoteLink
 import uk.co.jwgardenservices.crm.domain.quoteTotals
@@ -107,6 +128,36 @@ fun QuotesScreen(viewModel: CrmViewModel) {
     var sendingQuote by remember { mutableStateOf<Quote?>(null) }
     var sendError by remember { mutableStateOf<String?>(null) }
     var busyId by remember { mutableStateOf<String?>(null) }
+    var filter by remember { mutableStateOf("all") }
+
+    val withStatus = remember(state.quotes) {
+        state.quotes.map { it to displayQuoteStatus(it.status, it.validUntil) }
+    }
+    val counts = remember(withStatus) {
+        val draft = withStatus.count { it.second == "draft" }
+        val sent = withStatus.count { it.second == "sent" }
+        val approved = withStatus.count { it.second == "accepted" && it.first.clientId == null }
+        val converted = withStatus.count { it.second == "accepted" && it.first.clientId != null }
+        val declined = withStatus.count { it.second == "declined" }
+        mapOf(
+            "all" to withStatus.size,
+            "draft" to draft,
+            "sent" to sent,
+            "approved" to approved,
+            "converted" to converted,
+            "declined" to declined,
+        )
+    }
+    val shown = remember(withStatus, filter) {
+        when (filter) {
+            "approved" -> withStatus.filter { it.second == "accepted" && it.first.clientId == null }
+            "converted" -> withStatus.filter { it.second == "accepted" && it.first.clientId != null }
+            "all" -> withStatus
+            else -> withStatus.filter { it.second == filter }
+        }
+    }
+    val shownTotal = shown.sumOf { it.first.total }
+    val awaiting = shown.count { it.second == "sent" }
 
     val origin = state.settings?.publicSiteUrl?.trim()?.trimEnd('/')
     val warning = if (isSystemInDarkTheme()) DarkWarning else LightWarning
@@ -206,55 +257,100 @@ fun QuotesScreen(viewModel: CrmViewModel) {
         return
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item {
-            PageHeader(
-                title = "Quotes",
-                description = "Price up work and let the customer accept it online.",
-                action = {
-                    Button(
-                        onClick = {
-                            editorError = null
-                            editor = QuoteEditorState(quote = null, items = emptyList())
-                        },
-                    ) {
-                        Text("New quote")
-                    }
-                },
-            )
-        }
-
-        if (state.error != null) {
-            item { ErrorState(state.error!!, viewModel::refresh) }
-        }
-
-        if (state.quotes.isEmpty()) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             item {
-                EmptyState(
-                    icon = Icons.Outlined.RequestQuote,
-                    title = "No quotes yet",
-                    body = "Price up the first job and send the customer a link they can accept with one tap.",
+                QuotesHeader(
+                    counts = counts,
+                    filter = filter,
+                    onFilter = { filter = it },
                 )
             }
-            return@LazyColumn
+
+            if (state.error != null) {
+                item {
+                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        ErrorState(state.error!!, viewModel::refresh)
+                    }
+                }
+            }
+
+            if (state.quotes.isEmpty()) {
+                item {
+                    EmptyState(
+                        icon = Icons.Outlined.RequestQuote,
+                        title = "No quotes yet",
+                        body = "Price up the first job and send the customer a link they can accept with one tap.",
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                }
+            } else {
+                item {
+                    FilterPills(
+                        counts = counts,
+                        filter = filter,
+                        onFilter = { filter = it },
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                }
+                item {
+                    SummaryStrip(
+                        count = shown.size,
+                        total = shownTotal,
+                        awaiting = awaiting,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                }
+                item {
+                    Text(
+                        text = "Swipe left to delete · Swipe right to send",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                    )
+                }
+                items(shown, key = { it.first.id }) { (quote, status) ->
+                    QuoteCard(
+                        quote = quote,
+                        display = status,
+                        busy = busyId == quote.id,
+                        warning = warning,
+                        onEdit = { openEdit(quote) },
+                        onSend = { openSend(quote) },
+                        onLink = { shareLink(quote) },
+                        onStatus = { next -> setStatus(quote, next) },
+                        onDuplicate = { duplicate(quote) },
+                        onDelete = { deleting = quote },
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                }
+            }
         }
 
-        items(state.quotes, key = { it.id }) { quote ->
-            QuoteCard(
-                quote = quote,
-                busy = busyId == quote.id,
-                warning = warning,
-                onEdit = { openEdit(quote) },
-                onSend = { openSend(quote) },
-                onLink = { shareLink(quote) },
-                onStatus = { status -> setStatus(quote, status) },
-                onDuplicate = { duplicate(quote) },
-                onDelete = { deleting = quote },
-            )
+        Surface(
+            onClick = {
+                editorError = null
+                editor = QuoteEditorState(quote = null, items = emptyList())
+            },
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.tertiary,
+            contentColor = MaterialTheme.colorScheme.onTertiary,
+            shadowElevation = 8.dp,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(20.dp)
+                .size(56.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.Add, contentDescription = "New quote")
+            }
         }
     }
 
@@ -348,8 +444,222 @@ fun QuotesScreen(viewModel: CrmViewModel) {
 }
 
 @Composable
+private fun QuotesHeader(
+    counts: Map<String, Int>,
+    filter: String,
+    onFilter: (String) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+    ) {
+        Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 16.dp)) {
+            Text(
+                text = "Quotes",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "Proposals & price agreements",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f),
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                StatusTile(
+                    label = "Drafts",
+                    count = counts["draft"] ?: 0,
+                    icon = Icons.Outlined.Description,
+                    tint = MaterialTheme.colorScheme.tertiary,
+                    active = filter == "draft",
+                    onClick = { onFilter(if (filter == "draft") "all" else "draft") },
+                    modifier = Modifier.weight(1f),
+                )
+                StatusTile(
+                    label = "Sent",
+                    count = counts["sent"] ?: 0,
+                    icon = Icons.Outlined.Send,
+                    tint = Color(0xFF9FB6D8),
+                    active = filter == "sent",
+                    onClick = { onFilter(if (filter == "sent") "all" else "sent") },
+                    modifier = Modifier.weight(1f),
+                )
+                StatusTile(
+                    label = "Approved",
+                    count = counts["approved"] ?: 0,
+                    icon = Icons.Outlined.CheckCircle,
+                    tint = Color(0xFF8FCF9E),
+                    active = filter == "approved",
+                    onClick = { onFilter(if (filter == "approved") "all" else "approved") },
+                    modifier = Modifier.weight(1f),
+                )
+                StatusTile(
+                    label = "Converted",
+                    count = counts["converted"] ?: 0,
+                    icon = Icons.Outlined.HowToReg,
+                    tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.65f),
+                    active = filter == "converted",
+                    onClick = { onFilter(if (filter == "converted") "all" else "converted") },
+                    modifier = Modifier.weight(1f),
+                )
+                StatusTile(
+                    label = "Declined",
+                    count = counts["declined"] ?: 0,
+                    icon = Icons.Outlined.Cancel,
+                    tint = Color(0xFFFF9A84),
+                    active = filter == "declined",
+                    onClick = { onFilter(if (filter == "declined") "all" else "declined") },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusTile(
+    label: String,
+    count: Int,
+    icon: ImageVector,
+    tint: Color,
+    active: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = if (active) 0.18f else 0.08f),
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+        border = if (active) {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.45f))
+        } else {
+            null
+        },
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 7.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = count.toString(),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp, letterSpacing = 0.sp),
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.65f),
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun FilterPills(
+    counts: Map<String, Int>,
+    filter: String,
+    onFilter: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val filters = listOf(
+        "all" to "All",
+        "draft" to "Draft",
+        "sent" to "Sent",
+        "approved" to "Approved",
+        "declined" to "Declined",
+    )
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        filters.forEach { (key, label) ->
+            val active = filter == key
+            Surface(
+                onClick = { onFilter(key) },
+                shape = RoundedCornerShape(50),
+                color = if (active) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.secondary,
+                contentColor = if (active) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                border = if (active) {
+                    BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                } else {
+                    null
+                },
+            ) {
+                Text(
+                    text = "$label (${counts[key] ?: 0})",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SummaryStrip(
+    count: Int,
+    total: Double,
+    awaiting: Int,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = buildString {
+                    append("$count ${if (count == 1) "quote" else "quotes"} · ")
+                    append("${moneyCompact(total)} total")
+                    if (awaiting > 0) append(" · $awaiting awaiting response")
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.secondary,
+            ) {
+                Text(
+                    text = "Newest ↓",
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun QuoteCard(
     quote: Quote,
+    display: String,
     busy: Boolean,
     warning: Color,
     onEdit: () -> Unit,
@@ -358,150 +668,191 @@ private fun QuoteCard(
     onStatus: (String) -> Unit,
     onDuplicate: () -> Unit,
     onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val display = displayQuoteStatus(quote.status, quote.validUntil)
-    val (chipColor, chipContainer) = quoteStatusColors(display, warning)
+    val converted = display == "accepted" && quote.clientId != null
+    val statusLabel = when (display) {
+        "accepted" -> if (converted) "Converted" else "Approved"
+        "declined" -> "Declined"
+        "expired" -> "Expired"
+        "sent" -> "Sent"
+        else -> "Draft"
+    }
+    val chipColor = when (display) {
+        "draft" -> MaterialTheme.colorScheme.tertiary
+        "sent" -> Color(0xFF4C6A92)
+        "accepted" -> MaterialTheme.colorScheme.primary
+        "declined" -> MaterialTheme.colorScheme.error
+        else -> warning
+    }
+    val chipContainer = chipColor.copy(alpha = 0.12f)
     var menuOpen by remember { mutableStateOf(false) }
+    var drag by remember(quote.id) { mutableStateOf(0f) }
 
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .pointerInput(quote.id) {
+                detectHorizontalDragGestures(
+                    onDragStart = { drag = 0f },
+                    onDragEnd = {
+                        if (abs(drag) > 64f) {
+                            if (drag > 0f) onSend() else onDelete()
+                        }
+                        drag = 0f
+                    },
+                    onHorizontalDrag = { _, amount -> drag += amount },
+                )
+            },
+        shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
+        Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .fillMaxHeight()
+                    .background(chipColor),
+            )
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp)) {
+                Row(verticalAlignment = Alignment.Top) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = quote.contactName,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = quote.number,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = money(quote.total),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        StatusChip(
+                            label = statusLabel,
+                            color = chipColor,
+                            container = chipContainer,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(7.dp))
+                Text(
+                    text = quote.notes?.takeIf { it.isNotBlank() }
+                        ?: quote.contactAddress?.takeIf { it.isNotBlank() }
+                        ?: "No job description yet",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = quote.number,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = quote.contactName,
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = quote.validUntil?.let { date ->
+                            "Valid until ${parseDate(date)?.formatDayMonthYear() ?: date}"
+                        } ?: "No expiry date",
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
                     )
-                }
-                Text(
-                    text = money(quote.total),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
-                Spacer(Modifier.width(8.dp))
-                Box {
-                    IconButton(onClick = { menuOpen = true }, enabled = !busy) {
-                        Icon(Icons.Outlined.MoreVert, contentDescription = "Quote actions")
-                    }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        if (display == "sent") {
+                    Box {
+                        IconButton(
+                            onClick = { menuOpen = true },
+                            enabled = !busy,
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.MoreVert,
+                                contentDescription = "Quote actions",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false },
+                        ) {
                             DropdownMenuItem(
-                                text = { Text("Mark accepted") },
+                                text = { Text("Edit quote") },
+                                leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
                                 onClick = {
                                     menuOpen = false
-                                    onStatus("accepted")
+                                    onEdit()
                                 },
                             )
                             DropdownMenuItem(
-                                text = { Text("Mark declined") },
+                                text = {
+                                    Text(if (display == "draft") "Send quote" else "Send again")
+                                },
+                                leadingIcon = { Icon(Icons.Outlined.Send, contentDescription = null) },
                                 onClick = {
                                     menuOpen = false
-                                    onStatus("declined")
+                                    onSend()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Share link") },
+                                leadingIcon = { Icon(Icons.Outlined.Link, contentDescription = null) },
+                                onClick = {
+                                    menuOpen = false
+                                    onLink()
+                                },
+                            )
+                            if (display == "sent") {
+                                DropdownMenuItem(
+                                    text = { Text("Mark approved") },
+                                    leadingIcon = {
+                                        Icon(Icons.Outlined.CheckCircle, contentDescription = null)
+                                    },
+                                    onClick = {
+                                        menuOpen = false
+                                        onStatus("accepted")
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Mark declined") },
+                                    leadingIcon = {
+                                        Icon(Icons.Outlined.Cancel, contentDescription = null)
+                                    },
+                                    onClick = {
+                                        menuOpen = false
+                                        onStatus("declined")
+                                    },
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text("Duplicate") },
+                                onClick = {
+                                    menuOpen = false
+                                    onDuplicate()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                                },
+                                onClick = {
+                                    menuOpen = false
+                                    onDelete()
                                 },
                             )
                         }
-                        DropdownMenuItem(
-                            text = { Text("Duplicate") },
-                            onClick = {
-                                menuOpen = false
-                                onDuplicate()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                            onClick = {
-                                menuOpen = false
-                                onDelete()
-                            },
-                        )
                     }
                 }
-            }
-
-            Spacer(Modifier.padding(top = 8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = quote.validUntil?.let { date ->
-                        "Valid until ${parseDate(date)?.formatDayMonthYear() ?: date}"
-                    } ?: "No expiry date",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                StatusChip(
-                    label = display.replaceFirstChar { it.uppercase() },
-                    color = chipColor,
-                    container = chipContainer,
-                )
-            }
-
-            if (busy) {
-                Text(
-                    text = "Working…",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-            }
-
-            HorizontalDivider(Modifier.padding(vertical = 10.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                when (display) {
-                    "draft" -> {
-                        OutlinedButton(
-                            onClick = onEdit,
-                            enabled = !busy,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text("Edit")
-                        }
-                        Button(
-                            onClick = onSend,
-                            enabled = !busy,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text("Send")
-                        }
-                    }
-                    "sent" -> {
-                        OutlinedButton(
-                            onClick = onLink,
-                            enabled = !busy,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text("Link")
-                        }
-                        Button(
-                            onClick = onSend,
-                            enabled = !busy,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text("Resend")
-                        }
-                    }
-                    else -> {
-                        OutlinedButton(
-                            onClick = onLink,
-                            enabled = !busy,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text("Share link")
-                        }
-                    }
+                if (busy) {
+                    Text(
+                        text = "Working…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
                 }
             }
         }
