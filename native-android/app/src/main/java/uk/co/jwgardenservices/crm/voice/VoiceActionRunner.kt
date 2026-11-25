@@ -10,6 +10,8 @@ import uk.co.jwgardenservices.crm.data.repository.CrmRepository
 import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
 import uk.co.jwgardenservices.crm.data.repository.createInvoice
 import uk.co.jwgardenservices.crm.data.repository.deleteInvoice
+import uk.co.jwgardenservices.crm.data.repository.markInvoicePaid
+import uk.co.jwgardenservices.crm.data.repository.updateInvoiceDraft
 import uk.co.jwgardenservices.crm.domain.BillingSource
 import uk.co.jwgardenservices.crm.domain.formatDayMonth
 import uk.co.jwgardenservices.crm.domain.formatDayMonthYear
@@ -267,6 +269,7 @@ class VoiceActionRunner(
             SpokenIntent.Unbilled -> unbilled()
             SpokenIntent.ClientList -> clientList()
             SpokenIntent.InvoiceStatus -> invoiceStatus(text)
+            SpokenIntent.InvoiceEdit -> editInvoice(text)
             SpokenIntent.NextJobForClient -> nextJobForClient(text)
             SpokenIntent.TodayEarnings -> todayEarnings()
             SpokenIntent.DayWrapUp -> startWrapUp()
@@ -1588,6 +1591,53 @@ class VoiceActionRunner(
             .sortedBy { it.name }
         if (clients.isEmpty()) return "No clients yet."
         return slow(chunkedList("You've got ${clients.size} clients:", clients.map { it.name }))
+    }
+
+    /** Offline invoice edits: due date, internal note, mark paid. */
+    private suspend fun editInvoice(text: String): String {
+        val clients = repository.observeClients().first()
+        val client = clientFor(clients, text) ?: inferredClient(clients)
+            ?: return "Which client's invoice?"
+        val invoice = repository.observeInvoices().first()
+            .filter { it.clientId == client.id }
+            .maxByOrNull { parseDate(it.issueDate) ?: LocalDate.MIN }
+            ?: return "I have no invoices for ${client.name}."
+        val lower = text.lowercase()
+        if (lower.contains("paid")) {
+            if (invoice.status == "paid") return "${client.name}'s invoice is already paid."
+            repository.markInvoicePaid(invoice.id)
+            CallLedger.record("Invoice ${invoice.number} for ${client.name} marked paid")
+            return fast("Marked ${client.name}'s invoice ${invoice.number} paid.")
+        }
+        if (lower.contains("due")) {
+            val date = SpeechNormalizer.relativeDate(text, LocalDate.now())
+                ?: return "What date should ${client.name}'s invoice be due?"
+            repository.updateInvoiceDraft(invoice.id, date.toString(), invoice.notes)
+            val before = invoice.dueDate
+            CallLedger.record("Invoice ${invoice.number} due date changed") {
+                repository.updateInvoiceDraft(invoice.id, before, invoice.notes)
+                "Put the due date back."
+            }
+            return fast(
+                "${client.name}'s invoice ${invoice.number} is now due " +
+                    "${date.dayOfMonth} ${date.month.name.lowercase().replaceFirstChar { it.uppercase() }}.",
+            )
+        }
+        val note = text
+            .substringAfter("note", "")
+            .removePrefix("s")
+            .removePrefix(":")
+            .replace(Regex("\\b(?:on|for|to)\\s+the\\s+invoice.*$", RegexOption.IGNORE_CASE), "")
+            .trim()
+            .trimEnd('.', '!', '?')
+            .ifBlank { return "What note should go on ${client.name}'s invoice?" }
+        repository.updateInvoiceDraft(invoice.id, invoice.dueDate, note)
+        val before = invoice.notes
+        CallLedger.record("Invoice ${invoice.number} note changed") {
+            repository.updateInvoiceDraft(invoice.id, invoice.dueDate, before)
+            "Put the invoice note back."
+        }
+        return fast("Noted on ${client.name}'s invoice: $note.")
     }
 
     private suspend fun invoiceStatus(text: String): String {

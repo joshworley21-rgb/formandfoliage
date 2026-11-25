@@ -2295,6 +2295,7 @@ private fun confirmationFor(intent: IntentResult): String {
         SpokenIntent.Unbilled -> "Checking what is waiting to be invoiced."
         SpokenIntent.ClientList -> "Reading out your clients."
         SpokenIntent.InvoiceStatus -> "Checking that invoice."
+        SpokenIntent.InvoiceEdit -> "Updating that invoice."
         SpokenIntent.NextJobForClient ->
             if (topic.isEmpty()) "Checking that booking." else "Checking when $topic is next in."
         SpokenIntent.TodayEarnings -> "Checking today's takings."

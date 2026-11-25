@@ -26,6 +26,7 @@ enum class SpokenIntent(val wire: String) {
     Unbilled("unbilled"),
     ClientList("client_list"),
     InvoiceStatus("invoice_status"),
+    InvoiceEdit("invoice_edit"),
     NextJobForClient("next_job_for_client"),
     TodayEarnings("today_earnings"),
     DayWrapUp("day_wrap_up"),

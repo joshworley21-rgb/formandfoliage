@@ -134,6 +134,13 @@ object IntentRules {
                 text.containsAny("earn", "made", "make", "taken", "income") ->
                 SpokenIntent.MonthEarnings
 
+            // Offline invoice edits must be matched before the read-only status
+            // rules, otherwise "mark it paid" becomes a lookup.
+            text.containsAny("mark", "set", "change", "move", "add a note") &&
+                text.containsAny("invoice", "bill") &&
+                (text.containsAny("paid", "due", "note", "notes", "due date")) ->
+                SpokenIntent.InvoiceEdit
+
             text.containsAny("invoice status", "invoice been paid", "invoice paid", "been paid") ||
                 Regex(
                     "\\b(?:has|have|did)\\s+(?:the\\s+|my\\s+)?[a-z0-9'& ]+\\s+(?:paid|pay)\\b",
