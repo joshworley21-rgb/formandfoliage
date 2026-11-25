@@ -22,6 +22,7 @@ data class BusinessSnapshot(
     /** Value of work logged this month, whether invoiced yet or not. */
     val monthIncome: Double,
     val monthMaterials: Double,
+    val monthLabour: Double,
     val monthlyCosts: Double,
     val netProfit: Double,
     val netMargin: Double,
@@ -59,6 +60,7 @@ fun buildBusinessSnapshot(
     jobs: List<ScheduledJob>,
     clients: List<Client>,
     costs: List<RunningCost>,
+    labourRate: Double = 0.0,
     today: LocalDate = LocalDate.now(),
 ): BusinessSnapshot {
     val month = YearMonth.from(today)
@@ -75,8 +77,9 @@ fun buildBusinessSnapshot(
     }
     val income = round2(monthVisits.sumOf { it.amount })
     val materials = round2(monthVisits.sumOf { it.materialsCost })
+    val labour = round2(monthVisits.sumOf { it.hours } * labourRate.coerceAtLeast(0.0))
     val monthlyCosts = costs.monthlyRunningCosts()
-    val net = round2(income - materials - monthlyCosts)
+    val net = round2(income - materials - labour - monthlyCosts)
 
     val outstandingInvoices = invoices.filter { it.status == "sent" }
     val outstanding = round2(outstandingInvoices.sumOf { it.total })
@@ -115,6 +118,7 @@ fun buildBusinessSnapshot(
         monthPaid = round2(monthPaidInvoices.sumOf { it.total }),
         monthIncome = income,
         monthMaterials = materials,
+        monthLabour = labour,
         monthlyCosts = monthlyCosts,
         netProfit = net,
         netMargin = if (income > 0.0) net / income else 0.0,
@@ -149,7 +153,8 @@ fun coachScore(snapshot: BusinessSnapshot): Int {
     val margin = 25.0 * (snapshot.netMargin / 0.35).coerceIn(0.0, 1.0)
 
     val costsShare = if (snapshot.monthIncome > 0.0) {
-        (snapshot.monthlyCosts + snapshot.monthMaterials) / snapshot.monthIncome
+        (snapshot.monthlyCosts + snapshot.monthMaterials + snapshot.monthLabour) /
+            snapshot.monthIncome
     } else if (snapshot.monthlyCosts > 0.0) {
         1.0
     } else {
@@ -231,8 +236,8 @@ fun coachInsights(
             tone = CoachTone.Attention,
             area = "Profit",
             title = "This month is ${money(kotlin.math.abs(snapshot.netProfit))} down",
-            body = "Income ${money(snapshot.monthIncome)} less materials and running costs. " +
-                "Check the cost breakdown before the month closes.",
+            body = "Income ${money(snapshot.monthIncome)} less materials, labour and running " +
+                "costs. Check the cost breakdown before the month closes.",
             action = CoachAction.Costs,
             actionLabel = "See costs",
         )
@@ -269,7 +274,8 @@ fun coachInsights(
             actionLabel = "Add first cost",
         )
     } else if (snapshot.monthIncome > 0.0) {
-        val share = (snapshot.monthlyCosts + snapshot.monthMaterials) / snapshot.monthIncome
+        val share = (snapshot.monthlyCosts + snapshot.monthMaterials + snapshot.monthLabour) /
+            snapshot.monthIncome
         if (share > 0.5) {
             insights += CoachInsight(
                 id = "cost-share",

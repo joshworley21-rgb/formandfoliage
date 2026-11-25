@@ -103,6 +103,21 @@ class BusinessCoachTest {
     }
 
     @Test
+    fun `hourly labour rate is a real cost in profit`() {
+        val snapshot = buildBusinessSnapshot(
+            invoices = emptyList(),
+            visits = listOf(visit("1", amount = 1000.0, materials = 100.0)),
+            jobs = emptyList(),
+            clients = listOf(client("c1", "Smiths", 40.0)),
+            costs = listOf(cost(200.0)),
+            labourRate = 30.0,
+            today = today,
+        )
+        assertEquals(120.0, snapshot.monthLabour, 0.001)
+        assertEquals(580.0, snapshot.netProfit, 0.001)
+    }
+
+    @Test
     fun `score rewards collected cash and healthy margin`() {
         val healthy = buildBusinessSnapshot(
             invoices = listOf(invoice("1", 500.0, status = "paid")),

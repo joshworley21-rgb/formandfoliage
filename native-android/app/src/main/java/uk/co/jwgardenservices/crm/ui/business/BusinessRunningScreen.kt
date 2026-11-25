@@ -178,13 +178,22 @@ fun BusinessRunningScreen(
     val daily = remember(costs) { costs.dailyRunningCosts() }
     val annual = remember(costs) { costs.annualRunningCosts() }
     val breakdown = remember(costs) { costBreakdown(costs) }
-    val snapshot = remember(state.invoices, state.visits, state.jobs, state.clients, costs, today) {
+    val snapshot = remember(
+        state.invoices,
+        state.visits,
+        state.jobs,
+        state.clients,
+        costs,
+        state.settings?.labourRate,
+        today,
+    ) {
         buildBusinessSnapshot(
             invoices = state.invoices,
             visits = state.visits,
             jobs = state.jobs,
             clients = state.clients,
             costs = costs,
+            labourRate = state.settings?.labourRate ?: 0.0,
             today = today,
         )
     }
@@ -530,8 +539,13 @@ private fun NetBand(snapshot: BusinessSnapshot) {
             Spacer(Modifier.height(12.dp))
             Row(modifier = Modifier.fillMaxWidth()) {
                 BandFigure(
-                    label = "Work logged",
+                    label = "Work",
                     value = money(snapshot.monthIncome),
+                    modifier = Modifier.weight(1f),
+                )
+                BandFigure(
+                    label = "Labour",
+                    value = money(snapshot.monthLabour),
                     modifier = Modifier.weight(1f),
                 )
                 BandFigure(
@@ -540,7 +554,7 @@ private fun NetBand(snapshot: BusinessSnapshot) {
                     modifier = Modifier.weight(1f),
                 )
                 BandFigure(
-                    label = "Running costs",
+                    label = "Running",
                     value = money(snapshot.monthlyCosts),
                     modifier = Modifier.weight(1f),
                 )

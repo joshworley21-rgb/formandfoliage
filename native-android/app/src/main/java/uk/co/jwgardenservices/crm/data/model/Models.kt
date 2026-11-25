@@ -1,5 +1,6 @@
 package uk.co.jwgardenservices.crm.data.model
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -164,6 +165,9 @@ data class Settings(
     @SerialName("business_profile") val businessProfile: String? = null,
     @SerialName("business_profile_source") val businessProfileSource: String? = null,
     @SerialName("business_profile_updated_at") val businessProfileUpdatedAt: String? = null,
+    /** What one hour of labour costs the business, for the weekly P&L. */
+    @ColumnInfo(defaultValue = "0")
+    @SerialName("labour_rate") val labourRate: Double = 0.0,
     @SerialName("vat_registered") val vatRegistered: Boolean = false,
     @SerialName("vat_number") val vatNumber: String? = null,
     @SerialName("vat_rate") val vatRate: Double = 20.0,
@@ -353,6 +357,7 @@ data class SettingsDraft(
     val email: String? = null,
     val replyToEmail: String? = null,
     val publicSiteUrl: String? = null,
+    val labourRate: Double = 0.0,
     val vatRegistered: Boolean = false,
     val vatNumber: String? = null,
     val vatRate: Double = 20.0,

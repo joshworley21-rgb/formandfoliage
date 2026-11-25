@@ -43,7 +43,7 @@ import uk.co.jwgardenservices.crm.data.model.Visit
         VoiceAlias::class,
         ClientVisitNote::class,
     ],
-    version = 16,
+    version = 17,
     exportSchema = true,
 )
 abstract class CrmDatabase : RoomDatabase() {
@@ -163,6 +163,20 @@ private val MIGRATION_15_16 = object : Migration(15, 16) {
     }
 }
 
+/**
+ * Additive: the hourly labour cost used by the weekly profit figure.
+ *
+ * Existing rows start at zero, which is how the app behaved before the field
+ * existed; the owner sets the real rate in Settings.
+ */
+private val MIGRATION_16_17 = object : Migration(16, 17) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "ALTER TABLE `settings` ADD COLUMN `labourRate` REAL NOT NULL DEFAULT 0",
+        )
+    }
+}
+
 object DatabaseProvider {
     @Volatile
     private var instance: CrmDatabase? = null
@@ -181,6 +195,7 @@ object DatabaseProvider {
                     MIGRATION_13_14,
                     MIGRATION_14_15,
                     MIGRATION_15_16,
+                    MIGRATION_16_17,
                 )
                 // Only reached for versions older than 10, which never held
                 // unsynced work from a shipped build. From 11 onward every

@@ -107,6 +107,7 @@ fun DashboardScreen(
     val lastWeekEnd = weekStart.minusDays(1)
     val month = YearMonth.from(today)
     val taxRate by TaxReservePrefs.ratePercent.collectAsStateWithLifecycle()
+    val labourRate = state.settings?.labourRate ?: 0.0
     var tab by remember { mutableStateOf(HomeTab.Week) }
     var projected by remember { mutableStateOf(false) }
     var statDrag by remember { mutableStateOf(0f) }
@@ -125,10 +126,12 @@ fun DashboardScreen(
     }
     val weekIncome = weekVisits.sumOf { it.amount }
     val weekMaterials = weekVisits.sumOf { it.materialsCost }
+    val weekLabour = weekVisits.sumOf { it.hours } * labourRate
     val weekOverheads = state.runningCosts.monthlyRunningCosts() * 12.0 / 52.0
     val lastWeekNet = lastWeekVisits.sumOf { it.amount } -
-        lastWeekVisits.sumOf { it.materialsCost } - weekOverheads
-    val weekNet = weekIncome - weekMaterials - weekOverheads
+        lastWeekVisits.sumOf { it.materialsCost } -
+        lastWeekVisits.sumOf { it.hours } * labourRate - weekOverheads
+    val weekNet = weekIncome - weekMaterials - weekLabour - weekOverheads
     val monthIncome = monthVisits.sumOf { it.amount }
     val weekProjected = weekIncome / today.dayOfWeek.value.coerceAtLeast(1) * 7
     val monthProjected = monthIncome / today.dayOfMonth.coerceAtLeast(1) *
@@ -158,11 +161,11 @@ fun DashboardScreen(
         val visits = weekVisits.filter { parseDate(it.visitDate) == day }
         DaySeries(
             day = day,
-            billed = visits.filter { it.billed }.sumOf { it.amount },
-            unbilled = visits.filter { !it.billed }.sumOf { it.amount },
+            revenue = visits.sumOf { it.amount },
+            labour = visits.sumOf { it.hours } * labourRate,
         )
     }
-    val busiest = series.maxByOrNull { it.billed + it.unbilled }
+    val busiest = series.maxByOrNull { it.revenue }
     val topClient = weekVisits
         .groupBy { it.clientId }
         .mapValues { (_, visits) -> visits.sumOf { it.amount } }
@@ -260,6 +263,7 @@ fun DashboardScreen(
                         HomeTab.Week -> WeekPanel(
                             weekIncome = weekIncome,
                             weekMaterials = weekMaterials,
+                            weekLabour = weekLabour,
                             weekOverheads = weekOverheads,
                             weekNet = weekNet,
                             lastWeekNet = lastWeekNet,
@@ -538,12 +542,13 @@ private fun HomeTabs(selected: HomeTab, onSelect: (HomeTab) -> Unit) {
     }
 }
 
-private data class DaySeries(val day: LocalDate, val billed: Double, val unbilled: Double)
+private data class DaySeries(val day: LocalDate, val revenue: Double, val labour: Double)
 
 @Composable
 private fun WeekPanel(
     weekIncome: Double,
     weekMaterials: Double,
+    weekLabour: Double,
     weekOverheads: Double,
     weekNet: Double,
     lastWeekNet: Double,
@@ -586,8 +591,8 @@ private fun WeekPanel(
         WeekBars(series = series, today = today)
         Spacer(Modifier.height(14.dp))
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        SummaryRow("Busiest day", if ((busiest?.let { it.billed + it.unbilled } ?: 0.0) > 0.0) {
-            "${busiest!!.day.formatWeekday().substringBefore(" ")} · ${money(busiest.billed + busiest.unbilled)}"
+        SummaryRow("Busiest day", if ((busiest?.revenue ?: 0.0) > 0.0) {
+            "${busiest!!.day.formatWeekday().substringBefore(" ")} · ${money(busiest.revenue)}"
         } else {
             "—"
         })
@@ -600,6 +605,7 @@ private fun WeekPanel(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         SummaryRow("Income", money(weekIncome))
+        SummaryRow("Labour", money(weekLabour))
         SummaryRow("Materials", money(weekMaterials))
         SummaryRow("Overheads", money(weekOverheads))
         SummaryRow("Net profit", money(weekNet), emphasis = true)
@@ -608,7 +614,7 @@ private fun WeekPanel(
 
 @Composable
 private fun WeekBars(series: List<DaySeries>, today: LocalDate) {
-    val max = maxOf(1.0, series.maxOfOrNull { maxOf(it.billed, it.unbilled) } ?: 1.0)
+    val max = maxOf(1.0, series.maxOfOrNull { maxOf(it.revenue, it.labour) } ?: 1.0)
     Column {
         Row(
             modifier = Modifier
@@ -637,13 +643,13 @@ private fun WeekBars(series: List<DaySeries>, today: LocalDate) {
                         Box(
                             modifier = Modifier
                                 .width(7.dp)
-                                .height((78 * (day.billed / max)).dp.coerceAtLeast(3.dp))
+                                .height((78 * (day.revenue / max)).dp.coerceAtLeast(3.dp))
                                 .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)),
                         )
                         Box(
                             modifier = Modifier
                                 .width(7.dp)
-                                .height((78 * (day.unbilled / max)).dp.coerceAtLeast(3.dp))
+                                .height((78 * (day.labour / max)).dp.coerceAtLeast(3.dp))
                                 .background(
                                     MaterialTheme.colorScheme.outline,
                                     RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp),
@@ -665,8 +671,8 @@ private fun WeekBars(series: List<DaySeries>, today: LocalDate) {
         }
         Spacer(Modifier.height(4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Legend(MaterialTheme.colorScheme.primary, "Billed")
-            Legend(MaterialTheme.colorScheme.outline, "Unbilled")
+            Legend(MaterialTheme.colorScheme.primary, "Revenue")
+            Legend(MaterialTheme.colorScheme.outline, "Labour")
         }
     }
 }

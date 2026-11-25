@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -62,6 +63,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -86,6 +88,7 @@ private data class SettingsForm(
     val email: String = "",
     val replyToEmail: String = "",
     val publicSiteUrl: String = "",
+    val labourRate: String = "0",
     val vatRegistered: Boolean = false,
     val vatNumber: String = "",
     val vatRate: String = "20",
@@ -109,6 +112,7 @@ private fun formOf(settings: Settings?): SettingsForm = if (settings == null) {
         email = settings.email.orEmpty(),
         replyToEmail = settings.replyToEmail.orEmpty(),
         publicSiteUrl = settings.publicSiteUrl.orEmpty(),
+        labourRate = settings.labourRate.toString(),
         vatRegistered = settings.vatRegistered,
         vatNumber = settings.vatNumber.orEmpty(),
         vatRate = settings.vatRate.toString(),
@@ -256,6 +260,7 @@ fun SettingsScreen(
                         email = form.email,
                         replyToEmail = form.replyToEmail,
                         publicSiteUrl = form.publicSiteUrl,
+                        labourRate = form.labourRate.toDoubleOrNull() ?: 0.0,
                         vatRegistered = form.vatRegistered,
                         vatNumber = form.vatNumber,
                         vatRate = form.vatRate.toDoubleOrNull() ?: 0.0,
@@ -467,6 +472,20 @@ fun SettingsScreen(
                     )
                     Text(
                         text = "Leave reply-to blank to send replies to the address above.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = form.labourRate,
+                        onValueChange = { form = form.copy(labourRate = it) },
+                        label = { Text("Labour cost (£ per hour)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "What an hour of your time costs the business. Used in the " +
+                            "weekly profit figure; leave it at 0 to exclude labour.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

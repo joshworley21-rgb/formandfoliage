@@ -40,6 +40,9 @@ class AssistantContext(
             settings.paymentTerms?.takeIf { it.isNotBlank() }?.let {
                 appendLine("Payment terms: ${it.trim().take(120)}.")
             }
+            if (settings.labourRate > 0.0) {
+                appendLine("Labour cost: ${money(settings.labourRate)} an hour.")
+            }
         }
         // Services, patch and credentials from the website, so answers about
         // what the business offers or where it covers come from the source of

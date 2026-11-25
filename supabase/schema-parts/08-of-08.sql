@@ -101,6 +101,18 @@ ALTER TABLE public.settings
   ADD COLUMN IF NOT EXISTS business_profile_source text,
   ADD COLUMN IF NOT EXISTS business_profile_updated_at timestamptz;
 
+-- ---------- 20261125180000_labour_rate.sql ----------
+
+-- What an hour of the owner's (or a employee's) time costs the business.
+--
+-- The dashboard can show income, materials and running costs without it, but
+-- a profit figure that treats labour as free is not a profit figure. This is a
+-- single workspace rate for now; a per-person rate belongs here when the team
+-- grows.
+
+ALTER TABLE public.settings
+  ADD COLUMN IF NOT EXISTS labour_rate numeric(10,2) NOT NULL DEFAULT 0;
+
 CREATE SCHEMA IF NOT EXISTS supabase_migrations;
 CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
   version text PRIMARY KEY,
@@ -116,5 +128,7 @@ INSERT INTO supabase_migrations.schema_migrations (version, name)
   VALUES ('20261125150000', 'running_costs') ON CONFLICT (version) DO NOTHING;
 INSERT INTO supabase_migrations.schema_migrations (version, name)
   VALUES ('20261125170000', 'business_knowledge') ON CONFLICT (version) DO NOTHING;
+INSERT INTO supabase_migrations.schema_migrations (version, name)
+  VALUES ('20261125180000', 'labour_rate') ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

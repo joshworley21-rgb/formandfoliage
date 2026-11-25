@@ -1932,7 +1932,8 @@ class VoiceActionRunner(
         if (snapshot.netProfit < 0.0) {
             return "This month is down ${money(abs(snapshot.netProfit))}: " +
                 "${money(snapshot.monthIncome)} of work, ${money(snapshot.monthMaterials)} " +
-                "materials and ${money(snapshot.monthlyCosts)} running costs."
+                "materials, ${money(snapshot.monthLabour)} labour and " +
+                "${money(snapshot.monthlyCosts)} running costs."
         }
         val margin = (snapshot.netMargin * 100).toInt()
         val overheadNote = if (costs.isEmpty()) {
@@ -1941,8 +1942,8 @@ class VoiceActionRunner(
             ""
         }
         return "${money(snapshot.netProfit)} left this month from " +
-            "${money(snapshot.monthIncome)} of work, about $margin percent after materials " +
-            "and running costs.$overheadNote"
+            "${money(snapshot.monthIncome)} of work, about $margin percent after materials, " +
+            "labour and running costs.$overheadNote"
     }
 
     private suspend fun breakEven(): String {
@@ -2057,6 +2058,10 @@ class VoiceActionRunner(
             jobs = repository.observeJobs().first(),
             clients = repository.observeClients().first(),
             costs = costs,
+            labourRate = runCatching { repository.getSettings() }
+                .getOrNull()
+                ?.labourRate
+                ?: 0.0,
         )
 
     private fun sectionText(profile: String, names: List<String>): String? {

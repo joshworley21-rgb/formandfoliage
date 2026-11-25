@@ -667,6 +667,7 @@ suspend fun CrmRepository.saveSettings(draft: SettingsDraft) {
             email = draft.email.clean(),
             replyToEmail = draft.replyToEmail.clean(),
             publicSiteUrl = draft.publicSiteUrl.clean()?.trimEnd('/'),
+            labourRate = draft.labourRate.coerceAtLeast(0.0),
             vatRegistered = draft.vatRegistered,
             vatNumber = draft.vatNumber.clean(),
             vatRate = draft.vatRate,
