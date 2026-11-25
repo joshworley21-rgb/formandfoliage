@@ -199,7 +199,10 @@ function pageScore(url: URL): number {
     [/our-work|portfolio|gallery|project/i, 60],
     [/landscap|garden|maintenance/i, 50],
   ];
-  return checks.reduce((best, [pattern, score]) => (pattern.test(path) ? Math.max(best, score) : best), 0);
+  return checks.reduce(
+    (best, [pattern, score]) => (pattern.test(path) ? Math.max(best, score) : best),
+    0,
+  );
 }
 
 async function collectSite(start: URL): Promise<{ pages: string[]; text: string }> {
