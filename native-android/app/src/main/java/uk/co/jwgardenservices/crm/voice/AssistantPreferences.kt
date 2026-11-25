@@ -19,6 +19,23 @@ import kotlinx.coroutines.flow.map
  * American, Chinese, Japanese and so on. The bank is ordered
  * af_… → am_… → bf_… → bm_…, which is why alice is 20 and fable is 25.
  */
+/** How the assistant sounds, beyond the voice itself. */
+enum class PersonaTone(val label: String) {
+    Warm("Warm and chatty"),
+    Brisk("Brisk and efficient"),
+}
+
+enum class PersonaHumour(val label: String) {
+    Low("Straight"),
+    Normal("A little dry"),
+    High("Playful"),
+}
+
+enum class PersonaLength(val label: String) {
+    Short("Keep it short"),
+    Normal("Normal"),
+}
+
 enum class KokoroVoice(val speakerId: Int, val label: String) {
     BfAlice(20, "bf_alice — British female"),
     BfEmma(21, "bf_emma — British female"),
@@ -44,6 +61,9 @@ private val LOCAL_THINKING_KEY = booleanPreferencesKey("local_thinking")
 private val PRONUNCIATION_KEY = stringPreferencesKey("pronunciation")
 private val DRIVING_KEY = booleanPreferencesKey("driving_mode")
 private val AUTO_DRIVING_KEY = booleanPreferencesKey("auto_driving_mode")
+private val PERSONA_TONE_KEY = stringPreferencesKey("persona_tone")
+private val PERSONA_HUMOUR_KEY = stringPreferencesKey("persona_humour")
+private val PERSONA_LENGTH_KEY = stringPreferencesKey("persona_length")
 private val PHONON_VOICE_KEY = stringPreferencesKey("phonon_voice")
 private val ASR_ENGINE_KEY = stringPreferencesKey("asr_engine")
 private val FOLLOW_UP_KEY = booleanPreferencesKey("follow_up")
@@ -208,6 +228,36 @@ object AssistantPreferences {
 
     suspend fun setDrivingMode(context: Context, enabled: Boolean) {
         context.assistantDataStore.edit { it[DRIVING_KEY] = enabled }
+    }
+
+    fun personaToneFlow(context: Context): Flow<PersonaTone> =
+        context.assistantDataStore.data.map {
+            PersonaTone.entries.firstOrNull { tone -> tone.name == it[PERSONA_TONE_KEY] }
+                ?: PersonaTone.Warm
+        }
+
+    suspend fun setPersonaTone(context: Context, tone: PersonaTone) {
+        context.assistantDataStore.edit { it[PERSONA_TONE_KEY] = tone.name }
+    }
+
+    fun personaHumourFlow(context: Context): Flow<PersonaHumour> =
+        context.assistantDataStore.data.map {
+            PersonaHumour.entries.firstOrNull { humour -> humour.name == it[PERSONA_HUMOUR_KEY] }
+                ?: PersonaHumour.Normal
+        }
+
+    suspend fun setPersonaHumour(context: Context, humour: PersonaHumour) {
+        context.assistantDataStore.edit { it[PERSONA_HUMOUR_KEY] = humour.name }
+    }
+
+    fun personaLengthFlow(context: Context): Flow<PersonaLength> =
+        context.assistantDataStore.data.map {
+            PersonaLength.entries.firstOrNull { length -> length.name == it[PERSONA_LENGTH_KEY] }
+                ?: PersonaLength.Normal
+        }
+
+    suspend fun setPersonaLength(context: Context, length: PersonaLength) {
+        context.assistantDataStore.edit { it[PERSONA_LENGTH_KEY] = length.name }
     }
 
     /** Switch driving mode on automatically while a Bluetooth car kit is connected. */

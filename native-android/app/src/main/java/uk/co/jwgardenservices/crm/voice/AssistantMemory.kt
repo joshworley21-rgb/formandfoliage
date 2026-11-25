@@ -60,6 +60,7 @@ object AssistantMemory {
 
     private val FACTS = stringPreferencesKey("facts")
     private val TURNS = stringPreferencesKey("turns")
+    private val LAST_CALL = stringPreferencesKey("last_call")
     private val CLOUD_CONVERSATION = booleanPreferencesKey("cloud_conversation")
     private val CALL_COUNT = intPreferencesKey("call_count")
     private val CALL_DAY = stringPreferencesKey("call_day")
@@ -143,6 +144,28 @@ object AssistantMemory {
             val turns = (readTurns(preferences[TURNS]) + turn).takeLast(MAX_TURNS)
             preferences[TURNS] = json.encodeToString(turns)
         }
+    }
+
+    /** A short summary of the previous call, for continuity across calls. */
+    suspend fun lastCall(context: Context): String? =
+        context.assistantMemoryStore.data.map { it[LAST_CALL] }.first()
+            ?.takeIf { it.isNotBlank() }
+
+    fun lastCallFlow(context: Context): Flow<String?> =
+        context.assistantMemoryStore.data.map { it[LAST_CALL]?.takeIf(String::isNotBlank) }
+
+    suspend fun setLastCall(context: Context, summary: String) {
+        context.assistantMemoryStore.edit { preferences ->
+            if (summary.isBlank()) {
+                preferences.remove(LAST_CALL)
+            } else {
+                preferences[LAST_CALL] = summary.take(600)
+            }
+        }
+    }
+
+    suspend fun clearLastCall(context: Context) {
+        context.assistantMemoryStore.edit { it.remove(LAST_CALL) }
     }
 
     suspend fun clearTurns(context: Context) {

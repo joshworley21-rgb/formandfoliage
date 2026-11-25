@@ -70,6 +70,9 @@ import uk.co.jwgardenservices.crm.voice.PunctuationDownloader
 import uk.co.jwgardenservices.crm.voice.PhononVoice
 import uk.co.jwgardenservices.crm.voice.PiperVoice
 import uk.co.jwgardenservices.crm.voice.PiperVoiceDownloader
+import uk.co.jwgardenservices.crm.voice.PersonaHumour
+import uk.co.jwgardenservices.crm.voice.PersonaLength
+import uk.co.jwgardenservices.crm.voice.PersonaTone
 import uk.co.jwgardenservices.crm.voice.Pronunciation
 import uk.co.jwgardenservices.crm.voice.SpeechEngine
 
@@ -107,6 +110,12 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = false)
     val autoDrivingMode by AssistantPreferences.autoDrivingModeFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
+    val personaTone by AssistantPreferences.personaToneFlow(context)
+        .collectAsStateWithLifecycle(initialValue = PersonaTone.Warm)
+    val personaHumour by AssistantPreferences.personaHumourFlow(context)
+        .collectAsStateWithLifecycle(initialValue = PersonaHumour.Normal)
+    val personaLength by AssistantPreferences.personaLengthFlow(context)
+        .collectAsStateWithLifecycle(initialValue = PersonaLength.Normal)
     val pronunciations by AssistantPreferences.pronunciationsFlow(context)
         .collectAsStateWithLifecycle(initialValue = emptyMap())
     LaunchedEffect(pronunciations) { Pronunciation.userEntries = pronunciations }
@@ -1034,6 +1043,47 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         }
                     }
                 }
+            }
+        }
+
+        SectionCard(title = "Personality") {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "How it sounds once the words are chosen: warm or brisk, straight " +
+                        "or dry, short or normal. The voice itself is set above.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text("Tone", style = MaterialTheme.typography.labelMedium)
+                OptionPicker(
+                    options = PersonaTone.entries,
+                    selected = personaTone,
+                    label = { it?.label ?: PersonaTone.Warm.label },
+                    onSelect = { tone ->
+                        scope.launch { AssistantPreferences.setPersonaTone(context, tone) }
+                    },
+                )
+                Text("Humour", style = MaterialTheme.typography.labelMedium)
+                OptionPicker(
+                    options = PersonaHumour.entries,
+                    selected = personaHumour,
+                    label = { it?.label ?: PersonaHumour.Normal.label },
+                    onSelect = { humour ->
+                        scope.launch { AssistantPreferences.setPersonaHumour(context, humour) }
+                    },
+                )
+                Text("Length", style = MaterialTheme.typography.labelMedium)
+                OptionPicker(
+                    options = PersonaLength.entries,
+                    selected = personaLength,
+                    label = { it?.label ?: PersonaLength.Normal.label },
+                    onSelect = { length ->
+                        scope.launch { AssistantPreferences.setPersonaLength(context, length) }
+                    },
+                )
             }
         }
 

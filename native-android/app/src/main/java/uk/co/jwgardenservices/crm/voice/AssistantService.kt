@@ -146,6 +146,9 @@ class AssistantService : Service() {
     private var autoDrivingMode = true
     private var bluetoothDriving = false
     private var onlineVoice = false
+    private var personaTone = PersonaTone.Warm
+    private var personaHumour = PersonaHumour.Normal
+    private var personaLength = PersonaLength.Normal
 
     /** Waiting for the text of a "message X on WhatsApp" turn. */
     private var pendingWhatsApp: Client? = null
@@ -307,6 +310,18 @@ class AssistantService : Service() {
         scope.launch {
             AssistantPreferences.pronunciationsFlow(this@AssistantService)
                 .collect { Pronunciation.userEntries = it }
+        }
+        scope.launch {
+            AssistantPreferences.personaToneFlow(this@AssistantService)
+                .collect { personaTone = it }
+        }
+        scope.launch {
+            AssistantPreferences.personaHumourFlow(this@AssistantService)
+                .collect { personaHumour = it }
+        }
+        scope.launch {
+            AssistantPreferences.personaLengthFlow(this@AssistantService)
+                .collect { personaLength = it }
         }
         scope.launch {
             AssistantPreferences.onlineVoiceFlow(this@AssistantService).collect { onlineVoice = it }
@@ -814,10 +829,14 @@ class AssistantService : Service() {
                     else -> 1f
                 }
                 val drivingPace = if (drivingMode) 0.94f else 1f
+                val personaPace = when (personaTone) {
+                    PersonaTone.Brisk -> 1.04f
+                    PersonaTone.Warm -> 0.98f
+                }
                 speaker.speakStreaming(
                     text.trim(),
                     voice.speakerId,
-                    speed * naturalPace * drivingPace,
+                    speed * naturalPace * drivingPace * personaPace,
                 )
             }
         } finally {
@@ -883,7 +902,9 @@ class AssistantService : Service() {
         val lead = correctionLead
         correctionLead = null
         val clean = text.trim().let { if (lead != null) "$lead$it" else it }
-        if (clean.isNotEmpty() && askFollowUp && !drivingMode && !clean.endsWith("?")) {
+        if (clean.isNotEmpty() && askFollowUp && !drivingMode &&
+            personaLength == PersonaLength.Normal && !clean.endsWith("?")
+        ) {
             val nudge = VoiceLines.pick(
                 "Right — what next?",
                 "Go on.",
@@ -1060,6 +1081,13 @@ class AssistantService : Service() {
         releaseCallAudio()
         runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
         foreground = false
+        val summary = CallLedger.actions.value.map { it.label }.take(6).joinToString("; ")
+        if (summary.isNotBlank()) {
+            val app = applicationContext
+            Thread({
+                kotlinx.coroutines.runBlocking { AssistantMemory.setLastCall(app, summary) }
+            }, "call-memory").start()
+        }
         stopSelf()
     }
 
@@ -1849,6 +1877,8 @@ class AssistantService : Service() {
             is going. Address him as Josh occasionally, not in every sentence.
             If you do not know, say so briefly and suggest what would help.
             It is $clock. Business facts: ${facts.joinToString("; ").ifBlank { "a UK gardening business" }}
+            ${runCatching { AssistantMemory.lastCall(this) }.getOrNull()?.let { "Last call: $it" } ?: ""}
+            ${personalityInstruction()}
         """.trimIndent()
     }
 
@@ -1881,6 +1911,23 @@ class AssistantService : Service() {
     }
 
     /** A general question, as opposed to a command or a fragment. */
+    private fun personalityInstruction(): String {
+        val tone = when (personaTone) {
+            PersonaTone.Warm -> "Speak warmly, with contractions and a little humanity."
+            PersonaTone.Brisk -> "Be brisk and efficient; no filler or small talk."
+        }
+        val humour = when (personaHumour) {
+            PersonaHumour.Low -> "No jokes or banter."
+            PersonaHumour.Normal -> "A dry aside is fine occasionally."
+            PersonaHumour.High -> "A playful, lightly teasing tone is welcome."
+        }
+        val length = when (personaLength) {
+            PersonaLength.Short -> "Keep answers to one short sentence."
+            PersonaLength.Normal -> "Keep answers to one or two short sentences."
+        }
+        return "$tone $humour $length"
+    }
+
     private fun looksLikeQuestion(text: String): Boolean {
         val lower = text.lowercase().trim()
         return Regex(
@@ -2013,7 +2060,9 @@ class AssistantService : Service() {
     /** The business snapshot handed to the local and cloud models. */
     private suspend fun businessContext(): String {
         val facts = runCatching { AssistantMemory.facts(this).map { it.text } }.getOrDefault(emptyList())
-        return assistantContext.snapshot(facts, _turns.value.takeLast(8))
+        val base = assistantContext.snapshot(facts, _turns.value.takeLast(8))
+        val last = runCatching { AssistantMemory.lastCall(this) }.getOrNull()
+        return if (last.isNullOrBlank()) base else "$base\nLast call: $last"
     }
 
     /**
