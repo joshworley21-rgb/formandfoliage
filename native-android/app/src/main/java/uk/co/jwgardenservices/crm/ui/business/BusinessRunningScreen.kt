@@ -512,16 +512,6 @@ private fun CoachHeader(onBack: () -> Unit, onRefresh: () -> Unit) {
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.weight(1f))
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.1f),
-            ) {
-                Text(
-                    text = "PRO",
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                )
-            }
             IconButton(onClick = onRefresh) {
                 Icon(
                     imageVector = Icons.Outlined.Refresh,
