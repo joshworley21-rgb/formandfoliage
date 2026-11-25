@@ -1,7 +1,10 @@
 package uk.co.jwgardenservices.crm.ui.dashboard
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -10,56 +13,75 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material.icons.outlined.Payments
-import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.NotificationsNone
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.LocalTime
+import java.time.YearMonth
+import java.time.temporal.TemporalAdjusters
+import uk.co.jwgardenservices.crm.core.TaxReservePrefs
 import uk.co.jwgardenservices.crm.data.model.Invoice
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
+import uk.co.jwgardenservices.crm.data.model.Settings
+import uk.co.jwgardenservices.crm.data.model.Visit
+import uk.co.jwgardenservices.crm.domain.SelfAssessment
+import uk.co.jwgardenservices.crm.domain.buildReminderSummary
+import uk.co.jwgardenservices.crm.domain.daysOverdue
+import uk.co.jwgardenservices.crm.domain.estimateSelfAssessmentTax
+import uk.co.jwgardenservices.crm.domain.estimatedTaxYearProfit
 import uk.co.jwgardenservices.crm.domain.formatDayMonth
 import uk.co.jwgardenservices.crm.domain.formatTime
 import uk.co.jwgardenservices.crm.domain.formatWeekday
 import uk.co.jwgardenservices.crm.domain.hoursLabel
 import uk.co.jwgardenservices.crm.domain.localDate
 import uk.co.jwgardenservices.crm.domain.money
-import uk.co.jwgardenservices.crm.domain.monthlyTotals
-import uk.co.jwgardenservices.crm.domain.topClients
+import uk.co.jwgardenservices.crm.domain.overdueInvoices
 import uk.co.jwgardenservices.crm.domain.parseDate
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
-import uk.co.jwgardenservices.crm.ui.CrmViewModel
-import uk.co.jwgardenservices.crm.ui.common.ErrorState
-import uk.co.jwgardenservices.crm.ui.common.LoadingState
-import uk.co.jwgardenservices.crm.ui.common.PageHeader
-import uk.co.jwgardenservices.crm.ui.common.SectionCard
-import uk.co.jwgardenservices.crm.core.TaxReservePrefs
 import uk.co.jwgardenservices.crm.domain.taxSetAside
 import uk.co.jwgardenservices.crm.domain.ukTaxYearContaining
 import uk.co.jwgardenservices.crm.domain.ukTaxYearLabel
-import uk.co.jwgardenservices.crm.domain.SelfAssessment
-import uk.co.jwgardenservices.crm.domain.estimateSelfAssessmentTax
-import uk.co.jwgardenservices.crm.domain.estimatedTaxYearProfit
-import uk.co.jwgardenservices.crm.data.model.Visit
-import uk.co.jwgardenservices.crm.ui.common.StatCard
-import uk.co.jwgardenservices.crm.ui.common.StatusChip
+import uk.co.jwgardenservices.crm.ui.CrmViewModel
+import uk.co.jwgardenservices.crm.ui.common.ErrorState
+import uk.co.jwgardenservices.crm.ui.common.LoadingState
+import uk.co.jwgardenservices.crm.ui.common.SectionCard
 import uk.co.jwgardenservices.crm.ui.onDay
+import uk.co.jwgardenservices.crm.voice.VoiceLines
+
+private enum class HomeTab(val label: String) {
+    Week("This week"),
+    Today("Today"),
+    Cash("Cash flow"),
+}
 
 @Composable
 fun DashboardScreen(
@@ -70,34 +92,69 @@ fun DashboardScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val today = LocalDate.now()
+    val weekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+    val weekEnd = weekStart.plusDays(6)
+    val lastWeekStart = weekStart.minusDays(7)
+    val lastWeekEnd = weekStart.minusDays(1)
+    val month = YearMonth.from(today)
     val taxRate by TaxReservePrefs.ratePercent.collectAsStateWithLifecycle()
+    var tab by remember { mutableStateOf(HomeTab.Week) }
 
-    val scheduled = state.jobs.filter { it.status == "scheduled" }
-    val todayJobs = scheduled.onDay(today)
-    val weekAhead = today.plusDays(7)
-    val weekJobs = scheduled.filter {
-        parseTimestamp(it.startsAt)?.localDate()?.let { d -> !d.isBefore(today) && !d.isAfter(weekAhead) } == true
+    val clientNames = remember(state.clients) { state.clients.associate { it.id to it.name } }
+    val weekVisits = state.visits.filter { visit ->
+        !visit.missed && parseDate(visit.visitDate)?.let { !it.isBefore(weekStart) && !it.isAfter(weekEnd) } == true
+    }
+    val lastWeekVisits = state.visits.filter { visit ->
+        !visit.missed && parseDate(visit.visitDate)?.let {
+            !it.isBefore(lastWeekStart) && !it.isAfter(lastWeekEnd)
+        } == true
     }
     val monthVisits = state.visits.filter { visit ->
-        parseDate(visit.visitDate)?.let { it.year == today.year && it.month == today.month } == true
+        !visit.missed && parseDate(visit.visitDate)?.let { YearMonth.from(it) == month } == true
     }
-    val monthHours = monthVisits.sumOf { it.hours }
-    val monthValue = monthVisits.sumOf { it.amount }
+    val weekIncome = weekVisits.sumOf { it.amount }
+    val weekMaterials = weekVisits.sumOf { it.materialsCost }
+    val lastWeekNet = lastWeekVisits.sumOf { it.amount - it.materialsCost }
+    val weekNet = weekIncome - weekMaterials
+    val monthIncome = monthVisits.sumOf { it.amount }
 
+    val scheduled = state.jobs.filter { it.status == "scheduled" }
+    val weekJobs = scheduled.filter { job ->
+        parseTimestamp(job.startsAt)?.localDate()?.let {
+            !it.isBefore(weekStart) && !it.isAfter(weekEnd)
+        } == true
+    }
+    val todayJobs = scheduled.onDay(today)
+    val weekHours = weekJobs.sumOf { it.durationMinutes / 60.0 }
+    val capacity = ((weekHours / 40.0) * 100).toInt()
+
+    val outstanding = state.invoices.filter { it.status == "sent" }
+        .sumOf { it.total }
+    val overdue = remember(state.invoices, today) { overdueInvoices(state.invoices, today) }
     val unbilled = state.visits.filter { !it.billed && !it.missed }
     val unbilledTotal = unbilled.sumOf { it.amount }
-
-    val monthTotals = remember(state.invoices) { monthlyTotals(state.invoices, today) }
-    val topClientRows = remember(state.invoices) { topClients(state.invoices, today.minusMonths(12)) }
-    val todayMinutes = todayJobs.sumOf { it.durationMinutes }
-    val recentInvoices = state.invoices.take(6)
-    val clientNames = remember(state.clients) {
-        state.clients.associate { it.id to it.name }
+    val reminders = remember(state.jobs, state.invoices, state.visits, today) {
+        buildReminderSummary(state.jobs, state.invoices, state.visits, today)
     }
+
+    val series = (0..6).map { offset ->
+        val day = weekStart.plusDays(offset.toLong())
+        val visits = weekVisits.filter { parseDate(it.visitDate) == day }
+        DaySeries(
+            day = day,
+            billed = visits.filter { it.billed }.sumOf { it.amount },
+            unbilled = visits.filter { !it.billed }.sumOf { it.amount },
+        )
+    }
+    val busiest = series.maxByOrNull { it.billed + it.unbilled }
+    val topClient = weekVisits
+        .groupBy { it.clientId }
+        .mapValues { (_, visits) -> visits.sumOf { it.amount } }
+        .maxByOrNull { it.value }
 
     if (state.loading) {
         Column(modifier = Modifier.padding(20.dp)) {
-            PageHeader("Dashboard", "Today's round first, then hours and billing.")
+            Text("Home", style = MaterialTheme.typography.displaySmall)
             LoadingState("Loading your workspace…")
         }
         return
@@ -105,15 +162,14 @@ fun DashboardScreen(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            PageHeader(
-                title = "Dashboard",
-                description = "Today's round first, then hours and billing.",
+            HomeHero(
+                today = today,
                 onRefresh = viewModel::refresh,
-                onSecretary = onOpenSecretary,
+                onOpenSecretary = onOpenSecretary,
             )
         }
 
@@ -122,14 +178,77 @@ fun DashboardScreen(
         }
 
         item {
-            TodayBand(
-                today = today,
-                jobs = todayJobs,
-                todayMinutes = todayMinutes,
-                clientNames = clientNames,
-                onOpenSchedule = onOpenSchedule,
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                HomeStat(
+                    label = "THIS WEEK",
+                    value = money(weekIncome),
+                    detail = "${weekVisits.size} ${if (weekVisits.size == 1) "visit" else "visits"} · so far",
+                    modifier = Modifier.weight(1f),
+                )
+                HomeStat(
+                    label = "THIS MONTH",
+                    value = money(monthIncome),
+                    detail = "${monthVisits.size} ${if (monthVisits.size == 1) "visit" else "visits"} · so far",
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+
+        item {
+            ReminderPill(
+                reminders = reminders,
+                unbilledTotal = unbilledTotal,
+                onClick = onOpenInvoices,
             )
         }
+
+        item {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            ) {
+                Column {
+                    HomeTabs(selected = tab, onSelect = { tab = it })
+                    when (tab) {
+                        HomeTab.Week -> WeekPanel(
+                            weekIncome = weekIncome,
+                            weekMaterials = weekMaterials,
+                            weekNet = weekNet,
+                            lastWeekNet = lastWeekNet,
+                            series = series,
+                            today = today,
+                            busiest = busiest,
+                            topClientName = topClient?.key?.let { clientNames[it] ?: "Client" },
+                            topClientValue = topClient?.value ?: 0.0,
+                            capacity = capacity,
+                            weekHours = weekHours,
+                        )
+                        HomeTab.Today -> TodayPanel(
+                            jobs = todayJobs,
+                            clientNames = clientNames,
+                            overdue = overdue,
+                            clientName = { id -> clientNames[id] ?: "Client" },
+                            onOpenSchedule = onOpenSchedule,
+                        )
+                        HomeTab.Cash -> CashPanel(
+                            outstanding = outstanding,
+                            overdue = overdue,
+                            unbilledTotal = unbilledTotal,
+                            unpaid = state.invoices.filter { it.status == "sent" },
+                            clientName = { id -> clientNames[id] ?: "Client" },
+                            today = today,
+                            onOpenInvoices = onOpenInvoices,
+                        )
+                    }
+                }
+            }
+        }
+
         item {
             TaxPotBand(
                 ratePercent = taxRate,
@@ -140,208 +259,530 @@ fun DashboardScreen(
         }
 
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    StatCard(
-                        label = "Hours this month",
-                        value = hoursLabel(monthHours),
-                        icon = Icons.Outlined.AccessTime,
-                        modifier = Modifier.weight(1f),
-                    )
-                    StatCard(
-                        label = "Value logged",
-                        value = money(monthValue),
-                        icon = Icons.AutoMirrored.Outlined.ReceiptLong,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    StatCard(
-                        label = "Unbilled work",
-                        value = money(unbilledTotal),
-                        icon = Icons.Outlined.Payments,
-                        modifier = Modifier.weight(1f),
-                    )
-                    StatCard(
-                        label = "Jobs next 7 days",
-                        value = weekJobs.size.toString(),
-                        icon = Icons.Outlined.CalendarMonth,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-        }
-
-        item {
-            SectionCard(
-                title = "Billing",
-                actionLabel = "Invoices",
-                onAction = onOpenInvoices,
-            ) {
-                if (recentInvoices.isEmpty()) {
-                    Text(
-                        text = "No invoices yet.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(20.dp),
-                    )
-                } else {
-                    recentInvoices.forEachIndexed { index, invoice ->
-                        if (index > 0) HorizontalDivider(Modifier.padding(horizontal = 20.dp))
-                        InvoiceRow(invoice = invoice, clientName = clientNames[invoice.clientId] ?: "Client")
-                    }
-                    Spacer(Modifier.height(8.dp))
-                }
-            }
-        }
-
-        item { RevenueCard(months = monthTotals) }
-
-        item {
-            TopClientsCard(
-                clients = topClientRows,
-                clientName = { id -> clientNames[id] ?: "Client" },
+            Text(
+                text = "Tap Business for running costs, profit and the coach.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp),
             )
         }
     }
 }
 
 @Composable
-private fun TodayBand(
-    today: LocalDate,
-    jobs: List<ScheduledJob>,
-    todayMinutes: Int,
-    clientNames: Map<String, String>,
-    onOpenSchedule: () -> Unit,
-) {
+private fun HomeHero(today: LocalDate, onRefresh: () -> Unit, onOpenSecretary: () -> Unit) {
+    val greeting = when (LocalTime.now().hour) {
+        in 0..11 -> "Morning"
+        in 12..17 -> "Afternoon"
+        else -> "Evening"
+    }
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onOpenSchedule),
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
         color = MaterialTheme.colorScheme.primary,
         contentColor = MaterialTheme.colorScheme.onPrimary,
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = today.formatWeekday().uppercase(),
                     style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f),
+                    modifier = Modifier.weight(1f),
                 )
-                if (todayMinutes > 0) {
-                    Text(
-                        text = hoursLabel(todayMinutes / 60.0),
-                        style = MaterialTheme.typography.labelSmall,
+                IconButton(onClick = onOpenSecretary) {
+                    Icon(
+                        imageVector = Icons.Outlined.Mic,
+                        contentDescription = "Call Secretary",
+                        tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f),
+                        modifier = Modifier.size(19.dp),
+                    )
+                }
+                IconButton(onClick = onRefresh) {
+                    Icon(
+                        imageVector = Icons.Outlined.Refresh,
+                        contentDescription = "Refresh",
+                        tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f),
+                        modifier = Modifier.size(19.dp),
                     )
                 }
             }
             Spacer(Modifier.height(8.dp))
             Text(
-                text = if (jobs.isEmpty()) {
-                    "Nothing booked"
-                } else {
-                    "${jobs.size} ${if (jobs.size == 1) "job" else "jobs"} today"
-                },
+                text = "$greeting, ${VoiceLines.OWNER_NAME}",
                 style = MaterialTheme.typography.displaySmall,
+                color = MaterialTheme.colorScheme.onPrimary,
             )
-            Spacer(Modifier.height(16.dp))
-            if (jobs.isEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "The round, the money and what needs doing next.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.68f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeStat(
+    label: String,
+    value: String,
+    detail: String,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(22.dp),
+        color = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.55f),
+            )
+            Spacer(Modifier.height(5.dp))
+            Text(
+                text = value,
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.tertiary,
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.58f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReminderPill(
+    reminders: uk.co.jwgardenservices.crm.domain.ReminderSummary,
+    unbilledTotal: Double,
+    onClick: () -> Unit,
+) {
+    val text = when {
+        reminders.overdue.isNotEmpty() ->
+            "${reminders.overdue.size} ${if (reminders.overdue.size == 1) "invoice" else "invoices"} overdue"
+        unbilledTotal > 0.0 -> "${money(unbilledTotal)} ready to invoice"
+        reminders.tomorrowJobs.isNotEmpty() ->
+            "${reminders.tomorrowJobs.size} booked tomorrow"
+        else -> "No reminders today"
+    }
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.secondary,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.NotificationsNone,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "Review",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeTabs(selected: HomeTab, onSelect: (HomeTab) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        HomeTab.entries.forEach { tab ->
+            val active = tab == selected
+            Surface(
+                onClick = { onSelect(tab) },
+                shape = RoundedCornerShape(50),
+                color = if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
+                contentColor = if (active) {
+                    MaterialTheme.colorScheme.onPrimary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.weight(1f),
+            ) {
                 Text(
-                    text = "Tap Schedule to book the first one.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f),
+                    text = tab.label,
+                    style = MaterialTheme.typography.labelLarge,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(vertical = 8.dp),
                 )
-            } else {
-                jobs.take(3).forEach { job ->
-                    val starts = parseTimestamp(job.startsAt)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = starts?.formatTime() ?: "—",
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.width(56.dp),
-                        )
-                        Text(
-                            text = clientNames[job.clientId] ?: "Client",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f),
-                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f),
-                        )
-                        Text(
-                            text = "${job.durationMinutes} min",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f),
-                        )
-                    }
-                }
-                if (jobs.size > 3) {
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = "…and ${jobs.size - 3} more · tap to open the calendar",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f),
-                    )
-                }
             }
         }
     }
 }
 
+private data class DaySeries(val day: LocalDate, val billed: Double, val unbilled: Double)
+
 @Composable
-private fun InvoiceRow(invoice: Invoice, clientName: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(clientName, style = MaterialTheme.typography.titleMedium)
+private fun WeekPanel(
+    weekIncome: Double,
+    weekMaterials: Double,
+    weekNet: Double,
+    lastWeekNet: Double,
+    series: List<DaySeries>,
+    today: LocalDate,
+    busiest: DaySeries?,
+    topClientName: String?,
+    topClientValue: Double,
+    capacity: Int,
+    weekHours: Double,
+) {
+    val delta = weekNet - lastWeekNet
+    Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = "${invoice.number} · ${parseDate(invoice.issueDate)?.formatDayMonth() ?: ""}",
+                text = if (delta < 0) "↓" else "↑",
+                style = MaterialTheme.typography.titleMedium,
+                color = if (delta < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(
+                text = "${money(kotlin.math.abs(delta))} net",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = if (delta < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = " vs last week",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        InvoiceStatusChip(invoice.status)
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.height(14.dp))
         Text(
-            text = money(invoice.total),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
+            text = "THIS WEEK, DAY BY DAY",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        WeekBars(series = series, today = today)
+        Spacer(Modifier.height(14.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        SummaryRow("Busiest day", if ((busiest?.let { it.billed + it.unbilled } ?: 0.0) > 0.0) {
+            "${busiest!!.day.formatWeekday().substringBefore(" ")} · ${money(busiest.billed + busiest.unbilled)}"
+        } else {
+            "—"
+        })
+        SummaryRow("Top client", if (topClientName != null) "$topClientName · ${money(topClientValue)}" else "—")
+        SummaryRow("Capacity", "$capacity% · ${hoursLabel(weekHours)} of 40h")
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "PROFIT & LOSS",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        SummaryRow("Income", money(weekIncome))
+        SummaryRow("Materials", money(weekMaterials))
+        SummaryRow("Net profit", money(weekNet), emphasis = true)
+    }
+}
+
+@Composable
+private fun WeekBars(series: List<DaySeries>, today: LocalDate) {
+    val max = maxOf(1.0, series.maxOfOrNull { maxOf(it.billed, it.unbilled) } ?: 1.0)
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(120.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            series.forEach { day ->
+                val isToday = day.day == today
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(
+                            if (isToday) MaterialTheme.colorScheme.secondary else Color.Transparent,
+                            RoundedCornerShape(8.dp),
+                        )
+                        .padding(vertical = 5.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Row(
+                        modifier = Modifier.height(78.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.Bottom,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(7.dp)
+                                .height((78 * (day.billed / max)).dp.coerceAtLeast(3.dp))
+                                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)),
+                        )
+                        Box(
+                            modifier = Modifier
+                                .width(7.dp)
+                                .height((78 * (day.unbilled / max)).dp.coerceAtLeast(3.dp))
+                                .background(
+                                    MaterialTheme.colorScheme.tertiary.copy(alpha = 0.8f),
+                                    RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp),
+                                ),
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = day.day.formatWeekday().take(3),
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                        color = if (isToday) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Legend(MaterialTheme.colorScheme.primary, "Billed")
+            Legend(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.8f), "Unbilled")
+        }
+    }
+}
+
+@Composable
+private fun Legend(colour: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .background(colour, RoundedCornerShape(2.dp)),
+        )
+        Spacer(Modifier.width(5.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
 @Composable
-private fun InvoiceStatusChip(status: String) {
-    val (content, container) = invoiceColors(status)
-    val label = when (status) {
-        "paid" -> "Paid"
-        "sent" -> "Sent"
-        else -> "Draft"
+private fun SummaryRow(label: String, value: String, emphasis: Boolean = false) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (emphasis) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (emphasis) FontWeight.Bold else FontWeight.SemiBold,
+        )
     }
-    StatusChip(label = label, color = content, container = container)
 }
 
 @Composable
-private fun invoiceColors(status: String): Pair<Color, Color> = when (status) {
-    "paid" -> MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-    "sent" -> MaterialTheme.colorScheme.onSurfaceVariant to MaterialTheme.colorScheme.secondary
-    else -> MaterialTheme.colorScheme.onSurfaceVariant to MaterialTheme.colorScheme.secondary
+private fun TodayPanel(
+    jobs: List<ScheduledJob>,
+    clientNames: Map<String, String>,
+    overdue: List<Invoice>,
+    clientName: (String) -> String,
+    onOpenSchedule: () -> Unit,
+) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+        if (overdue.isNotEmpty()) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = "${overdue.size} ${if (overdue.size == 1) "invoice is" else "invoices are"} overdue · ${money(overdue.sumOf { it.total })}",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(12.dp),
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+        if (jobs.isEmpty()) {
+            Text(
+                text = "Nothing booked today. Tap Rota to book the first one.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 8.dp),
+            )
+        } else {
+            jobs.forEachIndexed { index, job ->
+                if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .background(
+                                if (index == 0) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.outline,
+                                CircleShape,
+                            ),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = clientNames[job.clientId] ?: "Client",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            text = "${parseTimestamp(job.startsAt)?.formatTime() ?: "—"} · ${job.durationMinutes} min",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        text = job.notes.orEmpty().take(24),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.width(80.dp),
+                        textAlign = TextAlign.End,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Surface(
+            onClick = onOpenSchedule,
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                text = "Open rota",
+                style = MaterialTheme.typography.labelLarge,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(vertical = 10.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CashPanel(
+    outstanding: Double,
+    overdue: List<Invoice>,
+    unbilledTotal: Double,
+    unpaid: List<Invoice>,
+    clientName: (String) -> String,
+    today: LocalDate,
+    onOpenInvoices: () -> Unit,
+) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "OWED TO YOU",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = money(outstanding),
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = money(unbilledTotal),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    text = "unbilled",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        if (unpaid.isEmpty()) {
+            Text(
+                text = "No unpaid invoices.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 8.dp),
+            )
+        } else {
+            unpaid.take(5).forEachIndexed { index, invoice ->
+                if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                val late = daysOverdue(invoice, today)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = clientName(invoice.clientId),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "${invoice.number}${if (late > 0) " · $late ${if (late == 1L) "day" else "days"} over" else ""}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (late > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        text = money(invoice.total),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Surface(
+            onClick = onOpenInvoices,
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                text = "Open invoices",
+                style = MaterialTheme.typography.labelLarge,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(vertical = 10.dp),
+            )
+        }
+    }
 }
 
 /** The running tax pot for the current UK self-assessment year (6 April - 5 April). */
@@ -360,11 +801,11 @@ private fun TaxPotBand(
     if (ratePercent <= 0.0) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surfaceVariant,
             contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         ) {
-            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(
                     text = "Income tax",
                     style = MaterialTheme.typography.titleMedium,
@@ -381,48 +822,41 @@ private fun TaxPotBand(
     }
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.primaryContainer,
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
     ) {
-        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Column {
-                Text(
-                    text = "Tax to set aside: ${money(pot)}",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    text = "${if (ratePercent % 1.0 == 0.0) ratePercent.toInt() else ratePercent}% of invoiced this tax year " +
-                        "(${ukTaxYearLabel(year)}) · adjust in Settings",
-                    style = MaterialTheme.typography.bodySmall,
-                )
+        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text(
+                text = "Tax to set aside: ${money(pot)}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "${if (ratePercent % 1.0 == 0.0) ratePercent.toInt() else ratePercent}% " +
+                    "of invoiced this tax year (${ukTaxYearLabel(year)})",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
+            val detail = if (estimate.profit <= SelfAssessment.PERSONAL_ALLOWANCE) {
+                "Under the £12,570 allowance so far — no income tax or Class 4 on this profit."
+            } else {
+                "Income tax ${money(estimate.incomeTax)} + Class 4 NICs ${money(estimate.class4)} " +
+                    "after the £12,570 allowance."
             }
-
-            HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.25f))
-
-            Column {
-                val detail = if (estimate.profit <= SelfAssessment.PERSONAL_ALLOWANCE) {
-                    "Under the £12,570 allowance so far — no income tax or Class 4 on this profit."
-                } else {
-                    "Income tax ${money(estimate.incomeTax)} + Class 4 NICs ${money(estimate.class4)} " +
-                        "after the £12,570 allowance (~${estimate.effectiveRate}% of profit)"
-                }
-                Text(
-                    text = "Estimated HMRC bill: ~${money(estimate.total)}",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = detail + " · from invoiced minus materials logged",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Text(
-                    text = "Net after tax: ${money((estimate.profit - estimate.total).coerceAtLeast(0.0))}",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium,
-                )
-            }
+            Text(
+                text = "Estimated HMRC bill: ~${money(estimate.total)}",
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                text = "Net after tax: ${money((estimate.profit - estimate.total).coerceAtLeast(0.0))}",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
     }
 }

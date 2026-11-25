@@ -1,7 +1,9 @@
 package uk.co.jwgardenservices.crm.ui.schedule
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,7 +12,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -18,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -25,10 +30,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.automirrored.outlined.Assignment
 import androidx.compose.material.icons.outlined.ArrowDropDown
+import androidx.compose.material.icons.outlined.ChevronLeft
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.EventAvailable
 import androidx.compose.material.icons.outlined.Navigation
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -50,6 +58,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -58,10 +67,12 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.widget.Toast
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.YearMonth
+import java.time.temporal.TemporalAdjusters
 import kotlinx.coroutines.launch
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.JobDraft
@@ -81,8 +92,10 @@ import uk.co.jwgardenservices.crm.domain.formatDayMonth
 import uk.co.jwgardenservices.crm.domain.formatDayMonthYear
 import uk.co.jwgardenservices.crm.domain.formatTime
 import uk.co.jwgardenservices.crm.domain.formatWeekday
+import uk.co.jwgardenservices.crm.domain.hoursLabel
 import uk.co.jwgardenservices.crm.domain.localDate
 import uk.co.jwgardenservices.crm.domain.money
+import uk.co.jwgardenservices.crm.domain.moneyCompact
 import uk.co.jwgardenservices.crm.domain.parseDate
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
 import uk.co.jwgardenservices.crm.domain.priceVisit
@@ -96,11 +109,19 @@ import uk.co.jwgardenservices.crm.ui.common.PageHeader
 import uk.co.jwgardenservices.crm.ui.common.StatusChip
 
 
+private enum class RotaView(val label: String) {
+    Week("Week"),
+    Month("Month"),
+    List("List"),
+}
+
 @Composable
 fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val today = LocalDate.now()
+    var rotaView by remember { mutableStateOf(RotaView.Week) }
+    var weekCursor by remember { mutableStateOf(today) }
     var selectedDay by remember { mutableStateOf(LocalDate.now()) }
     // Tapping a day in the calendar focuses the agenda on just that day;
     // null shows the running round again.
@@ -147,7 +168,51 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
     val hasAny = jobsByDay.values.any { it.isNotEmpty() } ||
         eventsByDay.values.any { it.isNotEmpty() }
 
+    val weekStart = weekCursor.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+    val weekDays = (0..6).map { weekStart.plusDays(it.toLong()) }
+    val weekVisits = state.visits.filter { visit ->
+        !visit.missed && parseDate(visit.visitDate)?.let {
+            !it.isBefore(weekStart) && !it.isAfter(weekStart.plusDays(6))
+        } == true
+    }
+    val weekJobs = state.jobs.filter { job ->
+        job.status != "cancelled" &&
+            parseTimestamp(job.startsAt)?.localDate()?.let {
+                !it.isBefore(weekStart) && !it.isAfter(weekStart.plusDays(6))
+            } == true
+    }
+    val weekIncome = weekVisits.sumOf { it.amount }
+    val weekMaterials = weekVisits.sumOf { it.materialsCost }
+    val weekHours = weekJobs.sumOf { it.durationMinutes / 60.0 }
+    val weekNet = weekIncome - weekMaterials
+    val weekSummary = weekJobs
+        .groupBy { it.clientId }
+        .map { (clientId, jobs) ->
+            Triple(
+                clientNames[clientId] ?: "Client",
+                jobs.mapNotNull { parseTimestamp(it.startsAt)?.localDate() }.distinct().size,
+                jobs.sumOf { it.durationMinutes } / 60.0,
+            )
+        }
+        .sortedByDescending { it.third }
+
+    val agendaDays = when (rotaView) {
+        RotaView.Month -> focusedDay?.let { listOf(it) } ?: days
+        RotaView.List -> days
+        RotaView.Week -> emptyList()
+    }
+    var monthCursor by remember { mutableStateOf(YearMonth.now()) }
+    val rangeLabel = when (rotaView) {
+        RotaView.Week -> "Week of ${weekStart.formatDayMonth()} – " +
+            "${weekStart.plusDays(6).formatDayMonth()}"
+        RotaView.Month -> monthCursor.format(
+            java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.UK),
+        )
+        RotaView.List -> "Next three weeks"
+    }
+
     var booking by remember { mutableStateOf(false) }
+    var bookingDate by remember { mutableStateOf<LocalDate?>(null) }
     var editing by remember { mutableStateOf<ScheduledJob?>(null) }
     var completing by remember { mutableStateOf<ScheduledJob?>(null) }
     var seriesJob by remember { mutableStateOf<ScheduledJob?>(null) }
@@ -155,7 +220,6 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
     var pendingSeriesMove by remember { mutableStateOf<Pair<ScheduledJob, LocalDate>?>(null) }
     var sheetJob by remember { mutableStateOf<ScheduledJob?>(null) }
     var saveError by remember { mutableStateOf<String?>(null) }
-    var monthCursor by remember { mutableStateOf(YearMonth.now()) }
     var route by remember { mutableStateOf<Pair<String, List<RouteStop>>?>(null) }
     val listState = rememberLazyListState()
     val appContext = LocalContext.current
@@ -200,6 +264,7 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
 
     fun closeDialogs() {
         booking = false
+        bookingDate = null
         editing = null
         completing = null
         seriesJob = null
@@ -217,6 +282,7 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
         return
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
@@ -225,20 +291,25 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
     ) {
         item {
             PageHeader(
-                title = "Schedule",
-                description = "Book the round, then tick it off as you go.",
+                title = "Rota",
+                description = rangeLabel,
                 action = {
                     if (!isStaff) {
                         Button(
                             enabled = state.clients.isNotEmpty(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.tertiary,
+                                contentColor = MaterialTheme.colorScheme.onTertiary,
+                            ),
                             onClick = {
                                 saveError = null
+                                bookingDate = null
                                 booking = true
                             },
                         ) {
                             Icon(Icons.Outlined.Add, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
-                            Text("Book job")
+                            Text("Add")
                         }
                     }
                 },
@@ -246,26 +317,88 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
         }
 
         item {
-            MonthCalendar(
-                jobs = jobsByDay,
-                calendarEventDays = eventsByDay.mapValues { (_, events) -> events.size },
-                month = monthCursor,
-                selectedDay = selectedDay,
-                onMonthChange = { monthCursor = it },
-                onSelectDay = { day ->
-                    selectedDay = day
-                    focusedDay = day
-                    monthCursor = YearMonth.from(day)
-                    scope.launch { listState.animateScrollToItem(2) }
+            RotaControls(
+                view = rotaView,
+                onView = { next ->
+                    rotaView = next
+                    focusedDay = if (next == RotaView.Month) selectedDay else null
+                    if (next == RotaView.Week) weekCursor = selectedDay
                 },
-                canDrag = !isStaff,
-                clientName = { id -> clientNames[id] ?: "Client" },
-                onMove = { job, day -> moveJobTo(job, day) },
+                onPrevious = {
+                    when (rotaView) {
+                        RotaView.Week -> weekCursor = weekCursor.minusWeeks(1)
+                        RotaView.Month -> monthCursor = monthCursor.minusMonths(1)
+                        RotaView.List -> selectedDay = selectedDay.minusWeeks(1)
+                    }
+                },
+                onNext = {
+                    when (rotaView) {
+                        RotaView.Week -> weekCursor = weekCursor.plusWeeks(1)
+                        RotaView.Month -> monthCursor = monthCursor.plusMonths(1)
+                        RotaView.List -> selectedDay = selectedDay.plusWeeks(1)
+                    }
+                },
+                onToday = {
+                    selectedDay = today
+                    weekCursor = today
+                    monthCursor = YearMonth.now()
+                    focusedDay = if (rotaView == RotaView.Month) today else null
+                },
             )
         }
 
+        if (rotaView == RotaView.Week) {
+            item {
+                WeekTotals(
+                    income = weekIncome,
+                    materials = weekMaterials,
+                    net = weekNet,
+                    hours = weekHours,
+                )
+            }
+            item {
+                WeekBoard(
+                    days = weekDays,
+                    jobsByDay = jobsByDay,
+                    today = today,
+                    clients = state.clients,
+                    clientNames = clientNames,
+                    isStaff = isStaff,
+                    onOpenJob = { sheetJob = it },
+                    onAdd = { day ->
+                        saveError = null
+                        bookingDate = day
+                        booking = true
+                    },
+                )
+            }
+            item { WeekClientSummary(summary = weekSummary) }
+            return@LazyColumn
+        }
+
+        if (rotaView == RotaView.Month) {
+            item {
+                MonthCalendar(
+                    jobs = jobsByDay,
+                    calendarEventDays = eventsByDay.mapValues { (_, events) -> events.size },
+                    month = monthCursor,
+                    selectedDay = selectedDay,
+                    onMonthChange = { monthCursor = it },
+                    onSelectDay = { day ->
+                        selectedDay = day
+                        focusedDay = day
+                        monthCursor = YearMonth.from(day)
+                        scope.launch { listState.animateScrollToItem(2) }
+                    },
+                    canDrag = !isStaff,
+                    clientName = { id -> clientNames[id] ?: "Client" },
+                    onMove = { job, day -> moveJobTo(job, day) },
+                )
+            }
+        }
+
         val focused = focusedDay
-        if (focused != null) {
+        if (focused != null && rotaView == RotaView.Month) {
             item {
                 TextButton(onClick = { focusedDay = null }) {
                     Text("Showing ${focused.formatDayMonth()} — show the whole round")
@@ -311,7 +444,7 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
             }
         }
 
-        days.forEach { day ->
+        agendaDays.forEach { day ->
             val jobs = jobsByDay[day].orEmpty().sortedBy { it.startsAt }
             val events = eventsByDay[day].orEmpty()
             if (day == selectedDay || jobs.isNotEmpty() || events.isNotEmpty()) {
@@ -381,6 +514,29 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
         }
     }
 
+    if (!isStaff) {
+        Surface(
+            onClick = {
+                saveError = null
+                bookingDate = today
+                booking = true
+            },
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.tertiary,
+            contentColor = MaterialTheme.colorScheme.onTertiary,
+            shadowElevation = 8.dp,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(20.dp)
+                .size(56.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.Add, contentDescription = "Add a job")
+            }
+        }
+    }
+    }
+
     route?.let { (title, stops) ->
         RouteDialog(
             title = "Route for $title",
@@ -392,6 +548,7 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
     if (booking) {
         JobEditorDialog(
             existing = null,
+            defaultDate = bookingDate,
             clients = state.clients,
             saving = state.saving,
             errorMessage = saveError,
@@ -649,6 +806,320 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun RotaControls(
+    view: RotaView,
+    onView: (RotaView) -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onToday: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onPrevious) {
+            Icon(Icons.Outlined.ChevronLeft, contentDescription = "Previous")
+        }
+        OutlinedButton(
+            onClick = onToday,
+            shape = RoundedCornerShape(10.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+            modifier = Modifier.height(34.dp),
+        ) {
+            Text("Today", style = MaterialTheme.typography.labelLarge)
+        }
+        IconButton(onClick = onNext) {
+            Icon(Icons.Outlined.ChevronRight, contentDescription = "Next")
+        }
+        Spacer(Modifier.weight(1f))
+        Row(
+            modifier = Modifier
+                .background(MaterialTheme.colorScheme.secondary, RoundedCornerShape(50))
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            RotaView.entries.forEach { option ->
+                val active = option == view
+                Surface(
+                    onClick = { onView(option) },
+                    shape = RoundedCornerShape(50),
+                    color = if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
+                    contentColor = if (active) {
+                        MaterialTheme.colorScheme.onPrimary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                ) {
+                    Text(
+                        text = option.label,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WeekTotals(income: Double, materials: Double, net: Double, hours: Double) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        color = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "WEEK TOTALS",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.55f),
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth()) {
+                WeekFigure("Income", moneyCompact(income), Modifier.weight(1f), brass = true)
+                WeekFigure("Materials", moneyCompact(materials), Modifier.weight(1f))
+                WeekFigure("Net", moneyCompact(net), Modifier.weight(1f), brass = true)
+                WeekFigure("Hours", hoursLabel(hours), Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun WeekFigure(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    brass: Boolean = false,
+) {
+    Column(modifier = modifier) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = if (brass) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onPrimary,
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.55f),
+        )
+    }
+}
+
+@Composable
+private fun WeekBoard(
+    days: List<LocalDate>,
+    jobsByDay: Map<LocalDate, List<ScheduledJob>>,
+    today: LocalDate,
+    clients: List<Client>,
+    clientNames: Map<String, String>,
+    isStaff: Boolean,
+    onOpenJob: (ScheduledJob) -> Unit,
+    onAdd: (LocalDate) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        days.forEach { day ->
+            val jobs = jobsByDay[day].orEmpty().sortedBy { it.startsAt }
+            Column(modifier = Modifier.width(150.dp)) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (day == today) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.secondary
+                    },
+                    contentColor = if (day == today) {
+                        MaterialTheme.colorScheme.onPrimary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                ) {
+                    Column(
+                        modifier = Modifier.padding(vertical = 7.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            text = day.format(java.time.format.DateTimeFormatter.ofPattern(
+                                "EEE",
+                                java.util.Locale.UK,
+                            )).uppercase(),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        Text(
+                            text = day.dayOfMonth.toString(),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(7.dp))
+                jobs.forEach { job ->
+                    WeekJobCard(
+                        job = job,
+                        clientName = clientNames[job.clientId] ?: "Client",
+                        address = clients.firstOrNull { it.id == job.clientId }?.address,
+                        onClick = { onOpenJob(job) },
+                    )
+                    Spacer(Modifier.height(6.dp))
+                }
+                if (!isStaff) {
+                    Surface(
+                        onClick = { onAdd(day) },
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color.Transparent,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = "+ Add",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(vertical = 8.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WeekJobCard(
+    job: ScheduledJob,
+    clientName: String,
+    address: String?,
+    onClick: () -> Unit,
+) {
+    val starts = parseTimestamp(job.startsAt)
+    val end = starts?.plusSeconds((job.durationMinutes * 60).toLong())
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row {
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .heightIn(min = 68.dp)
+                    .background(
+                        if (job.status == "done") {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.tertiary
+                        },
+                    ),
+            )
+            Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp)) {
+                Text(
+                    text = clientName,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+                if (!address.isNullOrBlank()) {
+                    Text(
+                        text = address,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = "${starts?.formatTime() ?: "—"}–${end?.formatTime() ?: "—"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "${job.durationMinutes} min",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WeekClientSummary(summary: List<Triple<String, Int, Double>>) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.primary)
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+            ) {
+                Text(
+                    text = "Clients — this week",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                )
+            }
+            if (summary.isEmpty()) {
+                Text(
+                    text = "Nothing on the rota this week yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(16.dp),
+                )
+            } else {
+                summary.take(10).forEachIndexed { index, (name, days, hours) ->
+                    if (index > 0) {
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            text = "$days ${if (days == 1) "day" else "days"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            text = "${hours.toInt()} hrs",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

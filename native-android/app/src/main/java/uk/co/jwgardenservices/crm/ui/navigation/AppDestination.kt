@@ -15,9 +15,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
  * The phone bar keeps the owner's driving workflow: the round, the calendar,
- * the business's running costs and billing. Clients and everything else live
- * behind More. Secretary is a tab inside Business; its route is kept for the
- * Dashboard microphone. Staff keep their shorter bar (Schedule + Clients).
+ * clients, the business's running costs and billing. Quotes, enquiries,
+ * visits and Secretary live behind More. Secretary is also a tab inside
+ * Business; its route is kept for the Dashboard microphone. Staff keep their
+ * shorter bar (Schedule + Clients).
  */
 enum class AppDestination(
     val route: String,
@@ -25,11 +26,11 @@ enum class AppDestination(
     val icon: ImageVector,
     val primary: Boolean,
 ) {
-    Dashboard("dashboard", "Dashboard", Icons.Outlined.Dashboard, true),
-    Schedule("schedule", "Schedule", Icons.Outlined.CalendarMonth, true),
+    Dashboard("dashboard", "Home", Icons.Outlined.Dashboard, true),
+    Schedule("schedule", "Rota", Icons.Outlined.CalendarMonth, true),
     Business("business", "Business", Icons.Outlined.Insights, true),
-    Invoices("invoices", "Invoices", Icons.AutoMirrored.Outlined.ReceiptLong, true),
-    Clients("clients", "Clients", Icons.Outlined.People, false),
+    Invoices("invoices", "Invoice", Icons.AutoMirrored.Outlined.ReceiptLong, true),
+    Clients("clients", "Clients", Icons.Outlined.People, true),
     Enquiries("enquiries", "Enquiries", Icons.Outlined.Inbox, false),
     Quotes("quotes", "Quotes", Icons.Outlined.RequestQuote, false),
     Visits("visits", "Visits", Icons.Outlined.Checklist, false),

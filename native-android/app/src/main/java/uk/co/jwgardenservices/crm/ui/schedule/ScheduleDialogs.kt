@@ -108,6 +108,7 @@ private enum class DeleteMode { ONE, SERIES }
 @Composable
 internal fun JobEditorDialog(
     existing: ScheduledJob?,
+    defaultDate: LocalDate? = null,
     clients: List<Client>,
     saving: Boolean,
     errorMessage: String?,
@@ -121,8 +122,8 @@ internal fun JobEditorDialog(
     var clientId by remember(existing?.id) {
         mutableStateOf(existing?.clientId ?: clients.firstOrNull()?.id.orEmpty())
     }
-    var date by remember(existing?.id) {
-        mutableStateOf(starts?.localDate()?.toString() ?: todayIso())
+    var date by remember(existing?.id, defaultDate) {
+        mutableStateOf(starts?.localDate()?.toString() ?: defaultDate?.toString() ?: todayIso())
     }
     var time by remember(existing?.id) {
         mutableStateOf(starts?.formatTime() ?: "09:00")
