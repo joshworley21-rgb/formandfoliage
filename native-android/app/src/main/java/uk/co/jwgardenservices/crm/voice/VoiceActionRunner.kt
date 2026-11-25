@@ -176,6 +176,9 @@ class VoiceActionRunner(
             "Yep ${VoiceLines.OWNER_NAME}, ",
             "Moving on ${VoiceLines.OWNER_NAME} — ",
             "Skipping ahead ${VoiceLines.OWNER_NAME} — ",
+            "Next up ${VoiceLines.OWNER_NAME} — ",
+            "Okay ${VoiceLines.OWNER_NAME}, ",
+            "Right then, ",
         )
         return when (reply.firstOrNull()) {
             TtsProsody.FAST -> "${TtsProsody.FAST}$opening${reply.substring(1)}"
@@ -188,13 +191,18 @@ class VoiceActionRunner(
      * Routine-log acknowledgements, shuffled so a run of jobs does not sound
      * like a machine reading the same line.
      */
-    private fun tradeAck(): String = listOf(
+    private fun tradeAck(): String = VoiceLines.pick(
         "Sorted, ${VoiceLines.OWNER_NAME}. Logged.",
         "Righto, that's in.",
-        "Spot on, consider it done.",
+        "Spot on — consider it done.",
         "All sorted.",
         "Bosh. Saved that for you.",
-    ).random()
+        "Lovely — logged.",
+        "That's tucked away.",
+        "Done and dusted.",
+        "Nice one — that's on the sheet.",
+        "Consider it logged.",
+    )
 
     /** Friday-afternoon sign-off, only when a job is being closed. */
     private fun fridaySignOff(): String {
@@ -202,20 +210,24 @@ class VoiceActionRunner(
         if (now.dayOfWeek != DayOfWeek.FRIDAY || now.toLocalTime() < LocalTime.of(14, 0)) {
             return ""
         }
-        val line = listOf(
+        val line = VoiceLines.pick(
             "Almost time to down tools, ${VoiceLines.OWNER_NAME}.",
             "Ha — must be pub time soon, surely?",
             "Last push for the week!",
-        ).random()
+            "Nearly the weekend, ${VoiceLines.OWNER_NAME}.",
+            "One more and then that's your lot.",
+        )
         return " $line"
     }
 
     /** Human reaction when something has to be taken back out. */
-    private fun undoBanter(): String = listOf(
+    private fun undoBanter(): String = VoiceLines.pick(
         "No worries, scrubbed that.",
         "Whoops. Deleted.",
         "Right, wiped that from the record, ${VoiceLines.OWNER_NAME}.",
-    ).random()
+        "Done — that never happened.",
+        "Taken back out. No harm done.",
+    )
 
     /** Pace markers — the runner knows the kind of reply; TTS honours it. */
     private fun fast(text: String): String = "${TtsProsody.FAST}$text"
@@ -595,6 +607,8 @@ class VoiceActionRunner(
                 "${hoursLabel(safeHours)} down, ${money(visit.amount)}.",
                 "Done, ${hoursLabel(safeHours)}, ${money(visit.amount)}.",
                 "That's in, ${hoursLabel(safeHours)}.",
+                "Right, ${hoursLabel(safeHours)} at ${money(visit.amount)}.",
+                "${hoursLabel(safeHours)} logged — ${money(visit.amount)}.",
             ),
         )
     }
@@ -776,6 +790,8 @@ class VoiceActionRunner(
             "Nothing booked ${range.label}, ${VoiceLines.OWNER_NAME}.",
             "Clear diary ${range.label}.",
             "Nothing on ${range.label} — free run at it.",
+            "You're clear ${range.label}. Have a breather.",
+            "Nowt in the diary ${range.label}.",
         )
 
         val clients = repository.observeClients().first()
@@ -1083,6 +1099,8 @@ class VoiceActionRunner(
             "Noted for ${client.name}.",
             "Got it — that's on ${client.name}'s notes.",
             "Written down for ${client.name}.",
+            "That's saved to ${client.name}.",
+            "Right, added to ${client.name}'s file.",
         )
     }
 
@@ -1184,6 +1202,8 @@ class VoiceActionRunner(
                     "it'll be on their next invoice.",
                 "Sorted, £${format(amount)} of $note on ${client.name}'s account. " +
                     "Next invoice picks it up.",
+                "Right, ${money(amount)} for $note added to ${client.name}.",
+                "That's ${money(amount)} of $note against ${client.name}. On the next bill.",
             ),
         )
     }
@@ -1327,6 +1347,10 @@ class VoiceActionRunner(
                     "Send it now, or leave it?",
                 "In drafts: ${client.name}, $visitsText, ${money(totalValue)}. " +
                     "Send it, or leave it there?",
+                "Ready to go for ${client.name} — $visitsText, ${money(totalValue)}. " +
+                    "Send it, or hold it?",
+                "Done — ${client.name}, $visitsText, ${money(totalValue)}. " +
+                    "Drafts for now, or send it?",
             ),
         )
     }
@@ -1537,6 +1561,8 @@ class VoiceActionRunner(
         return VoiceLines.pick(
             "Sorted — that visit is ${money(amount)} now$extra.",
             "Added. It comes to ${money(amount)}$extra.",
+            "Right, that one's ${money(amount)}$extra.",
+            "Updated — ${money(amount)}$extra.",
         )
     }
 

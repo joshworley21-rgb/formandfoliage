@@ -902,6 +902,7 @@ class AssistantService : Service() {
         val lead = correctionLead
         correctionLead = null
         val clean = text.trim().let { if (lead != null) "$lead$it" else it }
+        val human = humanise(clean)
         if (clean.isNotEmpty() && askFollowUp && !drivingMode &&
             personaLength == PersonaLength.Normal && !clean.endsWith("?")
         ) {
@@ -910,11 +911,47 @@ class AssistantService : Service() {
                 "Go on.",
                 "What else can I do?",
                 "Anything else while I'm here?",
+                "What's next?",
+                "Where to now?",
+                "Anything else?",
+                "Right, what else?",
             )
-            say("$clean $nudge")
+            say("$human $nudge")
         } else {
-            say(clean)
+            say(human)
         }
+    }
+
+    /**
+     * Occasionally start a plain answer with a small conversational beat.
+     * Questions, driving mode and very short replies are left alone, as is
+     * anything that already opens naturally, so the colour never gets in the
+     * way of the answer.
+     */
+    private fun humanise(text: String): String {
+        if (drivingMode || personaLength != PersonaLength.Normal) return text
+        if (text.length !in 8..220 || text.endsWith("?")) return text
+        val marker = text.first().takeIf { it == TtsProsody.FAST || it == TtsProsody.SLOW }
+        val body = if (marker != null) text.substring(1) else text
+        if (Regex(
+                "^(right|okay|ok|so|well|ah|oh|mm|hi|hello|hey|morning|afternoon|evening|" +
+                    "sorted|noted|done|got it|no|yes|yeah|yep)\\b",
+                RegexOption.IGNORE_CASE,
+            ).containsMatchIn(body)
+        ) {
+            return text
+        }
+        if (!VoiceLines.chance(7)) return text
+        val opener = VoiceLines.pick(
+            "Right — ",
+            "Okay, so — ",
+            "So — ",
+            "Ah, right — ",
+            "Right then — ",
+            "Mm, right — ",
+            "Right, so — ",
+        )
+        return (marker?.toString() ?: "") + opener + body
     }
 
     private fun onlineSpeaker(): CloudVoice =
@@ -1873,8 +1910,9 @@ class AssistantService : Service() {
         return """
             You are Josh's personal secretary for a UK gardening business, speaking
             on the phone. Be calm, warm and efficient, like a good British secretary.
-            Use contractions. Answer only the question in one or two short spoken
-            sentences, then offer a useful next step if it helps.
+            Use contractions and everyday British phrasing. Answer only the question
+            in one or two short spoken sentences, then offer a useful next step if it
+            helps. Vary your opening words between turns; never sound like a script.
             Never call yourself an AI, voice assistant, chatbot, model or assistant
             programme. If asked how you are, answer like a person and ask how his day
             is going. Address him as Josh occasionally, not in every sentence.
@@ -2017,29 +2055,71 @@ class AssistantService : Service() {
         val lower = text.lowercase().trim().trimEnd('.', '!', '?', ',')
         return when {
             Regex("^(hi|hello|hey|morning|afternoon|evening|good morning|good afternoon|good evening)\\b")
-                .containsMatchIn(lower) -> VoiceLines.pick(
-                "Hello ${VoiceLines.OWNER_NAME} — what do you need?",
-                "Hey — go on then.",
-                "Morning — what are we doing?",
-                "Ha — afternoon ${VoiceLines.OWNER_NAME}, what's next?",
-            )
-            Regex("\\b(you alright|you ok|how's it going|hows it going|how are you)\\b")
-                .containsMatchIn(lower) -> VoiceLines.pick(
+                .containsMatchIn(lower) -> when {
+                lower.contains("morning") -> VoiceLines.pick(
+                    "Morning, ${VoiceLines.OWNER_NAME} — what's first?",
+                    "Morning. Right, what are we doing?",
+                    "Morning — what's next on the list?",
+                )
+                lower.contains("afternoon") -> VoiceLines.pick(
+                    "Afternoon, ${VoiceLines.OWNER_NAME} — what's next?",
+                    "Afternoon. Go on then.",
+                    "Hey — afternoon. What do you need?",
+                )
+                lower.contains("evening") -> VoiceLines.pick(
+                    "Evening, ${VoiceLines.OWNER_NAME} — what's left to do?",
+                    "Evening. What can I do for you?",
+                    "Hi — evening. Go on.",
+                )
+                else -> VoiceLines.pick(
+                    "Hello ${VoiceLines.OWNER_NAME} — what do you need?",
+                    "Hey — go on then.",
+                    "Hi. What are we doing?",
+                    "Alright, ${VoiceLines.OWNER_NAME}. What's next?",
+                    "Hey up — what can I do?",
+                )
+            }
+            Regex(
+                "\\b(you alright|you ok|you good|how's it going|hows it going|how are you|" +
+                    "how are you doing|how do you feel)\\b",
+            ).containsMatchIn(lower) -> VoiceLines.pick(
                 "All good, thanks. How's your day going?",
-                "Can't complain — how are you keeping?",
-                "Not bad at all. What's next for you?",
+                "Can't grumble — how are you keeping?",
+                "Not bad at all. Busy one for you?",
+                "Champion, thanks. What's next?",
+                "Yeah, keeping busy. How about you?",
+                "Can't complain. What are we up to?",
             )
-            Regex("^(good|not bad|i'm good|im good|fine|okay|ok)\\b.*(thanks|thank you)?$")
-                .containsMatchIn(lower) -> VoiceLines.pick(
+            lower in setOf("you there", "are you there", "you awake", "you listening") ->
+                VoiceLines.pick(
+                    "Here. What do you need?",
+                    "Yep, listening.",
+                    "Still here — go on.",
+                )
+            Regex(
+                "^(what are you up to|what are you doing|what's happening|whats happening)\\b",
+            ).containsMatchIn(lower) -> VoiceLines.pick(
+                "Just keeping an eye on the diary. What do you need?",
+                "Not much — waiting on you. What's next?",
+                "Same as ever. What can I do?",
+            )
+            Regex(
+                "^(good|not bad|i'm good|im good|fine|okay|ok|grand|not too bad|" +
+                    "can't complain|cant complain)\\b",
+            ).containsMatchIn(lower) -> VoiceLines.pick(
                 "Glad to hear it. What's next?",
                 "Good stuff. What are we doing?",
+                "Nice. Right, where are we off to?",
+                "Grand. What do you need?",
             )
             lower in setOf(
                 "no", "no thanks", "nothing", "that's all", "thats all", "all done",
                 "we're done", "were done", "finished", "no thank you", "nothing else",
             ) -> VoiceLines.pick(
                 "Right, I'll leave you to it.",
-                "No worries — I'm here if you need me.",
+                "No worries — give us a shout if you need anything.",
+                "Fair enough. I'll be here.",
+                "All right, ${VoiceLines.OWNER_NAME}. Catch you in a bit.",
             )
             lower in setOf(
                 "bye", "goodbye", "night", "good night", "see you", "speak later",
@@ -2047,14 +2127,24 @@ class AssistantService : Service() {
             ) -> VoiceLines.pick(
                 "Right — talk later, ${VoiceLines.OWNER_NAME}.",
                 "Go on then — I'll be here.",
+                "See you, ${VoiceLines.OWNER_NAME}. Safe drive.",
+                "Take it easy. I'll be about.",
             )
             lower.contains("thank") || lower in setOf("ta", "nice one", "cheers") ->
-                VoiceLines.pick("Any time.", "No worries.", "Ha — pleasure.")
+                VoiceLines.pick(
+                    "Any time.",
+                    "No worries.",
+                    "Ha — pleasure.",
+                    "That's what I'm here for.",
+                    "Any time, ${VoiceLines.OWNER_NAME}.",
+                )
             lower.contains("what can you do") || lower == "help" -> HELP_TEXT
             lower.contains("busy") && lower.split(Regex("\\s+")).size <= 4 ->
                 VoiceLines.pick(
                     "Busy enough. What's next?",
                     "Busy one, aye. What do you need?",
+                    "Flat out, same as you I expect. What's next?",
+                    "Keeping going. What do you need?",
                 )
             else -> null
         }

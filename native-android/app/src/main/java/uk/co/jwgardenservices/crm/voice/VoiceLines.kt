@@ -27,4 +27,7 @@ object VoiceLines {
         while (recent.size > 6) recent.removeFirst()
         return choice
     }
+
+    /** True roughly once in [oneIn], for occasional conversational colour. */
+    fun chance(oneIn: Int): Boolean = oneIn > 0 && Random.Default.nextInt(oneIn) == 0
 }
