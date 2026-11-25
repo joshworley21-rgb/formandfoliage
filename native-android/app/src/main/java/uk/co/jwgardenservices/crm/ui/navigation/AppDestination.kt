@@ -27,10 +27,10 @@ enum class AppDestination(
     val primary: Boolean,
 ) {
     Dashboard("dashboard", "Home", Icons.Outlined.Dashboard, true),
+    Clients("clients", "Clients", Icons.Outlined.People, true),
     Schedule("schedule", "Rota", Icons.Outlined.CalendarMonth, true),
     Business("business", "Business", Icons.Outlined.Insights, true),
     Invoices("invoices", "Invoice", Icons.AutoMirrored.Outlined.ReceiptLong, true),
-    Clients("clients", "Clients", Icons.Outlined.People, true),
     Enquiries("enquiries", "Enquiries", Icons.Outlined.Inbox, false),
     Quotes("quotes", "Quotes", Icons.Outlined.RequestQuote, false),
     Visits("visits", "Visits", Icons.Outlined.Checklist, false),

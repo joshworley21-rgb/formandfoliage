@@ -3,15 +3,18 @@ package uk.co.jwgardenservices.crm.ui.dashboard
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,6 +26,7 @@ import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.NotificationsNone
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -38,11 +42,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlin.math.abs
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalTime
@@ -64,6 +71,8 @@ import uk.co.jwgardenservices.crm.domain.formatWeekday
 import uk.co.jwgardenservices.crm.domain.hoursLabel
 import uk.co.jwgardenservices.crm.domain.localDate
 import uk.co.jwgardenservices.crm.domain.money
+import uk.co.jwgardenservices.crm.domain.moneyCompact
+import uk.co.jwgardenservices.crm.domain.monthlyRunningCosts
 import uk.co.jwgardenservices.crm.domain.overdueInvoices
 import uk.co.jwgardenservices.crm.domain.parseDate
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
@@ -99,6 +108,8 @@ fun DashboardScreen(
     val month = YearMonth.from(today)
     val taxRate by TaxReservePrefs.ratePercent.collectAsStateWithLifecycle()
     var tab by remember { mutableStateOf(HomeTab.Week) }
+    var projected by remember { mutableStateOf(false) }
+    var statDrag by remember { mutableStateOf(0f) }
 
     val clientNames = remember(state.clients) { state.clients.associate { it.id to it.name } }
     val weekVisits = state.visits.filter { visit ->
@@ -114,9 +125,14 @@ fun DashboardScreen(
     }
     val weekIncome = weekVisits.sumOf { it.amount }
     val weekMaterials = weekVisits.sumOf { it.materialsCost }
-    val lastWeekNet = lastWeekVisits.sumOf { it.amount - it.materialsCost }
-    val weekNet = weekIncome - weekMaterials
+    val weekOverheads = state.runningCosts.monthlyRunningCosts() * 12.0 / 52.0
+    val lastWeekNet = lastWeekVisits.sumOf { it.amount } -
+        lastWeekVisits.sumOf { it.materialsCost } - weekOverheads
+    val weekNet = weekIncome - weekMaterials - weekOverheads
     val monthIncome = monthVisits.sumOf { it.amount }
+    val weekProjected = weekIncome / today.dayOfWeek.value.coerceAtLeast(1) * 7
+    val monthProjected = monthIncome / today.dayOfMonth.coerceAtLeast(1) *
+        month.lengthOfMonth()
 
     val scheduled = state.jobs.filter { it.status == "scheduled" }
     val weekJobs = scheduled.filter { job ->
@@ -166,35 +182,61 @@ fun DashboardScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            HomeHero(
-                today = today,
-                onRefresh = viewModel::refresh,
-                onOpenSecretary = onOpenSecretary,
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 26.dp),
+            ) {
+                HomeHero(
+                    today = today,
+                    onRefresh = viewModel::refresh,
+                    onOpenInvoices = onOpenInvoices,
+                )
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .offset(y = 4.dp)
+                        .fillMaxWidth()
+                        .pointerInput(Unit) {
+                            detectHorizontalDragGestures(
+                                onDragStart = { statDrag = 0f },
+                                onDragEnd = {
+                                    if (abs(statDrag) > 36f) projected = !projected
+                                    statDrag = 0f
+                                },
+                                onHorizontalDrag = { _, amount -> statDrag += amount },
+                            )
+                        },
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    HomeStat(
+                        label = "THIS WEEK",
+                        value = moneyCompact(weekIncome),
+                        projectedValue = moneyCompact(weekProjected),
+                        projected = projected,
+                        detail = "${weekVisits.size} ${if (weekVisits.size == 1) "visit" else "visits"} · so far",
+                        hint = if (projected) "Projected to Sunday" else "Swipe to see projected →",
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(128.dp),
+                    )
+                    HomeStat(
+                        label = "THIS MONTH",
+                        value = moneyCompact(monthIncome),
+                        projectedValue = moneyCompact(monthProjected),
+                        projected = projected,
+                        detail = "${monthVisits.size} ${if (monthVisits.size == 1) "visit" else "visits"} · so far",
+                        hint = if (projected) "Projected month end" else null,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(128.dp),
+                    )
+                }
+            }
         }
 
         if (state.error != null) {
             item { ErrorState(state.error!!, viewModel::refresh) }
-        }
-
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                HomeStat(
-                    label = "THIS WEEK",
-                    value = money(weekIncome),
-                    detail = "${weekVisits.size} ${if (weekVisits.size == 1) "visit" else "visits"} · so far",
-                    modifier = Modifier.weight(1f),
-                )
-                HomeStat(
-                    label = "THIS MONTH",
-                    value = money(monthIncome),
-                    detail = "${monthVisits.size} ${if (monthVisits.size == 1) "visit" else "visits"} · so far",
-                    modifier = Modifier.weight(1f),
-                )
-            }
         }
 
         item {
@@ -218,6 +260,7 @@ fun DashboardScreen(
                         HomeTab.Week -> WeekPanel(
                             weekIncome = weekIncome,
                             weekMaterials = weekMaterials,
+                            weekOverheads = weekOverheads,
                             weekNet = weekNet,
                             lastWeekNet = lastWeekNet,
                             series = series,
@@ -270,7 +313,7 @@ fun DashboardScreen(
 }
 
 @Composable
-private fun HomeHero(today: LocalDate, onRefresh: () -> Unit, onOpenSecretary: () -> Unit) {
+private fun HomeHero(today: LocalDate, onRefresh: () -> Unit, onOpenInvoices: () -> Unit) {
     val greeting = when (LocalTime.now().hour) {
         in 0..11 -> "Morning"
         in 12..17 -> "Afternoon"
@@ -278,33 +321,50 @@ private fun HomeHero(today: LocalDate, onRefresh: () -> Unit, onOpenSecretary: (
     }
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(30.dp),
         color = MaterialTheme.colorScheme.primary,
         contentColor = MaterialTheme.colorScheme.onPrimary,
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, top = 18.dp, end = 14.dp, bottom = 116.dp),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = today.formatWeekday().uppercase(),
-                    style = MaterialTheme.typography.labelSmall,
+                    text = today.formatWeekday(),
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f),
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(onClick = onOpenSecretary) {
-                    Icon(
-                        imageVector = Icons.Outlined.Mic,
-                        contentDescription = "Call Secretary",
-                        tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f),
-                        modifier = Modifier.size(19.dp),
-                    )
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.12f),
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    IconButton(onClick = onOpenInvoices) {
+                        Icon(
+                            imageVector = Icons.Outlined.NotificationsNone,
+                            contentDescription = "Reminders",
+                            tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f),
+                            modifier = Modifier.size(19.dp),
+                        )
+                    }
                 }
-                IconButton(onClick = onRefresh) {
-                    Icon(
-                        imageVector = Icons.Outlined.Refresh,
-                        contentDescription = "Refresh",
-                        tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f),
-                        modifier = Modifier.size(19.dp),
-                    )
+                Spacer(Modifier.width(8.dp))
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.12f),
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    IconButton(onClick = onRefresh) {
+                        Icon(
+                            imageVector = Icons.Outlined.Refresh,
+                            contentDescription = "Refresh",
+                            tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f),
+                            modifier = Modifier.size(19.dp),
+                        )
+                    }
                 }
             }
             Spacer(Modifier.height(8.dp))
@@ -312,12 +372,6 @@ private fun HomeHero(today: LocalDate, onRefresh: () -> Unit, onOpenSecretary: (
                 text = "$greeting, ${VoiceLines.OWNER_NAME}",
                 style = MaterialTheme.typography.displaySmall,
                 color = MaterialTheme.colorScheme.onPrimary,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "The round, the money and what needs doing next.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.68f),
             )
         }
     }
@@ -327,7 +381,10 @@ private fun HomeHero(today: LocalDate, onRefresh: () -> Unit, onOpenSecretary: (
 private fun HomeStat(
     label: String,
     value: String,
+    projectedValue: String,
+    projected: Boolean,
     detail: String,
+    hint: String?,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -336,24 +393,62 @@ private fun HomeStat(
         color = MaterialTheme.colorScheme.primary,
         contentColor = MaterialTheme.colorScheme.onPrimary,
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(horizontal = 14.dp, vertical = 13.dp),
+        ) {
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.55f),
             )
-            Spacer(Modifier.height(5.dp))
+            Spacer(Modifier.height(4.dp))
             Text(
-                text = value,
+                text = if (projected) projectedValue else value,
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.tertiary,
             )
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(2.dp))
             Text(
                 text = detail,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.58f),
             )
+            Spacer(Modifier.weight(1f))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(4.dp)
+                        .background(
+                            if (!projected) MaterialTheme.colorScheme.onPrimary else {
+                                MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.28f)
+                            },
+                            CircleShape,
+                        ),
+                )
+                Spacer(Modifier.width(4.dp))
+                Box(
+                    modifier = Modifier
+                        .size(4.dp)
+                        .background(
+                            if (projected) MaterialTheme.colorScheme.onPrimary else {
+                                MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.28f)
+                            },
+                            CircleShape,
+                        ),
+                )
+                if (hint != null) {
+                    Spacer(Modifier.width(7.dp))
+                    Text(
+                        text = hint,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.55f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
     }
 }
@@ -385,9 +480,9 @@ private fun ReminderPill(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                imageVector = Icons.Outlined.NotificationsNone,
+                imageVector = Icons.Outlined.PushPin,
                 contentDescription = null,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(17.dp),
                 tint = MaterialTheme.colorScheme.primary,
             )
             Spacer(Modifier.width(10.dp))
@@ -396,11 +491,17 @@ private fun ReminderPill(
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f),
             )
-            Text(
-                text = "Review",
-                style = MaterialTheme.typography.labelLarge,
+            Surface(
+                shape = RoundedCornerShape(50),
                 color = MaterialTheme.colorScheme.primary,
-            )
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            ) {
+                Text(
+                    text = "+ Add",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                )
+            }
         }
     }
 }
@@ -443,6 +544,7 @@ private data class DaySeries(val day: LocalDate, val billed: Double, val unbille
 private fun WeekPanel(
     weekIncome: Double,
     weekMaterials: Double,
+    weekOverheads: Double,
     weekNet: Double,
     lastWeekNet: Double,
     series: List<DaySeries>,
@@ -499,6 +601,7 @@ private fun WeekPanel(
         )
         SummaryRow("Income", money(weekIncome))
         SummaryRow("Materials", money(weekMaterials))
+        SummaryRow("Overheads", money(weekOverheads))
         SummaryRow("Net profit", money(weekNet), emphasis = true)
     }
 }
@@ -542,7 +645,7 @@ private fun WeekBars(series: List<DaySeries>, today: LocalDate) {
                                 .width(7.dp)
                                 .height((78 * (day.unbilled / max)).dp.coerceAtLeast(3.dp))
                                 .background(
-                                    MaterialTheme.colorScheme.tertiary.copy(alpha = 0.8f),
+                                    MaterialTheme.colorScheme.outline,
                                     RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp),
                                 ),
                         )
@@ -563,7 +666,7 @@ private fun WeekBars(series: List<DaySeries>, today: LocalDate) {
         Spacer(Modifier.height(4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             Legend(MaterialTheme.colorScheme.primary, "Billed")
-            Legend(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.8f), "Unbilled")
+            Legend(MaterialTheme.colorScheme.outline, "Unbilled")
         }
     }
 }
@@ -602,7 +705,7 @@ private fun SummaryRow(label: String, value: String, emphasis: Boolean = false) 
         Text(
             text = value,
             style = MaterialTheme.typography.bodyMedium,
-            fontWeight = if (emphasis) FontWeight.Bold else FontWeight.SemiBold,
+            fontWeight = FontWeight.Bold,
         )
     }
 }

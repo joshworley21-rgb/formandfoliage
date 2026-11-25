@@ -7,9 +7,9 @@ import androidx.compose.ui.graphics.Color
 // number or action that matters. Text pairs are at least 4.5:1.
 
 // Light
-val LightBackground = Color(0xFFF2F0E4)
+val LightBackground = Color(0xFFF4F3EE)
 val LightForeground = Color(0xFF1B2A1C)
-val LightCard = Color(0xFFFBFAF4)
+val LightCard = Color(0xFFFFFFFF)
 val LightPrimary = Color(0xFF1E2B1E)
 val LightPrimaryForeground = Color(0xFFF6F2E7)
 val LightPrimaryContainer = Color(0xFFDDE6D7)
@@ -35,8 +35,8 @@ val LightBandForeground = Color(0xFFF6F2E7)
 val LightSidebar = Color(0xFF1B2A1C)
 val LightSidebarForeground = Color(0xFFE8EEE6)
 val LightSidebarAccent = Color(0xFF2B382B)
-val LightSurfaceLow = Color(0xFFECEFE4)
-val LightSurfaceContainer = Color(0xFFE6EADF)
+val LightSurfaceLow = Color(0xFFF1F0E8)
+val LightSurfaceContainer = Color(0xFFE9EBE2)
 val LightSurfaceHigh = Color(0xFFDDE5D6)
 val LightSurfaceHighest = Color(0xFFD5DFCE)
 

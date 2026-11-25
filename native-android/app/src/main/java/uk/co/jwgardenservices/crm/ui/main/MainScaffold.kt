@@ -116,9 +116,7 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
     val moreItems = if (isStaff) {
         emptyList()
     } else {
-        AppDestination.moreItems.filter {
-            it != AppDestination.Settings && it != AppDestination.Secretary
-        }
+        AppDestination.moreItems.filter { it != AppDestination.Secretary }
     }
 
     fun navigate(destination: AppDestination) {
@@ -131,41 +129,9 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        BrandMark(compact = true)
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "Form & Foliage",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            Text(
-                                text = "CRM",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                    }
-                },
-                actions = {
-                    if (!isStaff) {
-                        IconButton(onClick = { navigate(AppDestination.Settings) }) {
-                            Icon(Icons.Outlined.Settings, contentDescription = "Settings")
-                        }
-                    }
-                    IconButton(onClick = requestSignOut) {
-                        Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = "Sign out")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
-            )
-        },
+        // No global app bar: each screen leads with its own hero or title, like
+        // the reference. Settings and sign-out live in More.
+
         bottomBar = {
             val moreSelected = moreItems.any { it.route == currentRoute }
             Column(
@@ -431,13 +397,28 @@ private fun BottomBarItem(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = colour,
-            modifier = Modifier.size(22.dp),
-        )
-        Spacer(Modifier.height(3.dp))
+        Box(
+            modifier = Modifier
+                .width(38.dp)
+                .height(24.dp)
+                .clip(RoundedCornerShape(50))
+                .background(
+                    if (selected) {
+                        MaterialTheme.colorScheme.secondary
+                    } else {
+                        Color.Transparent
+                    },
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = colour,
+                modifier = Modifier.size(21.dp),
+            )
+        }
+        Spacer(Modifier.height(2.dp))
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, letterSpacing = 0.sp),
