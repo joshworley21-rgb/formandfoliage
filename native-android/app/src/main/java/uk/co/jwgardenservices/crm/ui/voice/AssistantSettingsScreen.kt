@@ -248,6 +248,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         }
     }
 
+    var showAdvanced by remember { mutableStateOf(false) }
     var crashRefresh by remember { mutableIntStateOf(0) }
     val crashReport = remember(crashRefresh) { CrashLog.read(context) }
 
@@ -262,8 +263,11 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
 
         PageHeader(
             title = "Assistant settings",
-            description = "Voice and local voice models for the offline assistant.",
+            description = "Voice, personality and local models for the offline assistant.",
         )
+        TextButton(onClick = { showAdvanced = !showAdvanced }) {
+            Text(if (showAdvanced) "Hide advanced model settings" else "Advanced model settings")
+        }
 
         SectionCard(title = "Phonon 31m (fast)") {
             Column(
@@ -553,6 +557,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
+        if (showAdvanced) {
         SectionCard(title = "Nemotron ASR (streaming)") {
             Column(
                 modifier = Modifier.padding(20.dp),
@@ -794,6 +799,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     )
                 }
             }
+        }
+
         }
 
         SectionCard(title = "Call") {
@@ -1152,6 +1159,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
+        if (showAdvanced) {
         SectionCard(title = "Diagnostics") {
             Column(
                 modifier = Modifier.padding(20.dp),
@@ -1186,6 +1194,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
+        }
         Spacer(Modifier.height(8.dp))
     }
 }

@@ -356,8 +356,29 @@ private fun TaxPotBand(
     val estimate = remember(invoices, visits, today) {
         estimateSelfAssessmentTax(estimatedTaxYearProfit(invoices, visits, today))
     }
-    if (ratePercent <= 0.0 || pot <= 0.0) return
     val year = remember(today) { ukTaxYearContaining(today) }
+    if (ratePercent <= 0.0) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ) {
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Income tax",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "Set your tax rate in Settings → Tax and this card will show what " +
+                        "to put aside and an estimated HMRC bill.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+        return
+    }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
@@ -395,6 +416,11 @@ private fun TaxPotBand(
                 Text(
                     text = detail + " · from invoiced minus materials logged",
                     style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text = "Net after tax: ${money((estimate.profit - estimate.total).coerceAtLeast(0.0))}",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
                 )
             }
         }
