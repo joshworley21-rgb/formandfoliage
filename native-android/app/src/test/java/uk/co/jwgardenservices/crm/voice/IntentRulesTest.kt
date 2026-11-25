@@ -84,6 +84,9 @@ class IntentRulesTest {
         Case("how much are my running costs", SpokenIntent.RunningCosts),
         Case("what's my biggest cost", SpokenIntent.RunningCosts),
         Case("what's my profit this month", SpokenIntent.Profit),
+        Case("what's my break-even", SpokenIntent.BreakEven),
+        Case("who's my least profitable client", SpokenIntent.LeastProfitable),
+        Case("what should I chase first", SpokenIntent.ChaseFirst),
         Case("how's business", SpokenIntent.Health),
 
         Case("how much for forty square metres of turf", SpokenIntent.Quote, cloud = true),

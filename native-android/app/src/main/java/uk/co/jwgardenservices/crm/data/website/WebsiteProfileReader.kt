@@ -25,6 +25,13 @@ object WebsiteProfileReader {
     private const val MAX_PROFILE_CHARS = 2_400
     private const val MAX_LINE = 220
 
+    /** Buttons and "read more" links are not descriptions of the work. */
+    private val CALL_TO_ACTION = Regex(
+        "^(find out more|read more|learn more|see more|view|book|call us|" +
+            "get in touch|send us|contact us|click|discover|explore|request a quote)\\b",
+        RegexOption.IGNORE_CASE,
+    )
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(18, TimeUnit.SECONDS)
@@ -61,7 +68,13 @@ object WebsiteProfileReader {
         }
 
         val texts = pages.map { (url, html) -> url.toString() to stripHtml(html) }
-        val profile = buildProfile(texts)
+        val facts = pages.map { (_, html) -> facts(html) }
+        val profile = buildProfile(
+            texts = texts,
+            title = facts.firstOrNull()?.title.orEmpty(),
+            description = facts.firstOrNull()?.description.orEmpty(),
+            headings = facts.flatMap { it.headings },
+        )
             ?: throw IllegalStateException(
                 "I could not find enough readable text on that website. Try again or edit " +
                     "the profile by hand.",
@@ -190,11 +203,56 @@ object WebsiteProfileReader {
             match.groupValues[1].toIntOrNull()?.let { String(Character.toChars(it)) } ?: " "
         }
 
+    private data class Facts(
+        val title: String,
+        val description: String,
+        val headings: List<String>,
+    )
+
+    /** Title, meta description and real headings, before the tags are stripped. */
+    private fun facts(html: String): Facts {
+        val title = Regex("<title[^>]*>([\\s\\S]*?)</title>", RegexOption.IGNORE_CASE)
+            .find(html)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.let(::inlineText)
+            .orEmpty()
+        val description = Regex(
+            "<meta[^>]+name=[\"']description[\"'][^>]+content=[\"']([^\"']*)[\"'][^>]*>",
+            RegexOption.IGNORE_CASE,
+        ).find(html)?.groupValues?.getOrNull(1)
+            ?: Regex(
+                "<meta[^>]+content=[\"']([^\"']*)[\"'][^>]+name=[\"']description[\"'][^>]*>",
+                RegexOption.IGNORE_CASE,
+            ).find(html)?.groupValues?.getOrNull(1)
+        val headings = Regex("<h[1-3][^>]*>([\\s\\S]*?)</h[1-3]>", RegexOption.IGNORE_CASE)
+            .findAll(html)
+            .map { inlineText(it.groupValues[1]) }
+            .filter { it.length in 4..90 }
+            .distinct()
+            .toList()
+        return Facts(
+            title = title,
+            description = description?.let(::decodeEntities)?.trim().orEmpty(),
+            headings = headings,
+        )
+    }
+
+    private fun inlineText(html: String): String =
+        decodeEntities(html.replace(Regex("<[^>]+>"), " "))
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
     /**
      * Pure text → profile extraction, so the shape can be tested without a
      * network. [texts] is page URL → stripped page text.
      */
-    internal fun buildProfile(texts: List<Pair<String, String>>): String? {
+    internal fun buildProfile(
+        texts: List<Pair<String, String>>,
+        title: String = "",
+        description: String = "",
+        headings: List<String> = emptyList(),
+    ): String? {
         if (texts.isEmpty()) return null
         val all = texts.joinToString("\n") { it.second }
         val lines = all.lines()
@@ -207,17 +265,37 @@ object WebsiteProfileReader {
                     RegexOption.IGNORE_CASE,
                 ).containsMatchIn(line)
             }
+            .filterNot { CALL_TO_ACTION.containsMatchIn(it) }
             .distinct()
         if (lines.isEmpty()) return null
 
-        val business = lines.firstOrNull { line ->
-            line.length in 40..MAX_LINE && Regex(
-                "garden|landscap|maintenance|since \\d{4}|based in",
-                RegexOption.IGNORE_CASE,
-            ).containsMatchIn(line)
-        } ?: lines.firstOrNull()
+        val businessLine = lines.firstOrNull { it.contains("JW Garden Services", true) }
+            ?: lines.firstOrNull { line ->
+                line.length in 40..MAX_LINE && Regex(
+                    "garden|landscap|maintenance|since \\d{4}|based in",
+                    RegexOption.IGNORE_CASE,
+                ).containsMatchIn(line)
+            }
+            ?: lines.firstOrNull()
+        val business = listOfNotNull(
+            title.trim().takeIf { it.isNotBlank() && it.length <= 120 && it != businessLine },
+            description.trim().takeIf { it.isNotBlank() && it != businessLine },
+            businessLine,
+        ).distinct().joinToString(". ").take(360)
 
-        val services = pick(
+        val serviceHeadings = headings.filter { heading ->
+            Regex(
+                "maintenance|landscap|patio|fenc|deck|turf|plant|design|commercial|" +
+                    "grounds|hedge|lawn|clearance|garden",
+                RegexOption.IGNORE_CASE,
+            ).containsMatchIn(heading) &&
+                !Regex(
+                    "tell us|contact|areas we cover|recent work|gardeners in|" +
+                        "garden services in|about us",
+                    RegexOption.IGNORE_CASE,
+                ).containsMatchIn(heading)
+        }
+        val services = (serviceHeadings + pick(
             lines = lines,
             keywords = listOf(
                 "garden maintenance", "maintenance", "landscaping", "patio", "path",
@@ -225,7 +303,7 @@ object WebsiteProfileReader {
                 "lawn", "weeding", "commercial", "grounds", "clearance",
             ),
             limit = 5,
-        )
+        )).distinct().take(5)
         val areas = pick(
             lines = lines,
             keywords = listOf(

@@ -182,8 +182,8 @@ deliberately left on the web for now. The smaller known gaps:
 - **Secretary** is the voice assistant inside Business. It is also on the mic
   button in the Dashboard header. Common business questions are answered
   locally from the CRM and the stored profile: services, areas, credentials,
-  running costs, monthly profit and the health score. These never need the
-  cloud.
+  running costs, monthly profit, break-even, the lowest-earning client, what
+  to chase first and the health score. These never need the cloud.
 - **Teaching it the business**: Settings → Business knowledge. There are two
   scans:
   - **Scan on phone** is free: the app reads the home page plus about,

@@ -20,6 +20,7 @@ import uk.co.jwgardenservices.crm.domain.buildBusinessSnapshot
 import uk.co.jwgardenservices.crm.domain.coachInsights
 import uk.co.jwgardenservices.crm.domain.coachScore
 import uk.co.jwgardenservices.crm.domain.costBreakdown
+import uk.co.jwgardenservices.crm.domain.daysOverdue
 import uk.co.jwgardenservices.crm.domain.formatDayMonth
 import uk.co.jwgardenservices.crm.domain.formatDayMonthYear
 import uk.co.jwgardenservices.crm.domain.formatShortWeekday
@@ -30,6 +31,7 @@ import uk.co.jwgardenservices.crm.domain.localDate
 import uk.co.jwgardenservices.crm.domain.money
 import uk.co.jwgardenservices.crm.domain.moneyCompact
 import uk.co.jwgardenservices.crm.domain.monthlyRunningCosts
+import uk.co.jwgardenservices.crm.domain.overdueInvoices
 import uk.co.jwgardenservices.crm.domain.parseDate
 import uk.co.jwgardenservices.crm.domain.parseSpokenNumber
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
@@ -308,6 +310,9 @@ class VoiceActionRunner(
             SpokenIntent.BusinessInfo -> businessInfo(text)
             SpokenIntent.RunningCosts -> runningCosts()
             SpokenIntent.Profit -> profit()
+            SpokenIntent.BreakEven -> breakEven()
+            SpokenIntent.LeastProfitable -> leastProfitableClient()
+            SpokenIntent.ChaseFirst -> chaseFirst()
             SpokenIntent.Health -> health()
             SpokenIntent.DayWrapUp -> startWrapUp()
             SpokenIntent.RaiseInvoice -> raiseInvoice(text)
@@ -1937,6 +1942,84 @@ class VoiceActionRunner(
         return "${money(snapshot.netProfit)} left this month from " +
             "${money(snapshot.monthIncome)} of work, about $margin percent after materials " +
             "and running costs.$overheadNote"
+    }
+
+    private suspend fun breakEven(): String {
+        val costs = repository.observeRunningCosts().first()
+        if (costs.isEmpty()) {
+            return "I don't have running costs yet, so there is no break-even figure. " +
+                "Add them in Business, Costs."
+        }
+        val monthly = costs.monthlyRunningCosts()
+        val since = LocalDate.now().minusMonths(3)
+        val recent = repository.observeVisits().first().filter { visit ->
+            if (visit.missed) return@filter false
+            parseDate(visit.visitDate)?.let { !it.isBefore(since) } == true
+        }
+        val average = recent.sumOf { it.amount } / 3.0
+        if (average <= 0.0) {
+            return "You need ${money(monthly)} a month to cover running costs, but there is " +
+                "no recent work to compare it with."
+        }
+        return if (average >= monthly) {
+            "You need ${money(monthly)} a month to cover running costs. The last three " +
+                "months average ${money(average)} of work, so you are covering it."
+        } else {
+            "You need ${money(monthly)} a month to cover running costs. The last three " +
+                "months average ${money(average)}, so you are short by " +
+                "${money(monthly - average)} a month."
+        }
+    }
+
+    private suspend fun leastProfitableClient(): String {
+        val since = LocalDate.now().minusDays(90)
+        val clients = repository.observeClients().first().associateBy { it.id }
+        val rows = repository.observeVisits().first()
+            .filter { visit ->
+                !visit.missed &&
+                    visit.hours > 0.5 &&
+                    parseDate(visit.visitDate)?.let { !it.isBefore(since) } == true
+            }
+            .groupBy { it.clientId }
+            .mapValues { (_, visits) ->
+                val hours = visits.sumOf { it.hours }
+                val net = visits.sumOf { it.amount - it.materialsCost }
+                Triple(hours, net, if (hours > 0.0) net / hours else 0.0)
+            }
+            .filter { it.value.first >= 1.0 }
+        val lowest = rows.minByOrNull { it.value.third }
+            ?: return "No client has enough logged hours in the last three months to compare."
+        val (hours, net, rate) = lowest.value
+        val name = clients[lowest.key]?.name ?: "A client"
+        return "$name is your lowest earner by hourly return: about ${money(rate)} an hour " +
+            "across ${hoursLabel(hours)} in the last three months, ${money(net)} after materials."
+    }
+
+    private suspend fun chaseFirst(): String {
+        val invoices = repository.observeInvoices().first()
+        val clients = repository.observeClients().first().associateBy { it.id }
+        val overdue = overdueInvoices(invoices)
+            .sortedByDescending { daysOverdue(it) }
+        if (overdue.isNotEmpty()) {
+            val first = overdue.first()
+            val days = daysOverdue(first)
+            val name = clients[first.clientId]?.name ?: "a client"
+            val rest = if (overdue.size > 1) {
+                " There ${if (overdue.size == 2) "is" else "are"} " +
+                    "${overdue.size - 1} more overdue after that."
+            } else {
+                ""
+            }
+            return "Chase $name first: ${money(first.total)}, $days " +
+                "${if (days == 1L) "day" else "days"} over.$rest"
+        }
+        val unbilled = repository.observeVisits().first().filter { !it.billed && !it.missed }
+        if (unbilled.isNotEmpty()) {
+            val total = unbilled.sumOf { it.amount }
+            return "Nothing is overdue. The next move is billing ${money(total)} across " +
+                "${unbilled.size} ${if (unbilled.size == 1) "visit" else "visits"}."
+        }
+        return "Nothing is overdue and nothing is waiting to be billed. You are clear."
     }
 
     private suspend fun health(): String {

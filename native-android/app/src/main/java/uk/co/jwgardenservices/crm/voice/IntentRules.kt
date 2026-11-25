@@ -70,6 +70,34 @@ object IntentRules {
             ) -> SpokenIntent.RunningCosts
 
             text.containsAny(
+                "break even",
+                "break-even",
+                "breaking even",
+                "cover my costs",
+                "cover the costs",
+                "cover its costs",
+            ) -> SpokenIntent.BreakEven
+
+            text.containsAny(
+                "least profitable",
+                "worst client",
+                "lowest earning",
+                "least valuable",
+                "lowest paying",
+                "smallest client",
+            ) -> SpokenIntent.LeastProfitable
+
+            text.containsAny(
+                "chase first",
+                "who should i chase",
+                "what should i chase",
+                "who needs chasing",
+                "what needs attention",
+                "what should i do first",
+                "where do i start",
+            ) -> SpokenIntent.ChaseFirst
+
+            text.containsAny(
                 "health score",
                 "business health",
                 "how healthy",
@@ -82,9 +110,6 @@ object IntentRules {
                 "net profit",
                 "profit",
                 "margin",
-                "break even",
-                "break-even",
-                "breaking even",
             ) -> SpokenIntent.Profit
 
             // Free lookups: weather and facts need no cloud key. Placed before
@@ -306,6 +331,9 @@ object IntentRules {
             SpokenIntent.BusinessInfo,
             SpokenIntent.RunningCosts,
             SpokenIntent.Profit,
+            SpokenIntent.BreakEven,
+            SpokenIntent.LeastProfitable,
+            SpokenIntent.ChaseFirst,
             SpokenIntent.Health -> false
             else -> kind == SpokenIntent.Quote || text.containsAny(
                 "traffic",
@@ -349,6 +377,9 @@ object IntentRules {
         SpokenIntent.BusinessInfo,
         SpokenIntent.RunningCosts,
         SpokenIntent.Profit,
+        SpokenIntent.BreakEven,
+        SpokenIntent.LeastProfitable,
+        SpokenIntent.ChaseFirst,
         SpokenIntent.Health,
         SpokenIntent.SayAgain -> true
 
