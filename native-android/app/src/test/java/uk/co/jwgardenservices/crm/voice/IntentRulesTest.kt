@@ -78,6 +78,14 @@ class IntentRulesTest {
         Case("run through today's jobs", SpokenIntent.DayWrapUp),
         Case("do my timesheets", SpokenIntent.DayWrapUp),
 
+        Case("do you cover Tring", SpokenIntent.BusinessInfo),
+        Case("what services do you offer", SpokenIntent.BusinessInfo),
+        Case("are you insured", SpokenIntent.BusinessInfo),
+        Case("how much are my running costs", SpokenIntent.RunningCosts),
+        Case("what's my biggest cost", SpokenIntent.RunningCosts),
+        Case("what's my profit this month", SpokenIntent.Profit),
+        Case("how's business", SpokenIntent.Health),
+
         Case("how much for forty square metres of turf", SpokenIntent.Quote, cloud = true),
         Case("price up a hedge trim for Mrs Jones", SpokenIntent.Quote, cloud = true),
         Case("what's the weather tomorrow", SpokenIntent.Other, cloud = true),

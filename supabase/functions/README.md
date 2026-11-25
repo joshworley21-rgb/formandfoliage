@@ -20,6 +20,7 @@ the phone talks to Supabase directly, and nothing needs a web server.
 | `monzo-webhook`      | new — Monzo posts payments here as they land                 | Monzo, via a secret token in the URL                      |
 | `voice-route`        | new — the voice assistant's cloud fallback                   | signed-in user                                            |
 | `voice-speak`        | new — natural online voice (text in, MP3 out)                | signed-in user                                            |
+| `business-profile`   | new — reads the business website and distils Secretary's profile | signed-in user                                        |
 
 `public-quote` is how the customer's accept page reaches a quote: the `quotes`
 table has no anon policy, so this function is the only way in and it returns
@@ -31,6 +32,12 @@ assistant can answer live-pricing and quote turns without a key inside the APK.
 opts into the natural online voice. Only the reply text is sent — not their
 speech; the assistant's clients, jobs, hours and invoices stay on-device
 unless an unknown question is routed online.
+
+`business-profile` is the third `OPENAI_API_KEY` consumer. It is started only
+when the owner taps "Learn from website" in Settings, fetches a handful of
+public pages from the address they entered, and returns a compact profile.
+There is no background crawl. Deploy it with
+`supabase functions deploy business-profile`.
 
 `create-invoice` has to run here rather than on the phone because
 `next_invoice_number()` is granted to `service_role` only — invoice numbers must

@@ -36,7 +36,7 @@ fun PageHeader(
     title: String,
     description: String? = null,
     onRefresh: (() -> Unit)? = null,
-    onAssistant: (() -> Unit)? = null,
+    onSecretary: (() -> Unit)? = null,
     action: (@Composable () -> Unit)? = null,
 ) {
     Row(
@@ -57,9 +57,9 @@ fun PageHeader(
         if (action != null) {
             action()
         } else {
-            if (onAssistant != null) {
-                IconButton(onClick = onAssistant) {
-                    Icon(Icons.Outlined.Mic, contentDescription = "Call assistant")
+            if (onSecretary != null) {
+                IconButton(onClick = onSecretary) {
+                    Icon(Icons.Outlined.Mic, contentDescription = "Call Secretary")
                 }
             }
             if (onRefresh != null) {

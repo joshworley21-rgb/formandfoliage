@@ -14,13 +14,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -31,7 +36,9 @@ import uk.co.jwgardenservices.crm.core.Branding
 import uk.co.jwgardenservices.crm.core.TaxReservePrefs
 import androidx.compose.material3.Switch
 import java.time.LocalDate
+import uk.co.jwgardenservices.crm.domain.formatDateTime
 import uk.co.jwgardenservices.crm.domain.invoicesCsv
+import uk.co.jwgardenservices.crm.domain.parseTimestamp
 import uk.co.jwgardenservices.crm.domain.taxYearCsv
 import uk.co.jwgardenservices.crm.domain.ukTaxYearContaining
 import uk.co.jwgardenservices.crm.domain.ukTaxYearLabel
@@ -131,6 +138,12 @@ fun SettingsScreen(
     var inviteError by remember { mutableStateOf<String?>(null) }
     var removing by remember { mutableStateOf<TeamMember?>(null) }
 
+    var knowledgeOpen by remember { mutableStateOf(false) }
+    var knowledgeBusy by remember { mutableStateOf(false) }
+    var knowledgeOnPhoneBusy by remember { mutableStateOf(false) }
+    var knowledgeError by remember { mutableStateOf<String?>(null) }
+    var knowledgeNote by remember { mutableStateOf<String?>(null) }
+
     var appLockOn by remember { mutableStateOf(AppLock.isEnabled(context)) }
     val taxRate by TaxReservePrefs.ratePercent.collectAsStateWithLifecycle()
     val themeMode = LocalThemeMode.current
@@ -169,6 +182,62 @@ fun SettingsScreen(
                     failure.message ?: "Could not remove access",
                     Toast.LENGTH_SHORT,
                 ).show()
+            }
+        }
+    }
+
+    fun learnFromWebsite() {
+        val url = form.publicSiteUrl.trim()
+        if (url.isBlank()) {
+            knowledgeError = "Add the website address above first."
+            return
+        }
+        scope.launch {
+            knowledgeBusy = true
+            knowledgeError = null
+            knowledgeNote = null
+            try {
+                val result = viewModel.learnBusinessProfile(url)
+                knowledgeNote = "Learned from ${result.pages.size} " +
+                    (if (result.pages.size == 1) "page with AI." else "pages with AI.")
+                Toast.makeText(context, "Secretary has read the website", Toast.LENGTH_SHORT).show()
+            } catch (failure: Exception) {
+                // No key, no signal for the AI route, or the model refused:
+                // fall back to the free scan rather than leaving a dead end.
+                try {
+                    val local = viewModel.learnBusinessProfileLocally(url)
+                    knowledgeNote = "AI was unavailable — used the free on-phone scan " +
+                        "(${local.pages.size} ${if (local.pages.size == 1) "page" else "pages"})."
+                } catch (localFailure: Exception) {
+                    knowledgeError = localFailure.message
+                        ?: failure.message
+                        ?: "Could not read that website"
+                }
+            } finally {
+                knowledgeBusy = false
+            }
+        }
+    }
+
+    fun learnOnPhone() {
+        val url = form.publicSiteUrl.trim()
+        if (url.isBlank()) {
+            knowledgeError = "Add the website address above first."
+            return
+        }
+        scope.launch {
+            knowledgeOnPhoneBusy = true
+            knowledgeError = null
+            knowledgeNote = null
+            try {
+                val result = viewModel.learnBusinessProfileLocally(url)
+                knowledgeNote = "Read ${result.pages.size} " +
+                    (if (result.pages.size == 1) "page on this phone." else "pages on this phone.")
+                Toast.makeText(context, "Website read on this phone", Toast.LENGTH_SHORT).show()
+            } catch (failure: Exception) {
+                knowledgeError = failure.message ?: "Could not read that website"
+            } finally {
+                knowledgeOnPhoneBusy = false
             }
         }
     }
@@ -263,13 +332,13 @@ fun SettingsScreen(
         }
 
         item {
-            SectionCard(title = "Offline assistant") {
+            SectionCard(title = "Secretary") {
                 Column(
                     modifier = Modifier.padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
-                        text = "Choose the voice and check which local voice models are installed.",
+                        text = "Choose the voice Secretary uses and check which local models are installed.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     OutlinedButton(onClick = onOpenAssistantSettings) {
@@ -442,6 +511,127 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                }
+            }
+        }
+
+        item {
+            SectionCard(title = "Business knowledge") {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = "Secretary uses this profile to answer questions about what you do, " +
+                            "where you cover and how you talk. Learn it from your website, then " +
+                            "correct anything that is wrong.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    val profile = state.settings?.businessProfile
+                    if (profile.isNullOrBlank()) {
+                        Text(
+                            text = "Not learned yet — Secretary is using the built-in profile.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    } else {
+                        Text(
+                            text = profile.take(420) + if (profile.length > 420) "…" else "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        val source = state.settings?.businessProfileSource
+                        val updated = parseTimestamp(
+                            state.settings?.businessProfileUpdatedAt,
+                        )?.formatDateTime()
+                        if (!source.isNullOrBlank() || updated != null) {
+                            Text(
+                                text = listOfNotNull(
+                                    source?.takeIf { it.isNotBlank() }?.let { "From $it" },
+                                    updated,
+                                ).joinToString(" · "),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+
+                    if (knowledgeError != null) {
+                        Text(
+                            text = knowledgeError.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    if (knowledgeNote != null) {
+                        Text(
+                            text = knowledgeNote.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Button(
+                            onClick = ::learnOnPhone,
+                            enabled = !knowledgeBusy && !knowledgeOnPhoneBusy &&
+                                form.publicSiteUrl.isNotBlank(),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            if (knowledgeOnPhoneBusy) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                )
+                            } else {
+                                Icon(Icons.Outlined.PhoneAndroid, contentDescription = null)
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (knowledgeOnPhoneBusy) "Reading…" else "Scan on phone")
+                        }
+                        OutlinedButton(
+                            onClick = ::learnFromWebsite,
+                            enabled = !knowledgeBusy && !knowledgeOnPhoneBusy &&
+                                form.publicSiteUrl.isNotBlank(),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            if (knowledgeBusy) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            } else {
+                                Icon(Icons.Outlined.AutoAwesome, contentDescription = null)
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (knowledgeBusy) "Thinking…" else "Use AI")
+                        }
+                    }
+
+                    TextButton(
+                        onClick = { knowledgeOpen = true },
+                        enabled = !knowledgeBusy && !knowledgeOnPhoneBusy,
+                        contentPadding = PaddingValues(horizontal = 0.dp, vertical = 2.dp),
+                    ) {
+                        Icon(Icons.Outlined.Edit, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Edit knowledge")
+                    }
+
+                    Text(
+                        text = "On-phone is free and needs no API key; it keeps the services, " +
+                            "areas, credentials and contact details it can read. Use AI for a " +
+                            "better written profile — that one uses your OpenAI key. Both read " +
+                            "the home page plus about, services, areas and contact pages.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
@@ -787,4 +977,67 @@ fun SettingsScreen(
         )
     }
 
+    if (knowledgeOpen) {
+        BusinessKnowledgeDialog(
+            initial = state.settings?.businessProfile.orEmpty(),
+            onDismiss = { knowledgeOpen = false },
+            onSave = { profile ->
+                knowledgeOpen = false
+                scope.launch {
+                    knowledgeError = null
+                    try {
+                        viewModel.saveBusinessKnowledge(
+                            profile,
+                            state.settings?.businessProfileSource,
+                        )
+                        knowledgeNote = if (profile.isBlank()) {
+                            "Reset to the built-in profile."
+                        } else {
+                            "Business knowledge saved."
+                        }
+                        Toast.makeText(context, "Business knowledge saved", Toast.LENGTH_SHORT).show()
+                    } catch (failure: Exception) {
+                        knowledgeError = failure.message ?: "Could not save the profile"
+                    }
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun BusinessKnowledgeDialog(
+    initial: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var text by remember(initial) { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Business knowledge") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "This is what Secretary reads about the business. Keep it factual " +
+                        "and short. Leave it empty to go back to the built-in profile.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("Profile") },
+                    minLines = 10,
+                    maxLines = 16,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(text) }) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }

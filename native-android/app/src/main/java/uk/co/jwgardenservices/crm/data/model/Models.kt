@@ -102,6 +102,37 @@ data class Invoice(
     @SerialName("updated_at") val updatedAt: String? = null,
 )
 
+/**
+ * One recurring cost of running the business: the van, insurance, tools,
+ * software. [amount] is what the owner pays per [frequency] (weekly, monthly,
+ * quarterly or annual); the monthly equivalent is derived in the domain layer.
+ */
+@Serializable
+@Entity(
+    tableName = "running_costs",
+    indices = [Index("category")],
+)
+data class RunningCost(
+    @PrimaryKey val id: String,
+    @SerialName("user_id") val userId: String,
+    val name: String,
+    val category: String = "other",
+    val amount: Double = 0.0,
+    val frequency: String = "monthly",
+    val notes: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null,
+)
+
+/** The writable part of a running cost, as the editor collects it. */
+data class RunningCostDraft(
+    val name: String,
+    val category: String,
+    val amount: Double,
+    val frequency: String,
+    val notes: String? = null,
+)
+
 @Serializable
 @Entity(tableName = "invoice_items", indices = [Index("invoiceId")])
 data class InvoiceItem(
@@ -129,6 +160,10 @@ data class Settings(
     val email: String? = null,
     @SerialName("reply_to_email") val replyToEmail: String? = null,
     @SerialName("public_site_url") val publicSiteUrl: String? = null,
+    /** Distilled from the website, or edited by hand; what Secretary knows. */
+    @SerialName("business_profile") val businessProfile: String? = null,
+    @SerialName("business_profile_source") val businessProfileSource: String? = null,
+    @SerialName("business_profile_updated_at") val businessProfileUpdatedAt: String? = null,
     @SerialName("vat_registered") val vatRegistered: Boolean = false,
     @SerialName("vat_number") val vatNumber: String? = null,
     @SerialName("vat_rate") val vatRate: Double = 20.0,
@@ -329,6 +364,14 @@ data class SettingsDraft(
     val emailSubjectTemplate: String = "Invoice {{invoice_number}} from {{business_name}}",
     val emailBodyTemplate: String =
         "Hi {{client_name}},\n\nPlease find attached invoice {{invoice_number}} for recent garden work.\n\nTotal due: {{total}}{{due_clause}}.\n\nMany thanks,\n{{business_name}}",
+)
+
+/** What came back from the server-side website scan. */
+data class BusinessProfileResult(
+    val profile: String,
+    val sourceUrl: String,
+    val pages: List<String>,
+    val fetchedAt: String? = null,
 )
 
 /** One change applied to every remaining visit in a repeating run. */

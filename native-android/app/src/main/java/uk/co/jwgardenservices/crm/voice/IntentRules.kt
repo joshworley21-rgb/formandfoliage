@@ -29,6 +29,64 @@ object IntentRules {
                 "what else", "what next", "and then", "then what",
             ) -> SpokenIntent.Continue
 
+            // Questions about the business itself are answered from the stored
+            // profile on the phone. Checked before the generic "look up" and
+            // "what is" rules, which would otherwise send them to the web.
+            text.containsAny(
+                "about the business",
+                "about my business",
+                "what services",
+                "what do you do",
+                "services do you",
+                "do you do ",
+                "do you offer",
+                "do you cover",
+                "do you work in",
+                "areas do you cover",
+                "what areas",
+                "where are you based",
+                "where is your business",
+                "are you insured",
+                "are you qualified",
+                "gardeners guild",
+                "city & guilds",
+                "opening hours",
+                "what time do you open",
+                "how far do you travel",
+            ) -> SpokenIntent.BusinessInfo
+
+            // Money the owner can answer without the cloud: what the business
+            // costs, what is left, and how healthy it looks.
+            text.containsAny(
+                "running costs",
+                "overheads",
+                "what do i spend",
+                "what are my costs",
+                "monthly costs",
+                "cost breakdown",
+                "biggest cost",
+                "largest cost",
+                "cost to run",
+            ) -> SpokenIntent.RunningCosts
+
+            text.containsAny(
+                "health score",
+                "business health",
+                "how healthy",
+                "how's business",
+                "hows business",
+                "business score",
+            ) -> SpokenIntent.Health
+
+            text.containsAny(
+                "net profit",
+                "profit",
+                "margin",
+                "break even",
+                "break-even",
+                "breaking even",
+            ) -> SpokenIntent.Profit
+
             // Free lookups: weather and facts need no cloud key. Placed before
             // the diary rules so "what's the forecast" is not a schedule query.
             text.containsAny("weather", "forecast") -> SpokenIntent.Weather
@@ -243,7 +301,12 @@ object IntentRules {
         // made the assistant refuse with "online answers are switched off"
         // before it ever tried Open-Meteo or Wikipedia.
         val needsCloud = when (kind) {
-            SpokenIntent.Weather, SpokenIntent.Lookup -> false
+            SpokenIntent.Weather,
+            SpokenIntent.Lookup,
+            SpokenIntent.BusinessInfo,
+            SpokenIntent.RunningCosts,
+            SpokenIntent.Profit,
+            SpokenIntent.Health -> false
             else -> kind == SpokenIntent.Quote || text.containsAny(
                 "traffic",
                 "supplier",
@@ -283,6 +346,10 @@ object IntentRules {
         SpokenIntent.AdjustCharge,
         SpokenIntent.AddExpense,
         SpokenIntent.NextVisitNote,
+        SpokenIntent.BusinessInfo,
+        SpokenIntent.RunningCosts,
+        SpokenIntent.Profit,
+        SpokenIntent.Health,
         SpokenIntent.SayAgain -> true
 
         else -> false

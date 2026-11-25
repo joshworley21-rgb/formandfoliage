@@ -53,6 +53,7 @@ import uk.co.jwgardenservices.crm.data.model.RebuildInvoiceResult
 import uk.co.jwgardenservices.crm.data.model.Quote
 import uk.co.jwgardenservices.crm.data.model.QuoteDraft
 import uk.co.jwgardenservices.crm.data.model.QuoteItem
+import uk.co.jwgardenservices.crm.data.model.RunningCost
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
 import uk.co.jwgardenservices.crm.data.model.SendInvoiceResult
 import uk.co.jwgardenservices.crm.data.model.SendQuoteResult
@@ -108,6 +109,7 @@ class CrmRepository(
     internal val emailEvents = database.invoiceEmailEventDao()
     internal val quotes = database.quoteDao()
     internal val quoteLines = database.quoteItemDao()
+    internal val runningCosts = database.runningCostDao()
     internal val settings = database.settingsDao()
     internal val outbox = database.outboxDao()
 
@@ -124,6 +126,7 @@ class CrmRepository(
     }
     suspend fun discardFailedWrite(id: String) = outbox.delete(id)
     fun observeQuotes(): Flow<List<Quote>> = quotes.observeAll()
+    fun observeRunningCosts(): Flow<List<RunningCost>> = runningCosts.observeAll()
     fun observeEnquiries(): Flow<List<Enquiry>> = enquiries.observeAll()
     fun observeInvoiceEmailEvents(): Flow<List<InvoiceEmailEvent>> = emailEvents.observeAll()
     fun observeTeam(): Flow<List<TeamMember>> = team.observeAll()
@@ -213,6 +216,7 @@ class CrmRepository(
                 settings.clear()
                 quotes.clear()
                 quoteLines.clear()
+                runningCosts.clear()
                 enquiries.clear()
                 emailEvents.clear()
                 team.clear()
@@ -286,6 +290,19 @@ class CrmRepository(
                     filter { eq("user_id", uid) }
                 }.decodeList<Settings>().firstOrNull()
             }
+            // The running-costs table arrived after the first shipped build.
+            // If the migration has not been applied yet, a missing table must
+            // not stop clients, visits and invoices refreshing — but the rows
+            // already on the phone must not be wiped either.
+            val costRows = async {
+                val rows = runCatching {
+                    fetchAll<RunningCost>("running_costs") {
+                        order("category", order = Order.ASCENDING)
+                    }
+                }.getOrNull()
+                (rows ?: emptyList<RunningCost>()) to (rows != null)
+            }
+            val costs = costRows.await()
             Snapshot(
                 clients = clients.await(),
                 visits = visits.await(),
@@ -293,6 +310,8 @@ class CrmRepository(
                 invoiceItems = invoiceLines.await(),
                 quotes = quoteRows.await(),
                 quoteItems = quoteItemRows.await(),
+                runningCosts = costs.first,
+                runningCostsAvailable = costs.second,
                 enquiries = enquiryRows.await(),
                 invoiceEmailEvents = emailEventRows.await(),
                 team = teamRows.await(),
@@ -320,6 +339,10 @@ class CrmRepository(
             quotes.upsertAll(snapshot.quotes)
             quoteLines.clear()
             quoteLines.upsertAll(snapshot.quoteItems)
+            if (snapshot.runningCostsAvailable) {
+                runningCosts.clear()
+                runningCosts.upsertAll(snapshot.runningCosts)
+            }
             enquiries.clear()
             enquiries.upsertAll(snapshot.enquiries)
             emailEvents.clear()
@@ -340,6 +363,7 @@ class CrmRepository(
             visits.clear()
             jobs.clear()
             invoices.clear()
+            runningCosts.clear()
             settings.clear()
             jobTasks.clear()
             outbox.clear()
@@ -1100,6 +1124,8 @@ class CrmRepository(
         val invoiceItems: List<InvoiceItem>,
         val quotes: List<Quote>,
         val quoteItems: List<QuoteItem>,
+        val runningCosts: List<RunningCost>,
+        val runningCostsAvailable: Boolean = true,
         val enquiries: List<Enquiry>,
         val invoiceEmailEvents: List<InvoiceEmailEvent>,
         val team: List<TeamMember>,

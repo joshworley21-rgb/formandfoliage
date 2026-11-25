@@ -366,7 +366,10 @@ Deno.serve(
     const input = (await request.json()) as SpokenInput;
     const query = text(input.query, 500);
     const topic = text(input.client_or_topic, 120);
-    const businessContext = text(input.context, 2000);
+    // The profile learned from the website rides in this context alongside
+    // clients, jobs and money. 2,000 characters cut it off mid-sentence; 6,000
+    // still leaves the turn comfortably inside the model's window.
+    const businessContext = text(input.context, 6000);
     if (!query) return json({ error: "A spoken query is required" }, 400);
 
     const mode = text(input.mode, 20) || "answer";

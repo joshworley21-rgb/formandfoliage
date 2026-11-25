@@ -262,8 +262,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         TextButton(onClick = onBack) { Text("Back") }
 
         PageHeader(
-            title = "Assistant settings",
-            description = "Voice, personality and local models for the offline assistant.",
+            title = "Secretary settings",
+            description = "Voice, personality and local models for Secretary.",
         )
         TextButton(onClick = { showAdvanced = !showAdvanced }) {
             Text(if (showAdvanced) "Hide advanced model settings" else "Advanced model settings")
@@ -1167,7 +1167,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             ) {
                 Text(
                     text = if (crashReport.isNullOrBlank()) {
-                        "No crash recorded. If the assistant disappears unexpectedly, reopen the app and share this report; it includes native crashes and low-memory kills."
+                        "No crash recorded. If Secretary disappears unexpectedly, reopen the app and share this report; it includes native crashes and low-memory kills."
                     } else {
                         "A crash report is available. Share it to diagnose the last failure."
                     },
@@ -1180,7 +1180,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                             ShareText.share(
                                 context,
                                 CrashLog.diagnostics(context),
-                                "Assistant diagnostics",
+                                "Secretary diagnostics",
                             )
                         },
                     ) { Text("Share report") }

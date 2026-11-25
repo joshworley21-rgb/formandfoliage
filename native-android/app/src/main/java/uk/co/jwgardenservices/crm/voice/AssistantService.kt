@@ -95,6 +95,7 @@ class AssistantService : Service() {
             shareWhatsApp = { invoiceId, message ->
                 shareInvoiceWhatsAppByVoice(invoiceId, message)
             },
+            bundledBusinessProfile = { BusinessBrain.load(this) },
         )
     }
 
@@ -586,12 +587,12 @@ class AssistantService : Service() {
                 // you" — and that is worth saying once, with the fix.
                 if (!micHeardAnything && !hearHintGiven && now - lastHeardAt > 20_000) {
                     hearHintGiven = true
-                    setNotification("No microphone input — check Assistant settings")
+                    setNotification("No microphone input — check Secretary settings")
                     val wasListeningNow = speech.isListening()
                     if (wasListeningNow) speech.pauseForSpeech()
                     say(
                         "I'm not getting any sound from the microphone. Check the mic " +
-                            "in the Assistant settings, or that the call is not held by " +
+                            "in Secretary settings, or that the call is not held by " +
                             "another app.",
                     )
                     if (wasListeningNow) speech.resumeAfterSpeech()
@@ -1074,7 +1075,7 @@ class AssistantService : Service() {
         if (!speech.isListening()) return
         CrashLog.note(this, TAG, "pausing the microphone")
         speech.stopListening()
-        setNotification("Assistant paused")
+        setNotification("Secretary paused")
     }
 
     /**
@@ -1693,7 +1694,7 @@ class AssistantService : Service() {
                         "intent=cloud:${intent.intent.wire} in ${System.currentTimeMillis() - started}ms",
                     )
                     if (intent.requiresCloud) {
-                        say("I couldn't get an answer from the online assistant.")
+                        say("I couldn't get an answer from the online service.")
                     } else {
                         runIntent(text, intent)
                     }
@@ -1786,7 +1787,7 @@ class AssistantService : Service() {
                     lowBattery ->
                         "Battery's running low, so I'm offline only. I can't look that up."
                     cloudConversation ->
-                        "I couldn't reach the online assistant. Try again when you have signal."
+                        "I couldn't reach the online service. Try again when you have signal."
                     else -> "Online answers are switched off in settings."
                 },
             )
@@ -1799,7 +1800,7 @@ class AssistantService : Service() {
                         lowBattery ->
                             "Battery's running low, so I'm on the local answers only."
                         cloudConversation ->
-                            "I couldn't reach the online assistant. Try again when you have signal."
+                            "I couldn't reach the online service. Try again when you have signal."
                         else -> HELP_TEXT
                     },
                 )
@@ -1907,6 +1908,17 @@ class AssistantService : Service() {
             .take(8)
         val now = java.time.ZonedDateTime.now()
         val clock = now.format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM, HH:mm"))
+        // The small model needs the services and patch spelled out; without
+        // this it answers like a generic assistant when asked about the work.
+        val profile = runCatching { ServiceLocator.crmRepository.getSettings() }
+            .getOrNull()
+            ?.businessProfile
+            ?.takeIf { it.isNotBlank() }
+            ?: BusinessBrain.load(this)
+        val profileLine = profile
+            ?.replace(Regex("\\s+"), " ")
+            ?.take(700)
+            .orEmpty()
         return """
             You are Josh's personal secretary for a UK gardening business, speaking
             on the phone. Be calm, warm and efficient, like a good British secretary.
@@ -1918,6 +1930,7 @@ class AssistantService : Service() {
             is going. Address him as Josh occasionally, not in every sentence.
             If you do not know, say so briefly and suggest what would help.
             It is $clock. Business facts: ${facts.joinToString("; ").ifBlank { "a UK gardening business" }}
+            Business profile: $profileLine
             ${runCatching { AssistantMemory.lastCall(this) }.getOrNull()?.let { "Last call: $it" } ?: ""}
             ${personalityInstruction()}
         """.trimIndent()
@@ -2294,9 +2307,9 @@ class AssistantService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Assistant microphone",
+                "Secretary microphone",
                 NotificationManager.IMPORTANCE_LOW,
-            ).apply { description = "Keeps the offline assistant listening" }
+            ).apply { description = "Keeps Secretary listening" }
             manager.createNotificationChannel(channel)
         }
 
@@ -2353,12 +2366,13 @@ class AssistantService : Service() {
             "No rush — just shout when you're ready.",
         )
         const val CHECKING_ONLINE = "Checking online rates."
-        const val CALLING_TEXT = "Assistant is dialling…"
-        const val LISTENING_TEXT = "Assistant is listening for your next command"
+        const val CALLING_TEXT = "Secretary is dialling…"
+        const val LISTENING_TEXT = "Secretary is listening for your next command"
         const val CLOUD_TAG = "CloudRouter"
         const val HELP_TEXT = "I can log hours, check your diary, mark a job done, add a client " +
-            "note, read out invoices and takings, say run through today's jobs to wrap up the " +
-            "day, or say undo to reverse the last change."
+            "note, read out invoices and takings, tell you what the business costs and how " +
+            "healthy it looks, answer what services and areas you cover, run through today's " +
+            "jobs to wrap up the day, or undo the last change."
         val TEMPORAL_WORDS = listOf("week", "tomorrow", "month", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
         const val MAX_TURNS = 40
 
@@ -2392,6 +2406,10 @@ private fun confirmationFor(intent: IntentResult): String {
         SpokenIntent.NextJobForClient ->
             if (topic.isEmpty()) "Checking that booking." else "Checking when $topic is next in."
         SpokenIntent.TodayEarnings -> "Checking today's takings."
+        SpokenIntent.BusinessInfo -> "Checking the business profile."
+        SpokenIntent.RunningCosts -> "Checking your running costs."
+        SpokenIntent.Profit -> "Working out this month's profit."
+        SpokenIntent.Health -> "Checking the business health."
         SpokenIntent.DayWrapUp -> "Running through today's jobs."
         SpokenIntent.RaiseInvoice -> "Drafting that invoice."
         SpokenIntent.AdjustCharge -> "Adjusting that visit."

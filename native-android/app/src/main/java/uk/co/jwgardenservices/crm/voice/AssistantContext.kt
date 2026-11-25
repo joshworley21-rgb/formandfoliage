@@ -6,6 +6,7 @@ import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
 import uk.co.jwgardenservices.crm.domain.formatTime
 import uk.co.jwgardenservices.crm.domain.formatWeekday
 import uk.co.jwgardenservices.crm.domain.money
+import uk.co.jwgardenservices.crm.domain.monthlyRunningCosts
 import uk.co.jwgardenservices.crm.domain.parseDate
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
 import java.time.Instant
@@ -42,8 +43,10 @@ class AssistantContext(
         }
         // Services, patch and credentials from the website, so answers about
         // what the business offers or where it covers come from the source of
-        // truth rather than a language model's guess.
-        businessProfile?.takeIf { it.isNotBlank() }?.let { profile ->
+        // truth rather than a language model's guess. A profile learned from
+        // the live site (or edited in Settings) wins over the bundled asset.
+        val storedProfile = settings?.businessProfile?.takeIf { it.isNotBlank() }
+        (storedProfile ?: businessProfile)?.takeIf { it.isNotBlank() }?.let { profile ->
             appendLine("About the business:")
             appendLine(profile)
         }
@@ -106,6 +109,12 @@ class AssistantContext(
             }
         if (visits.isNotEmpty()) {
             appendLine("This week so far: ${money(visits.sumOf { it.amount })} from ${visits.size} visits.")
+        }
+
+        val costs = runCatching { repository.observeRunningCosts().first() }
+            .getOrDefault(emptyList())
+        if (costs.isNotEmpty()) {
+            appendLine("Running costs: ${money(costs.monthlyRunningCosts())} a month.")
         }
 
         if (memories.isNotEmpty()) {

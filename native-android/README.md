@@ -17,9 +17,10 @@ The foundation is in place:
   `uk.co.jwgardenservices.crm://password-reset` deep link.
 - Email/password sign-in, sign-up and password-reset screens; the app switches
   between the auth screen and the workspace from the SDK's session state.
-- Navigation matching the web information architecture: Dashboard, Schedule,
-  Clients, Invoices on the phone bar; Enquiries, Quotes, Visits and Settings
-  behind More.
+- Navigation: Dashboard, Schedule, Business and Invoices on the phone bar;
+  Clients, Enquiries, Quotes and Visits behind More; Settings in the top bar.
+  Business is the old Assistant slot, reworked into running costs, the
+  business coach and Secretary (the voice assistant).
 - A read-only vertical slice of the main screens: today's round, month totals,
   unbilled work, upcoming jobs, invoices, visits and a searchable client list.
   Clients can be added, edited and deleted from the phone.
@@ -164,19 +165,53 @@ deliberately left on the web for now. The smaller known gaps:
   taps send. The job sheet and route stops prefill "I'm on my way"; the client
   card prefills a greeting.
 
+## Business running
+
+- The **Business** tab is the money screen for the owner: **Overview**,
+  **Costs**, **Coach** and **Secretary**. Overview leads with this month's net position
+  (logged work minus materials and recurring costs), the health score and the
+  cost breakdown; Costs stores the recurring bills and converts every
+  frequency to a monthly equivalent; Coach lists what needs attention, what
+  is an opportunity and what is already working.
+- Running costs are real synced records (`running_costs`), not a local note.
+  They are owner-only, follow the same offline outbox as visits and invoices,
+  and are added or edited from the Costs tab.
+- The health score is calculated on the phone from five things: overdue cash,
+  net margin, running-cost share, unbilled work and how full the week is. No
+  model or server call is involved.
+- **Secretary** is the voice assistant inside Business. It is also on the mic
+  button in the Dashboard header. Common business questions are answered
+  locally from the CRM and the stored profile: services, areas, credentials,
+  running costs, monthly profit and the health score. These never need the
+  cloud.
+- **Teaching it the business**: Settings → Business knowledge. There are two
+  scans:
+  - **Scan on phone** is free: the app reads the home page plus about,
+    services, areas and contact pages with OkHttp, strips the HTML and keeps
+    the service names, places, credentials and contact lines it can see. No
+    API key, no OpenAI charge.
+  - **Use AI** sends the same public pages to the `business-profile` Edge
+    Function for a better-written profile. If that route is unavailable it
+    falls back to the free scan automatically.
+
+  Both write the profile to the settings row; Secretary prefers it over the
+  bundled `business_knowledge.txt`, which remains the fallback. The profile
+  can be edited or cleared by hand, and nothing crawls in the background.
+  Deploy `business-profile` and apply the `business_knowledge` migration for
+  the AI option; the `OPENAI_API_KEY` secret is shared with `voice-route`.
+
 ## Voice assistant (offline speech to text)
 
-- The **Assistant** tab (mic icon, centre of the phone bar between Schedule
-  and Invoices) is laid out like a phone call: a status orb, a rolling
-  transcript and one button. Opening the tab is silent and does not dial;
-  pressing the green **Call** button starts the foreground service, plays a
-  UK ringback while the recogniser and voice warm up, then the assistant
-  answers and the orb becomes **Connected**. The microphone permission is
-  requested on that first call, not on entering the tab. Speech is recognised
-  entirely on the phone and partial words appear as an italic bubble while
-  the recognizer is still deciding. Clients lives behind More; staff keep
-  their shorter bar.
-- **The call survives the tab.** Leaving the Assistant tab unbinds the screen
+- The **Secretary** screen (Business → Secretary, or the mic in the Dashboard
+  header) is laid out like a phone call: a status orb, a rolling transcript
+  and one button. Opening it is silent and does not dial; pressing the green
+  **Call** button starts the foreground service, plays a UK ringback while the
+  recogniser and voice warm up, then the assistant answers and the orb becomes
+  **Connected**. The microphone permission is requested on that first call,
+  not on opening the screen. Speech is recognised entirely on the phone and
+  partial words appear as an italic bubble while the recognizer is still
+  deciding. Staff keep their shorter bar.
+- **The call survives the screen.** Leaving the Secretary screen unbinds the screen
   but does not stop a connected call; the microphone closes while you are
   elsewhere and reopens on return. The recognizer itself is process-scoped
   (`SpeechEngine`), so even **End call** followed by a new call reuses the
@@ -200,8 +235,8 @@ deliberately left on the web for now. The smaller known gaps:
   background: a resident 190–660 MB model makes the process the first thing
   Android reclaims, which cold-starts the app on return. The next call
   reloads behind the ringback.
-- **Call screen**: the Assistant tab is a dark call sheet — a glowing orb,
-  "J W Assistant", a ticking call timer, animated speaking bars, a status
+- **Call screen**: the Secretary screen is a dark call sheet — a glowing orb,
+  "Secretary", a ticking call timer, animated speaking bars, a status
   pill, the rolling transcript, and Mute / Speaker / End controls. Mute stops
   the recogniser loop rather than just hiding it; Speaker routes to the
   loudspeaker best-effort; End hangs up and stops speech immediately.
@@ -213,7 +248,7 @@ deliberately left on the web for now. The smaller known gaps:
   the transcript. The clip is generated with the cached
   filler, so it costs nothing on later calls. Re-entering the tab does not
   repeat it, and it is skipped if the caller has already started speaking.
-  Settings → Assistant settings → Call turns the greeting off (the ringback
+  Settings → Secretary settings → Call turns the greeting off (the ringback
   remains).
 - **Warm start**: once the assistant has been used, the app loads the
   recogniser in the background after launch, so a returning caller opens the
@@ -236,7 +271,7 @@ deliberately left on the web for now. The smaller known gaps:
   a second layer replaces near misses in the final transcript with the
   canonical name (one edit for five-letter names, two for nine or more). The
   correction also applies to Moonshine. Both layers are logged.
-- **Nemotron 3.5 (experimental)**: Settings → Assistant settings → Nemotron
+- **Nemotron 3.5 (experimental)**: Settings → Secretary settings → Nemotron
   ASR downloads NVIDIA Nemotron 3.5 Speech Streaming 0.6B int8 (English/en
   only, about 662 MB) over Wi-Fi or mobile data. It is a **true streaming**
   online transducer, so it produces live partial words, from a 2026-era model
@@ -246,7 +281,7 @@ deliberately left on the web for now. The smaller known gaps:
 - **Quick resume**: a new call checks whether the selected recogniser and the
   voice are already loaded. If they are, it skips the dial tone and connects
   straight to the pickup; only a cold call rings out while the models load.
-- **Moonshine v2 (experimental)**: Settings → Assistant settings →
+- **Moonshine v2 (experimental)**: Settings → Secretary settings →
   Moonshine ASR downloads the 135 MB base English model (MIT) over Wi-Fi or
   mobile data. It is
   offline, so it has no live partial words; the call buffers one utterance
@@ -347,7 +382,7 @@ deliberately left on the web for now. The smaller known gaps:
   endpoint detector (roughly 0.4–0.65 s of trailing silence) decides the
   speaker has stopped and commits the line; Silero VAD is the primary
   endpoint.
-- **Settings → Assistant settings** opens the voice controls: Phonon 31m and
+- **Settings → Secretary settings** opens the voice controls: Phonon 31m and
   its eight catalog voices, the call options and the memory/cloud switches.
   A preview button auditions the selected Phonon voice.
 - **Conversation flow**: there is no extra "Got it." before local answers —
@@ -364,7 +399,7 @@ deliberately left on the web for now. The smaller known gaps:
   Settings and never warms unless needed. Audio focus is transient per
   sentence, microphone frames are discarded while the assistant speaks, and
   the mic reopens when playback finishes.
-- **Phonon 31m** (optional, Apache 2.0, Settings → Assistant settings →
+- **Phonon 31m** (optional, Apache 2.0, Settings → Secretary settings →
   Phonon 31m): about 62 MB and streamed as 24 kHz float PCM while it speaks.
   The Rust runtime (`libptts_ffi.so`) is built for arm64-v8a by the APK
   workflow — no native binary is committed — and called through JNA. While

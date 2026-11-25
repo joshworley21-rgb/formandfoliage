@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.first
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.ClientDraft
 import uk.co.jwgardenservices.crm.data.model.NewInvoiceInput
+import uk.co.jwgardenservices.crm.data.model.RunningCost
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
 import uk.co.jwgardenservices.crm.data.model.VisitDraft
 import uk.co.jwgardenservices.crm.data.repository.CrmRepository
@@ -14,6 +15,11 @@ import uk.co.jwgardenservices.crm.data.repository.deleteInvoice
 import uk.co.jwgardenservices.crm.data.repository.markInvoicePaid
 import uk.co.jwgardenservices.crm.data.repository.updateInvoiceDraft
 import uk.co.jwgardenservices.crm.domain.BillingSource
+import uk.co.jwgardenservices.crm.domain.BusinessSnapshot
+import uk.co.jwgardenservices.crm.domain.buildBusinessSnapshot
+import uk.co.jwgardenservices.crm.domain.coachInsights
+import uk.co.jwgardenservices.crm.domain.coachScore
+import uk.co.jwgardenservices.crm.domain.costBreakdown
 import uk.co.jwgardenservices.crm.domain.formatDayMonth
 import uk.co.jwgardenservices.crm.domain.formatDayMonthYear
 import uk.co.jwgardenservices.crm.domain.formatShortWeekday
@@ -22,12 +28,15 @@ import uk.co.jwgardenservices.crm.domain.formatWeekday
 import uk.co.jwgardenservices.crm.domain.hoursLabel
 import uk.co.jwgardenservices.crm.domain.localDate
 import uk.co.jwgardenservices.crm.domain.money
+import uk.co.jwgardenservices.crm.domain.moneyCompact
+import uk.co.jwgardenservices.crm.domain.monthlyRunningCosts
 import uk.co.jwgardenservices.crm.domain.parseDate
 import uk.co.jwgardenservices.crm.domain.parseSpokenNumber
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
 import uk.co.jwgardenservices.crm.domain.priceVisit
 import uk.co.jwgardenservices.crm.domain.topClients
 import uk.co.jwgardenservices.crm.domain.round2
+import uk.co.jwgardenservices.crm.domain.scoreLabel
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -37,6 +46,15 @@ import java.time.YearMonth
 import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
 import kotlin.math.abs
+
+/** Words that carry no business meaning when matching a profile section. */
+private val BUSINESS_STOP_WORDS = setOf(
+    "about", "after", "again", "also", "and", "are", "before", "being", "business",
+    "could", "cover", "does", "doing", "from", "have", "into", "just", "like", "many",
+    "much", "offer", "please", "really", "should", "that", "their", "them", "then",
+    "there", "these", "they", "thing", "this", "those", "what", "when", "where",
+    "which", "while", "with", "would", "your", "yours",
+)
 
 /**
  * Turns a spoken command into a real change in the CRM, not just a spoken
@@ -55,6 +73,8 @@ class VoiceActionRunner(
      */
     private val sendInvoice: (suspend (String, String?) -> String)? = null,
     private val shareWhatsApp: (suspend (String, String?) -> String)? = null,
+    /** The bundled profile, used when the owner has not scanned a website yet. */
+    private val bundledBusinessProfile: () -> String? = { null },
 ) {
 
     private data class PendingLog(
@@ -285,6 +305,10 @@ class VoiceActionRunner(
             SpokenIntent.InvoiceEdit -> editInvoice(text)
             SpokenIntent.NextJobForClient -> nextJobForClient(text)
             SpokenIntent.TodayEarnings -> todayEarnings()
+            SpokenIntent.BusinessInfo -> businessInfo(text)
+            SpokenIntent.RunningCosts -> runningCosts()
+            SpokenIntent.Profit -> profit()
+            SpokenIntent.Health -> health()
             SpokenIntent.DayWrapUp -> startWrapUp()
             SpokenIntent.RaiseInvoice -> raiseInvoice(text)
             SpokenIntent.AdjustCharge -> adjustCharge(text)
@@ -1828,6 +1852,142 @@ class VoiceActionRunner(
             .firstOrNull { it.id == top.clientId }?.name ?: "A client"
         return "$name is your best client, ${money(top.total)} in the last year."
     }
+
+    /**
+     * Answer "what do you do", "do you cover Tring", "are you insured" from
+     * the profile already on the phone. No model and no cloud: the profile is
+     * sectioned, so this picks the section the question is about and then the
+     * sentence that shares the most words with it.
+     */
+    private suspend fun businessInfo(text: String): String {
+        val settings = runCatching { repository.getSettings() }.getOrNull()
+        val profile = settings?.businessProfile?.takeIf { it.isNotBlank() }
+            ?: bundledBusinessProfile()?.takeIf { it.isNotBlank() }
+            ?: return "I don't have the business profile yet. Add your website in Settings, " +
+                "then Business knowledge."
+        val sections = when {
+            text.containsAny(
+                "insur", "qualif", "accredit", "guild", "city & guilds", "certified",
+            ) -> listOf("CREDENTIALS")
+            text.containsAny("opening", "open", "what time") -> listOf("HOURS & CONTACT")
+            text.containsAny("phone", "email", "contact", "number") -> listOf("HOURS & CONTACT")
+            text.containsAny("cover", "area", "based", "travel", "where") -> listOf("AREAS")
+            text.containsAny(
+                "service", "offer", "do you do", "patio", "lawn", "hedge", "fence",
+                "turf", "plant", "maintenance", "commercial", "design",
+            ) -> listOf("SERVICES")
+            else -> listOf("BUSINESS", "SERVICES", "AREAS", "CREDENTIALS")
+        }
+        val body = sectionText(profile, sections) ?: profile
+        val terms = text.lowercase()
+            .split(Regex("[^a-z0-9&]+"))
+            .filter { it.length >= 4 && it !in BUSINESS_STOP_WORDS }
+            .distinct()
+        val sentences = body
+            .split(Regex("(?<=[.!?])\\s+|\\n"))
+            .map { it.trim().trim('-', '*', '•') }
+            .filter { it.length > 20 }
+        val best = sentences.maxByOrNull { sentence ->
+            terms.count { term -> sentence.contains(term, ignoreCase = true) }
+        }
+        val chosen = best?.takeIf { sentence ->
+            terms.any { term -> sentence.contains(term, ignoreCase = true) }
+        } ?: body.take(320)
+        val prefix = if (
+            text.startsWith("do you") || text.startsWith("are you") || text.startsWith("can you")
+        ) {
+            "Yes — "
+        } else {
+            ""
+        }
+        return prefix + chosen.trim().trimEnd('.') + "."
+    }
+
+    private suspend fun runningCosts(): String {
+        val costs = repository.observeRunningCosts().first()
+        if (costs.isEmpty()) {
+            return "I don't have any running costs yet. Add them in Business, Costs, " +
+                "and I can tell you what the month really costs."
+        }
+        val monthly = costs.monthlyRunningCosts()
+        val biggest = costBreakdown(costs).firstOrNull()
+        val topLine = biggest?.let {
+            " The biggest is ${it.category.label.lowercase()}, ${money(it.monthly)} a month."
+        } ?: ""
+        return "Running costs are ${money(monthly)} a month, ${money(monthly * 12)} a year.$topLine"
+    }
+
+    private suspend fun profit(): String {
+        val costs = repository.observeRunningCosts().first()
+        val snapshot = businessSnapshot(costs)
+        if (snapshot.monthIncome <= 0.0) {
+            return "No work logged this month yet, so there is no profit figure to give you."
+        }
+        if (snapshot.netProfit < 0.0) {
+            return "This month is down ${money(abs(snapshot.netProfit))}: " +
+                "${money(snapshot.monthIncome)} of work, ${money(snapshot.monthMaterials)} " +
+                "materials and ${money(snapshot.monthlyCosts)} running costs."
+        }
+        val margin = (snapshot.netMargin * 100).toInt()
+        val overheadNote = if (costs.isEmpty()) {
+            " That is before overheads, because no running costs are added yet."
+        } else {
+            ""
+        }
+        return "${money(snapshot.netProfit)} left this month from " +
+            "${money(snapshot.monthIncome)} of work, about $margin percent after materials " +
+            "and running costs.$overheadNote"
+    }
+
+    private suspend fun health(): String {
+        val clients = repository.observeClients().first()
+        val costs = repository.observeRunningCosts().first()
+        val snapshot = businessSnapshot(costs)
+        val score = coachScore(snapshot)
+        val insights = coachInsights(snapshot, costs, clients)
+        val top = insights.firstOrNull()
+        val body = when {
+            !snapshot.hasData ->
+                "Add a few visits and running costs and I can start scoring the business."
+            top != null -> " The next thing worth a look: ${top.title.lowercase()}."
+            else -> " Nothing is flagging up."
+        }
+        return "Business health is $score out of 100, ${scoreLabel(score).lowercase()}.$body"
+    }
+
+    private suspend fun businessSnapshot(costs: List<RunningCost>) =
+        buildBusinessSnapshot(
+            invoices = repository.observeInvoices().first(),
+            visits = repository.observeVisits().first(),
+            jobs = repository.observeJobs().first(),
+            clients = repository.observeClients().first(),
+            costs = costs,
+        )
+
+    private fun sectionText(profile: String, names: List<String>): String? {
+        val lines = profile.lines()
+        val start = lines.indexOfFirst { line ->
+            names.any { name -> line.trim().uppercase().startsWith(name) }
+        }
+        if (start < 0) return null
+        val out = mutableListOf<String>()
+        for (index in start..lines.lastIndex) {
+            val line = lines[index].trim()
+            if (line.isBlank()) {
+                if (out.isNotEmpty()) break
+                continue
+            }
+            val heading = line.matches(Regex("^[A-Z][A-Z &]+:.*")) ||
+                line.matches(Regex("^[A-Z][A-Z &]+$"))
+            if (index > start && heading) break
+            val content = if (index == start) line.substringAfter(':', "").trim() else line
+            if (content.isNotBlank()) out += content
+        }
+        return out.joinToString(" ").ifBlank { null }
+    }
+
+    private fun String.containsAny(vararg needles: String): Boolean =
+        needles.any { contains(it, ignoreCase = true) }
 
     private suspend fun weeklyEarnings(): String {
         val today = LocalDate.now()

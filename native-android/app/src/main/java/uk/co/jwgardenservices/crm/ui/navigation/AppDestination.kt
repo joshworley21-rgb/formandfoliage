@@ -5,6 +5,7 @@ import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Inbox
+import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.People
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
@@ -14,8 +15,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
  * The phone bar keeps the owner's driving workflow: the round, the calendar,
- * the assistant call and billing, with Clients and everything else behind
- * More. Staff keep their own shorter bar (Schedule + Clients).
+ * the business's running costs and billing. Clients and everything else live
+ * behind More. Secretary is a tab inside Business; its route is kept for the
+ * Dashboard microphone. Staff keep their shorter bar (Schedule + Clients).
  */
 enum class AppDestination(
     val route: String,
@@ -25,12 +27,13 @@ enum class AppDestination(
 ) {
     Dashboard("dashboard", "Dashboard", Icons.Outlined.Dashboard, true),
     Schedule("schedule", "Schedule", Icons.Outlined.CalendarMonth, true),
-    Assistant("assistant", "Assistant", Icons.Outlined.Mic, true),
+    Business("business", "Business", Icons.Outlined.Insights, true),
     Invoices("invoices", "Invoices", Icons.AutoMirrored.Outlined.ReceiptLong, true),
     Clients("clients", "Clients", Icons.Outlined.People, false),
     Enquiries("enquiries", "Enquiries", Icons.Outlined.Inbox, false),
     Quotes("quotes", "Quotes", Icons.Outlined.RequestQuote, false),
     Visits("visits", "Visits", Icons.Outlined.Checklist, false),
+    Secretary("assistant", "Secretary", Icons.Outlined.Mic, false),
     Settings("settings", "Settings", Icons.Outlined.Settings, false),
     ;
 

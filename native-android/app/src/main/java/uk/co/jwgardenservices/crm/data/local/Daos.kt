@@ -16,6 +16,7 @@ import uk.co.jwgardenservices.crm.data.model.InvoiceItem
 import uk.co.jwgardenservices.crm.data.model.Quote
 import uk.co.jwgardenservices.crm.data.model.QuoteItem
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
+import uk.co.jwgardenservices.crm.data.model.RunningCost
 import uk.co.jwgardenservices.crm.data.model.Settings
 import uk.co.jwgardenservices.crm.data.model.TeamMember
 import uk.co.jwgardenservices.crm.data.model.Visit
@@ -135,6 +136,27 @@ interface SettingsDao {
     suspend fun upsert(item: Settings)
 
     @Query("DELETE FROM settings")
+    suspend fun clear()
+}
+
+@Dao
+interface RunningCostDao {
+    @Query("SELECT * FROM running_costs ORDER BY category ASC, name COLLATE NOCASE")
+    fun observeAll(): Flow<List<RunningCost>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(items: List<RunningCost>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(item: RunningCost)
+
+    @Query("SELECT * FROM running_costs WHERE id = :id")
+    suspend fun findById(id: String): RunningCost?
+
+    @Query("DELETE FROM running_costs WHERE id = :id")
+    suspend fun deleteById(id: String)
+
+    @Query("DELETE FROM running_costs")
     suspend fun clear()
 }
 

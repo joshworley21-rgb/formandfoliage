@@ -66,7 +66,7 @@ fun DashboardScreen(
     viewModel: CrmViewModel,
     onOpenSchedule: () -> Unit,
     onOpenInvoices: () -> Unit,
-    onOpenAssistant: () -> Unit = {},
+    onOpenSecretary: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val today = LocalDate.now()
@@ -113,7 +113,7 @@ fun DashboardScreen(
                 title = "Dashboard",
                 description = "Today's round first, then hours and billing.",
                 onRefresh = viewModel::refresh,
-                onAssistant = onOpenAssistant,
+                onSecretary = onOpenSecretary,
             )
         }
 

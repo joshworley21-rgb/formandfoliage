@@ -58,6 +58,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
+import uk.co.jwgardenservices.crm.ui.business.BusinessRunningScreen
 import uk.co.jwgardenservices.crm.ui.clients.ClientsScreen
 import uk.co.jwgardenservices.crm.ui.components.BrandMark
 import uk.co.jwgardenservices.crm.ui.dashboard.DashboardScreen
@@ -106,7 +107,9 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
     val moreItems = if (isStaff) {
         emptyList()
     } else {
-        AppDestination.moreItems.filter { it != AppDestination.Settings }
+        AppDestination.moreItems.filter {
+            it != AppDestination.Settings && it != AppDestination.Secretary
+        }
     }
 
     fun navigate(destination: AppDestination) {
@@ -218,7 +221,15 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                             viewModel = crmViewModel,
                             onOpenSchedule = { navigate(AppDestination.Schedule) },
                             onOpenInvoices = { navigate(AppDestination.Invoices) },
-                            onOpenAssistant = { navigate(AppDestination.Assistant) },
+                            onOpenSecretary = { navigate(AppDestination.Secretary) },
+                        )
+                    }
+                    composable(AppDestination.Business.route) {
+                        BusinessRunningScreen(
+                            viewModel = crmViewModel,
+                            onOpenInvoices = { navigate(AppDestination.Invoices) },
+                            onOpenSchedule = { navigate(AppDestination.Schedule) },
+                            onOpenClients = { navigate(AppDestination.Clients) },
                         )
                     }
                     composable(AppDestination.Invoices.route) {
@@ -239,7 +250,7 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                     composable(AppDestination.Quotes.route) {
                         QuotesScreen(viewModel = crmViewModel)
                     }
-                    composable(AppDestination.Assistant.route) {
+                    composable(AppDestination.Secretary.route) {
                         AssistantScreen()
                     }
                     composable(AppDestination.Settings.route) {

@@ -44,6 +44,11 @@ verify_jwt = true
 [functions.voice-speak]
 verify_jwt = true
 
+# Reads the owner's website and distils a compact business profile. Signed in
+# only: it spends tokens and fetches a URL on the owner's behalf.
+[functions.business-profile]
+verify_jwt = true
+
 # Public: the customer-facing enquiry form posts here from any website, so there
 # is no JWT to verify. Protected by the owner's enquiry_key and a honeypot field.
 [functions.public-enquiry]

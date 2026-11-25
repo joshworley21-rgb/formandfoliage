@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import uk.co.jwgardenservices.crm.data.local.OutboxEntry
+import uk.co.jwgardenservices.crm.data.model.BusinessProfileResult
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.ClientDraft
 import uk.co.jwgardenservices.crm.data.model.CreateInvoiceResult
@@ -26,6 +27,8 @@ import uk.co.jwgardenservices.crm.data.model.NewInvoiceInput
 import uk.co.jwgardenservices.crm.data.model.Quote
 import uk.co.jwgardenservices.crm.data.model.RebuildInvoiceResult
 import uk.co.jwgardenservices.crm.data.model.QuoteDraft
+import uk.co.jwgardenservices.crm.data.model.RunningCost
+import uk.co.jwgardenservices.crm.data.model.RunningCostDraft
 import uk.co.jwgardenservices.crm.data.model.QuoteItem
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
 import uk.co.jwgardenservices.crm.data.model.SendInvoiceResult
@@ -53,6 +56,7 @@ data class CrmUiState(
     val quotes: List<Quote> = emptyList(),
     val enquiries: List<Enquiry> = emptyList(),
     val jobs: List<ScheduledJob> = emptyList(),
+    val runningCosts: List<RunningCost> = emptyList(),
     val settings: Settings? = null,
     val loading: Boolean = true,
     val saving: Boolean = false,
@@ -112,11 +116,13 @@ class CrmViewModel(
         repository.observeQuotes(),
         repository.observeEnquiries(),
         repository.observeInvoiceEmailEvents(),
-    ) { snapshot, quotes, enquiries, emailEvents ->
+        repository.observeRunningCosts(),
+    ) { snapshot, quotes, enquiries, emailEvents, runningCosts ->
         snapshot.copy(
             quotes = quotes,
             enquiries = enquiries,
             invoiceEmailEvents = emailEvents,
+            runningCosts = runningCosts,
         )
     }
 
@@ -146,6 +152,7 @@ class CrmViewModel(
             quotes = snapshot.quotes,
             enquiries = snapshot.enquiries,
             jobs = snapshot.jobs,
+            runningCosts = snapshot.runningCosts,
             settings = snapshot.settings,
             loading = false,
             saving = sync.saving,
@@ -382,6 +389,24 @@ class CrmViewModel(
         withSaving { repository.removeMember(id) }
     }
 
+    suspend fun saveRunningCost(draft: RunningCostDraft, existing: RunningCost? = null) {
+        withSaving { repository.saveRunningCost(draft, existing) }
+    }
+
+    suspend fun deleteRunningCost(id: String) {
+        withSaving { repository.deleteRunningCost(id) }
+    }
+
+    suspend fun learnBusinessProfile(url: String): BusinessProfileResult =
+        withSavingResult { repository.learnBusinessProfile(url) }
+
+    suspend fun learnBusinessProfileLocally(url: String): BusinessProfileResult =
+        withSavingResult { repository.learnBusinessProfileLocally(url) }
+
+    suspend fun saveBusinessKnowledge(profile: String, sourceUrl: String?) {
+        withSaving { repository.saveBusinessKnowledge(profile, sourceUrl) }
+    }
+
     suspend fun saveSettings(draft: SettingsDraft) {
         withSaving {
             repository.saveSettings(draft)
@@ -423,7 +448,8 @@ class CrmViewModel(
         val quotes: List<Quote> = emptyList(),
         val enquiries: List<Enquiry> = emptyList(),
         val invoiceEmailEvents: List<InvoiceEmailEvent> = emptyList(),
-            val team: List<TeamMember> = emptyList(),
+        val runningCosts: List<RunningCost> = emptyList(),
+        val team: List<TeamMember> = emptyList(),
     )
 
     private data class SyncStatus(

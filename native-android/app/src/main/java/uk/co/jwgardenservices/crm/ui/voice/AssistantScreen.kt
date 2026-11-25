@@ -232,7 +232,7 @@ fun AssistantScreen() {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "Assistant",
+                text = "Form & Foliage",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -261,7 +261,7 @@ fun AssistantScreen() {
         Spacer(Modifier.height(if (compact) 10.dp else 18.dp))
 
         Text(
-            text = "Form & Foliage",
+            text = "Secretary",
             style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onBackground,
@@ -301,7 +301,7 @@ fun AssistantScreen() {
 
         if (!granted) {
             Text(
-                text = "The assistant needs the microphone to hear you. Nothing is uploaded.",
+                text = "Secretary needs the microphone to hear you. Nothing is uploaded.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -330,7 +330,7 @@ fun AssistantScreen() {
         ) {
             Icon(
                 Icons.Filled.Call,
-                contentDescription = "Call the assistant",
+                contentDescription = "Call Secretary",
                 modifier = Modifier.size(28.dp),
             )
         }

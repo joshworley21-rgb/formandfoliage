@@ -85,7 +85,7 @@ class OpenAiCloudRouter(
             SpokenRequest(
                 query = query,
                 clientOrTopic = clientOrTopic,
-                context = context.take(2000),
+                context = context.take(6000),
                 history = history.takeLast(6).map {
                     HistoryTurn(role = if (it.fromUser) "user" else "assistant", text = it.text.take(400))
                 },
@@ -150,7 +150,7 @@ class OpenAiCloudRouter(
         val body = json.encodeToString(
             IntentRequest(
                 query = query,
-                context = context.take(2000),
+                context = context.take(6000),
                 history = history.takeLast(6).map {
                     HistoryTurn(role = if (it.fromUser) "user" else "assistant", text = it.text.take(400))
                 },
