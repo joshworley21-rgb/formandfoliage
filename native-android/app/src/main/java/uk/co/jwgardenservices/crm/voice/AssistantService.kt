@@ -1744,9 +1744,12 @@ class AssistantService : Service() {
                 LocalLlm.generate(this@AssistantService, localPrompt(), text)
             }
             if (!answer.isNullOrBlank()) {
-                CrashLog.note(this, TAG, "local answer: ${answer.take(120)}")
-                sayAnswer(spokenLocalAnswer(answer))
-                return
+                val spoken = spokenLocalAnswer(answer, text)
+                if (spoken.isNotBlank()) {
+                    CrashLog.note(this, TAG, "local answer: $spoken".take(180))
+                    sayAnswer(spoken)
+                    return
+                }
             }
         }
 
@@ -1924,7 +1927,11 @@ class AssistantService : Service() {
             on the phone. Be calm, warm and efficient, like a good British secretary.
             Use contractions and everyday British phrasing. Answer only the question
             in one or two short spoken sentences, then offer a useful next step if it
-            helps. Vary your opening words between turns; never sound like a script.
+            helps. Never repeat or restate the question first. Vary your opening words
+            between turns; never sound like a script.
+            You can help with the diary, the next job, logging hours, marking work done,
+            client notes, invoices, who owes money, unbilled work, takings, running costs,
+            profit, business health, and the services and areas the business covers.
             Never call yourself an AI, voice assistant, chatbot, model or assistant
             programme. If asked how you are, answer like a person and ask how his day
             is going. Address him as Josh occasionally, not in every sentence.
@@ -1936,17 +1943,32 @@ class AssistantService : Service() {
         """.trimIndent()
     }
 
-    private fun spokenLocalAnswer(text: String): String {
+    private fun spokenLocalAnswer(text: String, question: String): String {
         val clean = text
             .replace(Regex("<\\|[^>]*\\|>"), "")
             .replace("\n", " ")
             .trim()
+        val questionWords = cleanWords(question)
         val sentences = clean.split(Regex("(?<=[.!?])\\s+"))
             .filter { it.isNotBlank() }
+            .filterNot { sentence ->
+                // The 0.6B model sometimes opens by repeating the question.
+                // Spoken back, that sounds like it is stalling.
+                if (!sentence.trimEnd().endsWith("?")) return@filterNot false
+                val words = cleanWords(sentence)
+                if (words.isEmpty()) return@filterNot false
+                words.count { it in questionWords }.toDouble() / words.size >= 0.6
+            }
             .take(2)
             .joinToString(" ")
-        return sentences.ifBlank { clean }.take(360)
+        return sentences.take(360)
     }
+
+    private fun cleanWords(value: String): Set<String> = value.lowercase()
+        .replace(Regex("[^a-z0-9 ]"), " ")
+        .split(Regex("\\s+"))
+        .filter { it.length > 2 && it !in setOf("the", "and", "you", "can", "what", "with", "for") }
+        .toSet()
 
     /** Weather/facts should go to the web APIs rather than a 0.5B model. */
     private fun looksLikeFactualQuestion(text: String): Boolean {
@@ -2413,6 +2435,7 @@ private fun confirmationFor(intent: IntentResult): String {
         SpokenIntent.LeastProfitable -> "Checking which client earns least."
         SpokenIntent.ChaseFirst -> "Checking what to chase first."
         SpokenIntent.Health -> "Checking the business health."
+        SpokenIntent.Help -> "Here is what I can do."
         SpokenIntent.DayWrapUp -> "Running through today's jobs."
         SpokenIntent.RaiseInvoice -> "Drafting that invoice."
         SpokenIntent.AdjustCharge -> "Adjusting that visit."

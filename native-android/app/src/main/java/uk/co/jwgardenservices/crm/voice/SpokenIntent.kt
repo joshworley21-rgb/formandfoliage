@@ -36,6 +36,7 @@ enum class SpokenIntent(val wire: String) {
     LeastProfitable("least_profitable"),
     ChaseFirst("chase_first"),
     Health("health_score"),
+    Help("help"),
     DayWrapUp("day_wrap_up"),
     RaiseInvoice("raise_invoice"),
     AdjustCharge("adjust_charge"),

@@ -77,8 +77,12 @@ class IntentRulesTest {
         Case("end of day wrap up", SpokenIntent.DayWrapUp),
         Case("run through today's jobs", SpokenIntent.DayWrapUp),
         Case("do my timesheets", SpokenIntent.DayWrapUp),
+        Case("What, can you do", SpokenIntent.Help),
+        Case("What could you help me with", SpokenIntent.Help),
+        Case("How can you help", SpokenIntent.Help),
 
         Case("do you cover Tring", SpokenIntent.BusinessInfo),
+        Case("what do you do", SpokenIntent.BusinessInfo),
         Case("what services do you offer", SpokenIntent.BusinessInfo),
         Case("are you insured", SpokenIntent.BusinessInfo),
         Case("how much are my running costs", SpokenIntent.RunningCosts),

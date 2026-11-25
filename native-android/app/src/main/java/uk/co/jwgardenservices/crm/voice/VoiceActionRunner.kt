@@ -314,6 +314,7 @@ class VoiceActionRunner(
             SpokenIntent.LeastProfitable -> leastProfitableClient()
             SpokenIntent.ChaseFirst -> chaseFirst()
             SpokenIntent.Health -> health()
+            SpokenIntent.Help -> help()
             SpokenIntent.DayWrapUp -> startWrapUp()
             SpokenIntent.RaiseInvoice -> raiseInvoice(text)
             SpokenIntent.AdjustCharge -> adjustCharge(text)
@@ -2021,6 +2022,17 @@ class VoiceActionRunner(
         }
         return "Nothing is overdue and nothing is waiting to be billed. You are clear."
     }
+
+    /**
+     * A short, concrete answer to "what can you do". The local model used to
+     * answer this by restating the question and wandering; these are the
+     * commands it actually has, in the order they are useful in a day.
+     */
+    private fun help(): String =
+        "I can check the diary and your next job, log hours, mark work done, add notes, " +
+            "read invoices and who owes you, and tell you about running costs, profit, " +
+            "how the business is doing, and the services and areas you cover. " +
+            "Try: what's next, or what should I chase first."
 
     private suspend fun health(): String {
         val clients = repository.observeClients().first()

@@ -13,7 +13,13 @@ object IntentRules {
     private const val MAX_TOPIC = 120
 
     fun classify(transcript: String): IntentResult {
+        // Speech recognisers sprinkle commas into "What, can you do" and the
+        // rules are word matches. Drop sentence punctuation before matching;
+        // the runner still receives the original transcript for amounts/names.
         val text = transcript.lowercase()
+            .replace(Regex("[,\\.!?;:]+"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
         val kind = when {
             // "Say again" must win over every schedule/word match below.
             text.containsAny(
@@ -28,6 +34,23 @@ object IntentRules {
                 "go on", "go on then", "carry on", "keep going", "continue",
                 "what else", "what next", "and then", "then what",
             ) -> SpokenIntent.Continue
+
+            // Capabilities, not services. Kept separate from "what do you do",
+            // which means the gardening business and goes to BusinessInfo.
+            text.trim() in setOf("what can you do", "what could you do", "help") ||
+                text.containsAny(
+                    "what can you help",
+                    "what could you help",
+                    "how can you help",
+                    "what are you able to do",
+                    "what do you help with",
+                    "what commands",
+                    "list your commands",
+                    "what can i ask",
+                    "what can i say",
+                    "what should i say",
+                    "give me an example",
+                ) -> SpokenIntent.Help
 
             // Questions about the business itself are answered from the stored
             // profile on the phone. Checked before the generic "look up" and
@@ -334,7 +357,8 @@ object IntentRules {
             SpokenIntent.BreakEven,
             SpokenIntent.LeastProfitable,
             SpokenIntent.ChaseFirst,
-            SpokenIntent.Health -> false
+            SpokenIntent.Health,
+            SpokenIntent.Help -> false
             else -> kind == SpokenIntent.Quote || text.containsAny(
                 "traffic",
                 "supplier",
@@ -381,6 +405,7 @@ object IntentRules {
         SpokenIntent.LeastProfitable,
         SpokenIntent.ChaseFirst,
         SpokenIntent.Health,
+        SpokenIntent.Help,
         SpokenIntent.SayAgain -> true
 
         else -> false
