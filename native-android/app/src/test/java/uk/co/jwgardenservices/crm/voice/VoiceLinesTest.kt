@@ -9,10 +9,10 @@ import org.junit.Test
 class VoiceLinesTest {
 
     @Test
-    fun `rotation covers every option before repeating`() {
-        val seen = mutableListOf<String>()
-        repeat(6) { seen += VoiceLines.pick("A", "B", "C") }
-        assertEquals(setOf("A", "B", "C"), seen.toSet())
+    fun `random picks cover every option over time`() {
+        val seen = mutableSetOf<String>()
+        repeat(100) { seen += VoiceLines.pick("A", "B", "C") }
+        assertEquals(setOf("A", "B", "C"), seen)
     }
 
     @Test

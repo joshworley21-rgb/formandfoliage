@@ -396,6 +396,9 @@ class CrmViewModel(
             .getOrElse { SyncResult(error = it.message ?: "Could not sync") }
         offline.value = result.offline
         syncError.value = result.error
+        if (!result.offline) {
+            runCatching { repository.reconcileLocalInvoices() }
+        }
     }
 
     private suspend fun withSaving(block: suspend () -> Unit) {

@@ -976,6 +976,9 @@ class AssistantService : Service() {
         val repository = ServiceLocator.crmRepository
         val invoice = repository.observeInvoices().first().firstOrNull { it.id == invoiceId }
             ?: return@runCatching "That draft isn't here any more."
+        if (invoice.id.startsWith("local-")) {
+            return@runCatching "That's an offline draft. Reconnect and sync it before sending."
+        }
         val client = repository.observeClients().first().firstOrNull { it.id == invoice.clientId }
             ?: return@runCatching "That invoice's client is missing."
         val pdf = withContext(Dispatchers.IO) {

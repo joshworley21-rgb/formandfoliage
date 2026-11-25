@@ -9,6 +9,7 @@ import uk.co.jwgardenservices.crm.data.model.VisitDraft
 import uk.co.jwgardenservices.crm.data.repository.CrmRepository
 import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
 import uk.co.jwgardenservices.crm.data.repository.createInvoice
+import uk.co.jwgardenservices.crm.data.repository.createLocalInvoice
 import uk.co.jwgardenservices.crm.data.repository.deleteInvoice
 import uk.co.jwgardenservices.crm.data.repository.markInvoicePaid
 import uk.co.jwgardenservices.crm.data.repository.updateInvoiceDraft
@@ -1291,14 +1292,10 @@ class VoiceActionRunner(
             return "There's nothing unbilled for ${client.name}."
         }
         val expected = round2(visits.sumOf { it.amount })
-        val made = runCatching {
-            repository.createInvoice(
-                NewInvoiceInput(clientId = client.id, visitIds = visits.map { it.id }),
-            )
-        }.getOrNull()
-            ?: return "I couldn't raise that without a signal. The ${visits.size} " +
-                "${if (visits.size == 1) "visit will be" else "visits will be"} waiting in " +
-                "ready to bill."
+        val input = NewInvoiceInput(clientId = client.id, visitIds = visits.map { it.id })
+        val made = runCatching { repository.createInvoice(input) }.getOrNull()
+            ?: repository.createLocalInvoice(input, repository.getSettings())
+            ?: return "I couldn't raise that: the work is still waiting in ready to bill."
 
         val visitsText = if (visits.size == 1) "one visit" else "${visits.size} visits"
         val totalValue = if (made.total > 0.0) made.total else expected
@@ -1364,11 +1361,9 @@ class VoiceActionRunner(
         var total = 0.0
         for ((clientId, rows) in groups) {
             val name = clients.firstOrNull { it.id == clientId }?.name ?: "a client"
-            val result = runCatching {
-                repository.createInvoice(
-                    NewInvoiceInput(clientId = clientId, visitIds = rows.map { it.id }),
-                )
-            }.getOrNull()
+            val input = NewInvoiceInput(clientId = clientId, visitIds = rows.map { it.id })
+            val result = runCatching { repository.createInvoice(input) }.getOrNull()
+                ?: repository.createLocalInvoice(input, repository.getSettings())
             if (result == null) {
                 failures += name
             } else {

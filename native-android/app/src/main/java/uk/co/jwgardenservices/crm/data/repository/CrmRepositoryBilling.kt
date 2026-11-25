@@ -90,6 +90,102 @@ suspend fun CrmRepository.invoiceItems(invoiceId: String): List<InvoiceItem> =
         invoiceLines.forInvoice(invoiceId)
 
 
+/**
+ * Create a draft entirely on the phone when the server cannot be reached.
+ *
+ * It uses a DRAFT- number so it can never collide with server numbering.
+ * The visits are marked billed locally and are reversed if the draft is
+ * deleted. When connectivity returns the draft has to be promoted through
+ * the server before it is sent.
+ */
+suspend fun CrmRepository.createLocalInvoice(
+    input: NewInvoiceInput,
+    settings: Settings?,
+): CreateInvoiceResult? {
+    val user = userId()
+    val rows = input.visitIds.mapNotNull { visits.findById(it) }
+        .filter { !it.billed && it.invoiceId == null }
+    if (rows.isEmpty()) return null
+    val id = "local-${UUID.randomUUID()}"
+    val subtotal = rows.sumOf { it.amount }
+    val vatRate = settings?.vatRate ?: 0.0
+    val vat = if (settings?.vatRegistered == true) subtotal * vatRate / 100.0 else 0.0
+    val total = subtotal + vat
+    val issued = LocalDate.now()
+    val due = input.dueDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        ?: issued.plusDays(input.dueInDays.toLong())
+    val prefix = settings?.invoicePrefix ?: "DRAFT-"
+    val number = "${prefix}DRAFT-${System.currentTimeMillis() % 1_000_000}"
+    val invoice = Invoice(
+        id = id,
+        userId = user,
+        clientId = input.clientId,
+        number = number,
+        issueDate = issued.toString(),
+        dueDate = due.toString(),
+        periodStart = rows.minOfOrNull { it.visitDate },
+        periodEnd = rows.maxOfOrNull { it.visitDate },
+        subtotal = round2(subtotal),
+        vatAmount = round2(vat),
+        total = round2(total),
+        status = "draft",
+        notes = input.notes,
+        createdAt = Instant.now().toString(),
+    )
+    val items = rows.mapIndexed { index, visit ->
+        val quantity = if (visit.hours > 0.0) visit.hours else 1.0
+        InvoiceItem(
+            id = UUID.randomUUID().toString(),
+            userId = user,
+            invoiceId = id,
+            visitId = visit.id,
+            itemDate = visit.visitDate,
+            description = visit.description ?: "Visit on ${visit.visitDate}",
+            quantity = quantity,
+            unitPrice = if (quantity > 0.0) round2(visit.amount / quantity) else 0.0,
+            amount = visit.amount,
+            createdAt = Instant.now().toString(),
+            position = index,
+        )
+    }
+    database.withTransaction {
+        invoices.upsert(invoice)
+        invoiceLines.upsertAll(items)
+        visits.upsertAll(rows.map { it.copy(billed = true, invoiceId = id, updatedAt = null) })
+    }
+    return CreateInvoiceResult(id, number, round2(total))
+}
+
+/**
+ * Promote offline DRAFT- invoices through the server once signal is back.
+ * The server allocates the real number and items; the local rows are removed.
+ */
+suspend fun CrmRepository.reconcileLocalInvoices(): Int {
+    val pending = observeInvoices().first().filter { it.id.startsWith("local-") }
+    var promoted = 0
+    for (invoice in pending) {
+        val visitIds = invoiceLines.forInvoice(invoice.id).mapNotNull { it.visitId }
+        if (visitIds.isEmpty()) {
+            database.withTransaction {
+                invoices.deleteById(invoice.id)
+                invoiceLines.deleteByInvoice(invoice.id)
+            }
+            continue
+        }
+        val created = runCatching {
+            createInvoice(NewInvoiceInput(clientId = invoice.clientId, visitIds = visitIds))
+        }.getOrNull() ?: continue
+        database.withTransaction {
+            invoices.deleteById(invoice.id)
+            invoiceLines.deleteByInvoice(invoice.id)
+        }
+        promoted++
+        android.util.Log.i("CrmRepository", "Promoted ${invoice.number} to ${created.number}")
+    }
+    if (promoted > 0) runCatching { refreshAll() }
+    return promoted
+}
+
 suspend fun CrmRepository.createInvoice(input: NewInvoiceInput): CreateInvoiceResult {
         val body = buildJsonObject {
             put("clientId", input.clientId)
