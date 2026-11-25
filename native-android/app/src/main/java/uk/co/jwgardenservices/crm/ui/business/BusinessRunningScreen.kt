@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -69,6 +70,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -79,6 +81,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.LocalDate
 import java.util.Locale
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlinx.coroutines.launch
 import uk.co.jwgardenservices.crm.data.model.RunningCost
 import uk.co.jwgardenservices.crm.data.model.RunningCostDraft
@@ -115,23 +119,20 @@ private enum class BusinessTab(val label: String) {
     Secretary("Secretary"),
 }
 
-private val CategoryColors = listOf(
-    Color(0xFF2F5D3A),
-    Color(0xFF4F7D5A),
-    Color(0xFF7FAE7A),
-    Color(0xFFC6A86A),
-    Color(0xFF8C9AA6),
-    Color(0xFFB0BE9E),
-    Color(0xFF6B7B6F),
-)
-
 @Composable
 private fun brass(): Color =
     if (isSystemInDarkTheme()) Color(0xFFE2C588) else Color(0xFF9C7A35)
 
-@Composable
-private fun categoryColor(category: CostCategory): Color =
-    CategoryColors[category.ordinal % CategoryColors.size]
+/** Forest, slate and sage: the three tones in the reference donut. */
+private fun categoryColor(category: CostCategory): Color = when (category) {
+    CostCategory.Vehicle -> Color(0xFF2E4A34)
+    CostCategory.Insurance -> Color(0xFF394553)
+    CostCategory.Fuel -> Color(0xFF6E8B6E)
+    CostCategory.Tools -> Color(0xFF8CA07E)
+    CostCategory.Software -> Color(0xFF586A5A)
+    CostCategory.Premises -> Color(0xFFA9B79A)
+    CostCategory.Other -> Color(0xFF7E9A79)
+}
 
 private fun costCategoryIcon(category: CostCategory): ImageVector = when (category) {
     CostCategory.Vehicle -> Icons.Outlined.DirectionsCar
@@ -226,22 +227,48 @@ fun BusinessRunningScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(top = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            PageHeader(
-                title = "Business running",
-                description = "Costs, profit and the next useful move.",
-                onRefresh = viewModel::refresh,
-            )
-            BusinessTabs(selected = tab, onSelect = { tab = it })
+        if (tab != BusinessTab.Costs) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                PageHeader(
+                    title = "Business running",
+                    description = "Costs, profit and the next useful move.",
+                    onRefresh = viewModel::refresh,
+                )
+                BusinessTabs(selected = tab, onSelect = { tab = it })
+            }
         }
 
-        if (tab == BusinessTab.Secretary) {
+        if (tab == BusinessTab.Costs) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) {
+                RunningCostsTab(
+                    monthly = monthly,
+                    daily = daily,
+                    annual = annual,
+                    breakdown = breakdown,
+                    costs = costs,
+                    onBack = { tab = BusinessTab.Overview },
+                    onAdd = {
+                        editing = null
+                        editorOpen = true
+                    },
+                    onEdit = { cost ->
+                        editing = cost
+                        editorOpen = true
+                    },
+                    onDelete = { cost -> pendingDelete = cost },
+                )
+            }
+        } else if (tab == BusinessTab.Secretary) {
             // The call sheet owns the rest of the screen. It binds the voice
             // service only while this tab is on screen, and releases the mic
             // when the owner switches back to the figures.
@@ -287,89 +314,6 @@ fun BusinessRunningScreen(
                         onAction = ::handleAction,
                         onOpenCoach = { tab = BusinessTab.Coach },
                     )
-                }
-            }
-
-            BusinessTab.Costs -> {
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        CostStat("Monthly", moneyCompact(monthly), Modifier.weight(1f))
-                        CostStat("Daily", moneyCompact(daily), Modifier.weight(1f))
-                        CostStat("Annual", moneyCompact(annual), Modifier.weight(1f))
-                    }
-                }
-                item {
-                    Button(
-                        onClick = {
-                            editing = null
-                            editorOpen = true
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp),
-                        shape = RoundedCornerShape(16.dp),
-                    ) {
-                        Icon(Icons.Outlined.Add, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Add a running cost")
-                    }
-                }
-                item {
-                    CostBreakdownCard(
-                        breakdown = breakdown,
-                        monthly = monthly,
-                        onAdd = {
-                            editing = null
-                            editorOpen = true
-                        },
-                        onOpenCosts = null,
-                    )
-                }
-                item {
-                    SectionCard(
-                        title = "Cost list",
-                        actionLabel = if (costs.isEmpty()) null else "+ Add",
-                        onAction = if (!costs.isEmpty()) {
-                            {
-                                editing = null
-                                editorOpen = true
-                            }
-                        } else {
-                            null
-                        },
-                    ) {
-                        if (costs.isEmpty()) {
-                            EmptyState(
-                                icon = Icons.Outlined.Savings,
-                                title = "No running costs yet",
-                                body = "Add the van, fuel, insurance, tools or software. " +
-                                    "Each one is worked out monthly so it sits beside income.",
-                            )
-                        } else {
-                            costs.forEachIndexed { index, cost ->
-                                if (index > 0) HorizontalDivider(Modifier.padding(horizontal = 20.dp))
-                                CostRow(
-                                    cost = cost,
-                                    onEdit = {
-                                        editing = cost
-                                        editorOpen = true
-                                    },
-                                    onDelete = { pendingDelete = cost },
-                                )
-                            }
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = "Monthly totals convert weekly, quarterly and annual costs. " +
-                                    "They sync to every device.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                            )
-                        }
-                    }
                 }
             }
 
@@ -431,6 +375,7 @@ fun BusinessRunningScreen(
                     )
                 }
             }
+                    BusinessTab.Costs,
                     BusinessTab.Secretary -> Unit
                 }
             }
@@ -476,6 +421,379 @@ fun BusinessRunningScreen(
                 TextButton(onClick = { pendingDelete = null }) { Text("Keep") }
             },
         )
+    }
+}
+
+@Composable
+private fun RunningCostsTab(
+    monthly: Double,
+    daily: Double,
+    annual: Double,
+    breakdown: List<CostBreakdown>,
+    costs: List<RunningCost>,
+    onBack: () -> Unit,
+    onAdd: () -> Unit,
+    onEdit: (RunningCost) -> Unit,
+    onDelete: (RunningCost) -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item { RunningCostsHeader(onBack = onBack, onAdd = onAdd) }
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CostStat("Monthly", moneyCompact(monthly), Modifier.weight(1f))
+                CostStat("Daily", moneyCompact(daily), Modifier.weight(1f))
+                CostStat("Annual", moneyCompact(annual), Modifier.weight(1f))
+            }
+        }
+        item {
+            RunningCostBreakdownCard(
+                breakdown = breakdown,
+                monthly = monthly,
+                onAdd = onAdd,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+        }
+        item {
+            GroupedCostCards(
+                costs = costs,
+                onEdit = onEdit,
+                onDelete = onDelete,
+                onAdd = onAdd,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+        }
+        item {
+            Text(
+                text = "Monthly totals convert weekly, quarterly and annual costs. " +
+                    "Tap an item to edit it; everything syncs to your other devices.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 20.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RunningCostsHeader(onBack: () -> Unit, onAdd: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+    ) {
+        Column(
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 18.dp),
+        ) {
+            TextButton(
+                onClick = onBack,
+                contentPadding = PaddingValues(0.dp),
+                modifier = Modifier.height(28.dp),
+            ) {
+                Text(
+                    text = "‹ Analytics",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.65f),
+                )
+            }
+            Row(verticalAlignment = Alignment.Bottom) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Running Costs",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                    Text(
+                        text = "Vehicles, fuel, insurance, tools",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f),
+                    )
+                }
+                Button(
+                    onClick = onAdd,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiary,
+                        contentColor = MaterialTheme.colorScheme.onTertiary,
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                    modifier = Modifier.height(38.dp),
+                ) {
+                    Text("+ Add", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RunningCostBreakdownCard(
+    breakdown: List<CostBreakdown>,
+    monthly: Double,
+    onAdd: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            Text(
+                text = "Cost Breakdown",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "Monthly recurring costs",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(14.dp))
+            if (breakdown.isEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = "Add the first cost and this becomes a picture of where the money goes.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                    TextButton(onClick = onAdd) {
+                        Icon(Icons.Outlined.Add, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Add a cost")
+                    }
+                }
+            } else {
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    DonutChart(
+                        breakdown = breakdown,
+                        centreTop = moneyCompact(monthly),
+                        centreBottom = "per month",
+                        size = 190.dp,
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    breakdown.forEach { slice ->
+                        BreakdownRow(slice)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BreakdownRow(slice: CostBreakdown) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .background(categoryColor(slice.category), CircleShape),
+            )
+            Spacer(Modifier.width(9.dp))
+            Text(
+                text = slice.category.label,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            Surface(
+                shape = RoundedCornerShape(5.dp),
+                color = categoryColor(slice.category).copy(alpha = 0.12f),
+                contentColor = categoryColor(slice.category),
+            ) {
+                Text(
+                    text = "${(slice.share * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = "${money(slice.monthly)}/mo",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun GroupedCostCards(
+    costs: List<RunningCost>,
+    onEdit: (RunningCost) -> Unit,
+    onDelete: (RunningCost) -> Unit,
+    onAdd: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (costs.isEmpty()) {
+        Surface(
+            modifier = modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant,
+            ),
+        ) {
+            EmptyState(
+                icon = Icons.Outlined.Savings,
+                title = "No running costs yet",
+                body = "Add the van, fuel, insurance, tools or software. Each one is " +
+                    "worked out monthly so it sits beside income.",
+                modifier = Modifier.padding(20.dp),
+            )
+        }
+        return
+    }
+    val groups = costs
+        .groupBy { CostCategory.from(it.category) }
+        .mapValues { (_, rows) -> rows to rows.sumOf { it.monthlyAmount() } }
+        .toList()
+        .sortedByDescending { it.second.second }
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        groups.forEach { (category, pair) ->
+            val (rows, total) = pair
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant,
+                ),
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = categoryColor(category).copy(alpha = 0.14f),
+                            contentColor = categoryColor(category),
+                            modifier = Modifier.size(26.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = costCategoryIcon(category),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(9.dp))
+                        Text(
+                            text = category.label,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            text = "${moneyCompact(total)}/mo",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    rows.forEachIndexed { index, cost ->
+                        if (index > 0) {
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant,
+                                modifier = Modifier.padding(horizontal = 14.dp),
+                            )
+                        }
+                        CostItemRow(
+                            cost = cost,
+                            onEdit = { onEdit(cost) },
+                            onDelete = { onDelete(cost) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CostItemRow(cost: RunningCost, onEdit: () -> Unit, onDelete: () -> Unit) {
+    val frequency = CostFrequency.from(cost.frequency)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onEdit)
+            .padding(start = 14.dp, end = 4.dp, top = 9.dp, bottom = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = cost.name,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+        )
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = money(cost.amount),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Surface(
+                shape = RoundedCornerShape(4.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ) {
+                Text(
+                    text = frequency.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                )
+            }
+        }
+        IconButton(
+            onClick = onDelete,
+            modifier = Modifier.size(34.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Delete,
+                contentDescription = "Delete ${cost.name}",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                modifier = Modifier.size(16.dp),
+            )
+        }
     }
 }
 
@@ -825,19 +1143,20 @@ private fun DonutChart(
     size: Dp = 132.dp,
 ) {
     val colours = breakdown.map { categoryColor(it.category) }
+    val stroke = (size.value * 0.18f).dp
     Box(modifier = Modifier.size(size), contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.size(size)) {
-            val stroke = 22.dp.toPx()
-            val inset = stroke / 2f
-            val arcSize = Size(this.size.width - stroke, this.size.height - stroke)
+            val strokePx = stroke.toPx()
+            val inset = strokePx / 2f
+            val arcSize = Size(this.size.width - strokePx, this.size.height - strokePx)
             drawArc(
-                color = Color.Gray.copy(alpha = 0.16f),
+                color = Color.Gray.copy(alpha = 0.14f),
                 startAngle = 0f,
                 sweepAngle = 360f,
                 useCenter = false,
                 topLeft = Offset(inset, inset),
                 size = arcSize,
-                style = Stroke(width = stroke),
+                style = Stroke(width = strokePx),
             )
             var start = -90f
             breakdown.forEachIndexed { index, slice ->
@@ -849,15 +1168,36 @@ private fun DonutChart(
                     useCenter = false,
                     topLeft = Offset(inset, inset),
                     size = arcSize,
-                    style = Stroke(width = stroke, cap = StrokeCap.Butt),
+                    style = Stroke(width = strokePx, cap = StrokeCap.Butt),
                 )
                 start += sweep
             }
         }
+        var start = -90f
+        breakdown.forEachIndexed { index, slice ->
+            val sweep = (slice.share * 360f).toFloat()
+            if (slice.share >= 0.05) {
+                val midpoint = Math.toRadians((start + sweep / 2f).toDouble())
+                val radius = (size / 2 - stroke / 2).value
+                val x = (size.value / 2 + cos(midpoint).toFloat() * radius - 11f).dp
+                val y = (size.value / 2 + sin(midpoint).toFloat() * radius - 6f).dp
+                Text(
+                    text = "${(slice.share * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (colours[index].luminance() > 0.55f) {
+                        Color(0xFF1B2A1C)
+                    } else {
+                        Color.White
+                    },
+                    modifier = Modifier.offset(x = x, y = y),
+                )
+            }
+            start += sweep
+        }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = centreTop,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
             )
             Text(
