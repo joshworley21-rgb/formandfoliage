@@ -102,6 +102,9 @@ class VoiceActionRunner(
     /** Set while re-running an intent for a client the clarification chose. */
     private var resolvedClientId: String? = null
 
+    /** The last client named or resolved in this call, for "it/that/them". */
+    private var lastMentionedClientId: String? = null
+
     /** The visit voice most recently wrote, for follow-up corrections. */
     private data class VoiceVisit(
         val id: String,
@@ -422,6 +425,7 @@ class VoiceActionRunner(
         pendingClarification = null
         pendingReadAll = null
         resolvedClientId = null
+        lastMentionedClientId = null
         lastVoiceVisit = null
         // Never let a cut-off from last night pivot tomorrow's first reply.
         AssistantMemory.wasInterrupted = false
@@ -1788,6 +1792,7 @@ class VoiceActionRunner(
             val chosen = clients.firstOrNull { it.id == id }
             if (chosen != null) {
                 resolvedClientId = null
+                lastMentionedClientId = chosen.id
                 return chosen
             }
         }
@@ -1801,7 +1806,22 @@ class VoiceActionRunner(
             val score = maxOf(nameScore, aliasScore)
             if (score > 0.0) client to score else null
         }.sortedByDescending { (_, score) -> score }
-        return scored.firstOrNull()?.first
+        val matched = scored.firstOrNull()?.first
+        if (matched != null) {
+            lastMentionedClientId = matched.id
+            return matched
+        }
+        // Conversational callback: "it", "that", "them", "their" after a
+        // client was named in the previous turn. Only when no name matched.
+        val pronoun = lower.split(Regex("\\s+")).any {
+            it.trim('.', ',', '!', '?') in setOf(
+                "it", "that", "them", "their", "they", "he", "she", "his", "her",
+            )
+        }
+        if (pronoun) {
+            return lastMentionedClientId?.let { id -> clients.firstOrNull { it.id == id } }
+        }
+        return null
     }
 
     /**
@@ -1826,7 +1846,9 @@ class VoiceActionRunner(
     /** The client for the slot the owner is on, when one is booked today. */
     private suspend fun inferredClient(clients: List<Client>): Client? {
         val (job, _) = activeJob() ?: return null
-        return clients.firstOrNull { it.id == job.clientId }
+        return clients.firstOrNull { it.id == job.clientId }?.also {
+            lastMentionedClientId = it.id
+        }
     }
 
     /** "eight hours", "8 hrs", "two and a half hours", "at eight hours". */
