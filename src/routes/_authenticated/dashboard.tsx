@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   addDays,
   endOfMonth,
+  endOfWeek,
   format,
   isBefore,
   isSameDay,
@@ -9,37 +10,40 @@ import {
   startOfDay,
   startOfMonth,
   startOfWeek,
+  subDays,
 } from "date-fns";
 import {
+  ArrowRight,
   CalendarDays,
-  CheckCircle2,
-  ClipboardList,
+  ChevronRight,
   Clock,
-  FileText,
   PoundSterling,
-  Plus,
-  Send,
+  TrendingDown,
+  TrendingUp,
 } from "lucide-react";
+import { useState } from "react";
 import { AppShell } from "@/components/AppShell";
-import { InvoiceReminders } from "@/components/InvoiceReminders";
+import { useInvoiceReminders } from "@/components/InvoiceReminders";
 import { OwnerOnly } from "@/components/OwnerOnly";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useClients, useInvoices, useJobs, useVisits } from "@/hooks/use-crm";
 import { hoursLabel, money } from "@/lib/crm";
+import { storedUser } from "@/lib/session";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({
     meta: [
-      { title: "Dashboard — JW Garden Services CRM" },
+      { title: "Home — JW Garden Services CRM" },
       {
         name: "description",
-        content: "Today's round, hours this month and work waiting to be billed.",
+        content: "This week's money, today's round and the work waiting to be billed.",
       },
-      { property: "og:title", content: "Dashboard — JW Garden Services CRM" },
+      { property: "og:title", content: "Home — JW Garden Services CRM" },
       {
         property: "og:description",
-        content: "Today's round, hours this month and work waiting to be billed.",
+        content: "This week's money, today's round and the work waiting to be billed.",
       },
     ],
   }),
@@ -50,71 +54,124 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
   ),
 });
 
-const STATUS_STYLES = {
-  draft: {
-    label: "Draft",
-    icon: FileText,
-    className: "border-border bg-muted text-muted-foreground",
-  },
-  sent: {
-    label: "Sent",
-    icon: Send,
-    className: "border-primary/30 bg-primary/10 text-primary",
-  },
-  paid: {
-    label: "Paid",
-    icon: CheckCircle2,
-    className: "border-accent/40 bg-accent/15 text-accent-foreground",
-  },
-} as const;
+type HomeTab = "week" | "today" | "cash";
 
-/**
- * The week at a glance. A dot means that day carries work — enough to answer
- * "is tomorrow busy?" without opening the calendar, which is the only question
- * the dashboard is ever asked about the week.
- */
-function WeekStrip({ today, busyDays }: { today: Date; busyDays: Set<string> }) {
-  const monday = startOfWeek(today, { weekStartsOn: 1 });
-  const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+/** Warm greeting from the stored session, without asking the network. */
+function greetingFor(date: Date): string {
+  const hour = date.getHours();
+  const greeting = hour < 12 ? "Morning" : hour < 18 ? "Afternoon" : "Evening";
+  const email = storedUser()?.email ?? "";
+  const raw = email.split("@")[0]?.split(/[._-]/)[0] ?? "";
+  const name = raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : "there";
+  return `${greeting}, ${name}`;
+}
+
+function between(date: string, start: Date, end: Date): boolean {
+  const d = parseISO(date);
+  return d >= start && d <= end;
+}
+
+function daysLate(issueDate: string, dueDate: string | null, today: Date): number {
+  const due = dueDate ? parseISO(dueDate) : addDays(parseISO(issueDate), 30);
+  return Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000));
+}
+
+function BarChart({
+  series,
+  today,
+}: {
+  series: { day: Date; billed: number; unbilled: number }[];
+  today: Date;
+}) {
+  const max = Math.max(1, ...series.map((point) => Math.max(point.billed, point.unbilled)));
 
   return (
-    <div className="mt-4 grid grid-cols-7 gap-1">
-      {days.map((day) => {
-        const isToday = isSameDay(day, today);
-        const busy = busyDays.has(format(day, "yyyy-MM-dd"));
-        return (
-          <div
-            key={day.toISOString()}
-            className={
-              isToday
-                ? "rounded-lg bg-band-foreground py-1.5 text-center text-band"
-                : "rounded-lg py-1.5 text-center"
-            }
-          >
-            <p className="figure text-[0.55rem] uppercase tracking-[0.1em] opacity-70">
-              {format(day, "EEEEE")}
-            </p>
-            <p className="figure text-sm font-semibold leading-tight">{format(day, "d")}</p>
-            <span
-              aria-hidden
-              className={
-                busy
-                  ? "mx-auto mt-0.5 block size-1 rounded-full bg-current opacity-90"
-                  : "mx-auto mt-0.5 block size-1 rounded-full bg-current opacity-0"
-              }
-            />
-          </div>
-        );
-      })}
+    <div>
+      <div className="flex items-end justify-between gap-1">
+        {series.map((point) => {
+          const isToday = isSameDay(point.day, today);
+          return (
+            <div
+              key={point.day.toISOString()}
+              className={cn(
+                "flex min-w-0 flex-1 flex-col items-center rounded-lg pt-2",
+                isToday ? "bg-secondary/70" : "",
+              )}
+            >
+              <div className="flex h-28 w-full items-end justify-center gap-[3px] px-1">
+                <div
+                  className="w-[38%] max-w-2.5 rounded-t-sm bg-primary"
+                  style={{ height: `${Math.max(3, (point.billed / max) * 100)}%` }}
+                  title={`Billed ${money(point.billed)}`}
+                />
+                <div
+                  className="w-[38%] max-w-2.5 rounded-t-sm bg-leaf/55"
+                  style={{ height: `${Math.max(3, (point.unbilled / max) * 100)}%` }}
+                  title={`Unbilled ${money(point.unbilled)}`}
+                />
+              </div>
+              <p
+                className={cn(
+                  "figure mt-1.5 pb-1 text-[0.6rem]",
+                  isToday ? "font-semibold text-foreground" : "text-muted-foreground",
+                )}
+              >
+                {format(point.day, "EEE")}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-2 flex items-center justify-center gap-4 text-[0.62rem] text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <span className="size-2 rounded-sm bg-primary" /> Billed
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="size-2 rounded-sm bg-leaf/55" /> Unbilled
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function SummaryRow({
+  label,
+  children,
+  emphasis = false,
+}: {
+  label: string;
+  children: React.ReactNode;
+  emphasis?: boolean;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 border-b border-border py-2.5 last:border-b-0">
+      <span
+        className={cn(
+          "text-sm",
+          emphasis ? "font-semibold text-foreground" : "text-muted-foreground",
+        )}
+      >
+        {label}
+      </span>
+      <span className={cn("figure text-sm", emphasis ? "font-semibold" : "font-medium")}>
+        {children}
+      </span>
     </div>
   );
 }
 
 function DashboardPage() {
   const today = startOfDay(new Date());
+  const weekStart = startOfWeek(today, { weekStartsOn: 1 });
+  const weekEnd = endOfWeek(today, { weekStartsOn: 1 });
+  const lastWeekStart = subDays(weekStart, 7);
+  const lastWeekEnd = subDays(weekEnd, 7);
   const monthStart = startOfMonth(today);
   const monthEnd = endOfMonth(today);
 
+  const [tab, setTab] = useState<HomeTab>("week");
+
+  const reminders = useInvoiceReminders();
   const { data: clients = [], error: clientsError } = useClients();
   const { data: visits = [], error: visitsError } = useVisits();
   const { data: invoices = [], error: invoicesError } = useInvoices();
@@ -126,270 +183,393 @@ function DashboardPage() {
   const error = clientsError || visitsError || invoicesError || jobsError;
   if (error)
     return (
-      <AppShell title="Dashboard">
-        <p className="text-destructive">Error loading dashboard: {error.message}</p>
+      <AppShell title="Home">
+        <p className="text-destructive">Error loading home: {error.message}</p>
       </AppShell>
     );
 
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name ?? "Client";
 
+  const weekVisits = visits.filter((v) => between(v.visit_date, weekStart, weekEnd));
+  const lastWeekVisits = visits.filter((v) => between(v.visit_date, lastWeekStart, lastWeekEnd));
+  const monthVisits = visits.filter((v) => between(v.visit_date, monthStart, monthEnd));
+
+  const sum = (rows: typeof visits, key: "amount" | "materials_cost" | "hours") =>
+    rows.reduce((total, row) => total + Number(row[key] ?? 0), 0);
+
+  const weekIncome = sum(weekVisits, "amount");
+  const weekMaterials = sum(weekVisits, "materials_cost");
+  const weekHours = sum(weekVisits, "hours");
+  const weekNet = weekIncome - weekMaterials;
+  const lastWeekNet = sum(lastWeekVisits, "amount") - sum(lastWeekVisits, "materials_cost");
+  const netDelta = weekNet - lastWeekNet;
+  const weekUnbilled = weekVisits
+    .filter((v) => !v.billed && !v.missed)
+    .reduce((total, v) => total + Number(v.amount), 0);
+
+  const monthIncome = sum(monthVisits, "amount");
+  const monthVisitsCount = monthVisits.filter((v) => !v.missed).length;
+
   const scheduled = jobs.filter((j) => j.status === "scheduled");
-  const todayJobs = scheduled.filter((j) => isSameDay(parseISO(j.starts_at), today));
-  const upcomingFiltered = scheduled.filter(
-    (j) => parseISO(j.starts_at) > today && !isSameDay(parseISO(j.starts_at), today),
-  );
-  const upcoming = upcomingFiltered.slice(0, 8);
-  const overdue = scheduled.filter((j) => isBefore(parseISO(j.starts_at), today));
-
-  const todayMinutes = todayJobs.reduce((s, j) => s + Number(j.duration_minutes ?? 0), 0);
-
-  // Which days this week carry work, for the dots under the band.
-  const busyDays = new Set(scheduled.map((j) => format(parseISO(j.starts_at), "yyyy-MM-dd")));
-
-  const monthVisits = visits.filter((v) => {
-    const d = parseISO(v.visit_date);
-    return d >= monthStart && d <= monthEnd;
+  const weekJobs = scheduled.filter((j) => {
+    const date = parseISO(j.starts_at);
+    return date >= weekStart && date <= weekEnd;
   });
-  const monthHours = monthVisits.reduce((s, v) => s + Number(v.hours ?? 0), 0);
-  const monthValue = monthVisits.reduce((s, v) => s + Number(v.amount), 0);
+  const scheduledHours = weekJobs.reduce((total, job) => total + job.duration_minutes / 60, 0);
+  const capacity = Math.round((scheduledHours / 40) * 100);
 
-  const unbilled = visits.filter((v) => !v.billed && !v.missed);
-  const unbilledTotal = unbilled.reduce((s, v) => s + Number(v.amount), 0);
-  const outstandingTotal = invoices
-    .filter((i) => i.status !== "paid")
-    .reduce((s, i) => s + Number(i.total), 0);
+  const todayJobs = scheduled.filter((j) => isSameDay(parseISO(j.starts_at), today));
+  const overdue = scheduled.filter((j) => isBefore(parseISO(j.starts_at), today));
+  const upcoming = scheduled
+    .filter((j) => parseISO(j.starts_at) > endOfWeek(today, { weekStartsOn: 1 }))
+    .slice(0, 3);
 
-  const recentInvoices = [...invoices]
-    .sort((a, b) => b.issue_date.localeCompare(a.issue_date))
-    .slice(0, 6);
+  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const series = weekDays.map((day) => {
+    const dayVisits = weekVisits.filter((v) => isSameDay(parseISO(v.visit_date), day));
+    return {
+      day,
+      billed: dayVisits
+        .filter((v) => v.billed && !v.missed)
+        .reduce((total, v) => total + Number(v.amount), 0),
+      unbilled: dayVisits
+        .filter((v) => !v.billed && !v.missed)
+        .reduce((total, v) => total + Number(v.amount), 0),
+    };
+  });
 
-  const stats = [
-    { label: "Hours this month", value: hoursLabel(monthHours), icon: Clock },
-    { label: "Value logged", value: money(monthValue), icon: ClipboardList },
-    { label: "Unbilled work", value: money(unbilledTotal), icon: PoundSterling },
-    {
-      label: "Jobs next 7 days",
-      value: String(upcomingFiltered.length + todayJobs.length),
-      icon: CalendarDays,
-    },
-  ];
+  const busiest = [...series].sort((a, b) => b.billed + b.unbilled - (a.billed + a.unbilled))[0];
+  const busiestTotal = busiest ? busiest.billed + busiest.unbilled : 0;
+
+  const byClient = new Map<string, number>();
+  for (const visit of weekVisits) {
+    if (visit.missed) continue;
+    byClient.set(visit.client_id, (byClient.get(visit.client_id) ?? 0) + Number(visit.amount));
+  }
+  const topClient = [...byClient.entries()].sort((a, b) => b[1] - a[1])[0];
+
+  const unpaid = invoices
+    .filter((invoice) => invoice.status !== "paid")
+    .sort((a, b) => a.issue_date.localeCompare(b.issue_date));
+  const outstanding = unpaid.reduce((total, invoice) => total + Number(invoice.total), 0);
+
+  const weekVisitCount = weekVisits.filter((v) => !v.missed).length;
 
   return (
-    <AppShell title="Dashboard" description="Today's round first, then hours and billing.">
-      {/*
-        1. Today. This is the question actually being asked at 7am, so it leads
-        the page as a solid block — countable at arm's length, in daylight.
-      */}
-      <section className="rounded-3xl bg-band p-5 text-band-foreground">
-        <div className="flex items-baseline justify-between gap-3">
-          <p className="figure text-[0.65rem] uppercase tracking-[0.14em] opacity-75">
-            {format(today, "EEE d MMMM")}
+    <AppShell title={greetingFor(today)} description={format(today, "EEEE d MMMM")} overlap>
+      {/* The two numbers the day opens with. Half on the band, half on paper. */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-2xl bg-band px-4 py-4 text-band-foreground shadow-lg shadow-band/15">
+          <p className="text-[0.58rem] uppercase tracking-[0.16em] text-band-foreground/50">
+            This week
           </p>
-          {todayMinutes > 0 ? (
-            <p className="figure text-[0.65rem] tracking-[0.14em] opacity-75">
-              {hoursLabel(todayMinutes / 60)}
-            </p>
-          ) : null}
+          <p className="figure mt-2 font-display text-[1.9rem] font-semibold leading-none text-gold">
+            {money(weekIncome)}
+          </p>
+          <p className="mt-1.5 text-[0.7rem] text-band-foreground/55">
+            {weekVisitCount} {weekVisitCount === 1 ? "visit" : "visits"} · so far
+          </p>
         </div>
-
-        <h2 className="mt-2 font-display text-4xl font-extrabold leading-none">
-          {todayJobs.length === 0 ? (
-            "Nothing booked"
-          ) : (
-            <>
-              {todayJobs.length}{" "}
-              <span className="text-xl font-semibold opacity-85">
-                {todayJobs.length === 1 ? "job" : "jobs"} today
-              </span>
-            </>
-          )}
-        </h2>
-
-        <WeekStrip today={today} busyDays={busyDays} />
-      </section>
-
-      {/* Money that needs doing, before anything else competes for attention. */}
-      <div className="mt-3">
-        <InvoiceReminders />
+        <div className="rounded-2xl bg-band px-4 py-4 text-band-foreground shadow-lg shadow-band/15">
+          <p className="text-[0.58rem] uppercase tracking-[0.16em] text-band-foreground/50">
+            This month
+          </p>
+          <p className="figure mt-2 font-display text-[1.9rem] font-semibold leading-none text-gold">
+            {money(monthIncome)}
+          </p>
+          <p className="mt-1.5 text-[0.7rem] text-band-foreground/55">
+            {monthVisitsCount} {monthVisitsCount === 1 ? "visit" : "visits"} · so far
+          </p>
+        </div>
       </div>
 
-      {/* Today's jobs, in order, straight under the band. */}
+      <Link
+        to={reminders.length ? "/invoices" : "/visits"}
+        className="mt-3 flex items-center gap-2.5 rounded-full border border-primary/25 bg-secondary/60 px-4 py-2.5 transition-colors hover:bg-secondary"
+      >
+        <span aria-hidden className="text-base leading-none">
+          📌
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+          {reminders.length === 0
+            ? "No invoice reminders today"
+            : `${reminders.length} ${reminders.length === 1 ? "client is" : "clients are"} ready to invoice`}
+        </span>
+        <span className="shrink-0 rounded-full bg-primary px-2.5 py-1 text-[0.6rem] font-semibold uppercase tracking-[0.08em] text-primary-foreground">
+          {reminders.length === 0 ? "+ Add" : "Review"}
+        </span>
+      </Link>
+
+      {/* The working card: the week's story, today's round, or the money owed. */}
       <section className="mt-3 overflow-hidden rounded-2xl border border-border bg-card">
-        <div className="flex items-center justify-between gap-3 px-4 py-2.5">
-          <p className="figure text-[0.65rem] uppercase tracking-[0.14em] text-muted-foreground">
-            Next up
-          </p>
-          <Button asChild size="sm" variant="ghost" className="-mr-2 h-8">
-            <Link to="/visits">
-              <Plus className="size-4" /> Log a visit
-            </Link>
-          </Button>
-        </div>
-        <div className="divide-y divide-border border-t border-border">
-          {todayJobs.length === 0 ? (
-            <p className="px-4 py-4 text-sm text-muted-foreground">
-              Your day is clear — book something from the calendar.
-            </p>
-          ) : (
-            todayJobs.map((job, index) => (
-              <div
-                key={job.id}
-                className="stripe flex items-center gap-3 py-3 pl-4 pr-3"
-                style={{
-                  ["--stripe" as string]: index === 0 ? "var(--color-lime)" : "var(--color-border)",
-                }}
+        <div className="p-3 pb-2">
+          <div className="grid grid-cols-3 gap-1 rounded-full bg-secondary p-1">
+            {(
+              [
+                ["week", "This week"],
+                ["today", "Today"],
+                ["cash", "Cash flow"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setTab(value)}
+                className={cn(
+                  "rounded-full px-2 py-1.5 text-[0.78rem] font-medium transition-colors",
+                  tab === value
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
               >
-                <p className="figure w-12 shrink-0 text-base font-semibold leading-none">
-                  {format(parseISO(job.starts_at), "HH:mm")}
-                </p>
-                <p className="min-w-0 flex-1 truncate font-medium">{clientName(job.client_id)}</p>
-                <span className="figure shrink-0 text-xs text-muted-foreground">
-                  {job.duration_minutes} min
-                </span>
-              </div>
-            ))
-          )}
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
+
+        {tab === "week" ? (
+          <div className="px-4 pb-4">
+            <div className="flex items-center gap-1.5 border-b border-border pb-2.5 text-sm">
+              {netDelta < 0 ? (
+                <TrendingDown className="size-4 text-destructive" />
+              ) : (
+                <TrendingUp className="size-4 text-primary" />
+              )}
+              <span
+                className={cn(
+                  "figure font-medium",
+                  netDelta < 0 ? "text-destructive" : "text-primary",
+                )}
+              >
+                {netDelta < 0 ? "↓" : "↑"} {money(Math.abs(netDelta))} net
+              </span>
+              <span className="text-muted-foreground">vs last week</span>
+            </div>
+
+            <p className="mt-3 text-[0.6rem] uppercase tracking-[0.14em] text-muted-foreground">
+              This week, day by day
+            </p>
+            <div className="mt-2">
+              <BarChart series={series} today={today} />
+            </div>
+
+            <div className="mt-3 border-t border-border pt-1">
+              <SummaryRow label="Busiest day">
+                {busiestTotal > 0
+                  ? `${format(busiest!.day, "EEEE")} · ${money(busiestTotal)}`
+                  : "—"}
+              </SummaryRow>
+              <SummaryRow label="Top client">
+                {topClient ? `${clientName(topClient[0])} · ${money(topClient[1])}` : "—"}
+              </SummaryRow>
+              <SummaryRow label="Capacity">
+                {capacity}% · {hoursLabel(scheduledHours)} of 40h
+              </SummaryRow>
+            </div>
+
+            <p className="mt-3 text-[0.6rem] uppercase tracking-[0.14em] text-muted-foreground">
+              Profit &amp; loss
+            </p>
+            <div className="mt-1">
+              <SummaryRow label="Income">{money(weekIncome)}</SummaryRow>
+              <SummaryRow label="Materials">{money(weekMaterials)}</SummaryRow>
+              <SummaryRow label="Net profit" emphasis>
+                {money(weekNet)}
+              </SummaryRow>
+            </div>
+          </div>
+        ) : null}
+
+        {tab === "today" ? (
+          <div className="px-4 pb-4">
+            <div className="flex items-center justify-between gap-2 border-b border-border pb-2.5">
+              <p className="text-sm text-muted-foreground">
+                {todayJobs.length === 0
+                  ? "Your day is clear."
+                  : `${todayJobs.length} ${todayJobs.length === 1 ? "job" : "jobs"} today`}
+              </p>
+              <Button asChild size="sm" variant="ghost" className="h-8 text-primary">
+                <Link to="/schedule">
+                  Open rota <ChevronRight className="size-3.5" />
+                </Link>
+              </Button>
+            </div>
+
+            {overdue.length > 0 ? (
+              <div className="mt-3 flex items-start gap-2.5 rounded-xl border border-warning/40 bg-warning/10 px-3 py-2.5">
+                <Clock className="mt-0.5 size-4 shrink-0 text-warning" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-foreground">
+                    {overdue.length} {overdue.length === 1 ? "job is" : "jobs are"} past their date
+                  </p>
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                    {overdue
+                      .slice(0, 2)
+                      .map((job) => clientName(job.client_id))
+                      .join(", ")}
+                    {overdue.length > 2 ? ` and ${overdue.length - 2} more` : ""}
+                  </p>
+                </div>
+                <Link
+                  to="/schedule"
+                  className="shrink-0 self-center text-xs font-semibold text-warning"
+                >
+                  Review
+                </Link>
+              </div>
+            ) : null}
+
+            <div className="mt-1 divide-y divide-border">
+              {todayJobs.length === 0 ? (
+                <div className="py-6 text-center">
+                  <CalendarDays className="mx-auto size-6 text-muted-foreground/60" />
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Nothing booked. Give yourself a day off, or add a job.
+                  </p>
+                  <Button asChild size="sm" variant="gold" className="mt-3">
+                    <Link to="/schedule">Book a job</Link>
+                  </Button>
+                </div>
+              ) : (
+                todayJobs.map((job, index) => (
+                  <div key={job.id} className="flex items-center gap-3 py-3">
+                    <span
+                      className={cn(
+                        "h-8 w-1 shrink-0 rounded-full",
+                        index === 0 ? "bg-lime" : "bg-border",
+                      )}
+                      aria-hidden
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold">{clientName(job.client_id)}</p>
+                      <p className="figure text-xs text-muted-foreground">
+                        {format(parseISO(job.starts_at), "HH:mm")} · {job.duration_minutes} min
+                      </p>
+                    </div>
+                    {job.notes ? (
+                      <span className="max-w-[38%] truncate text-xs text-muted-foreground">
+                        {job.notes}
+                      </span>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </div>
+
+            {upcoming.length > 0 ? (
+              <div className="mt-3 rounded-xl bg-background px-3 py-2">
+                <p className="text-[0.6rem] uppercase tracking-[0.14em] text-muted-foreground">
+                  After this week
+                </p>
+                {upcoming.map((job) => (
+                  <div key={job.id} className="flex items-center justify-between gap-2 py-1.5">
+                    <span className="truncate text-sm">{clientName(job.client_id)}</span>
+                    <span className="figure shrink-0 text-xs text-muted-foreground">
+                      {format(parseISO(job.starts_at), "EEE d MMM")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {tab === "cash" ? (
+          <div className="px-4 pb-4">
+            <div className="flex items-end justify-between gap-3 border-b border-border pb-3">
+              <div>
+                <p className="text-[0.6rem] uppercase tracking-[0.14em] text-muted-foreground">
+                  Owed to you
+                </p>
+                <p className="figure mt-1 font-display text-2xl font-semibold">
+                  {money(outstanding)}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="figure text-sm font-semibold">{money(weekUnbilled)}</p>
+                <p className="text-[0.6rem] uppercase tracking-[0.1em] text-muted-foreground">
+                  unbilled this week
+                </p>
+              </div>
+            </div>
+
+            <div className="divide-y divide-border">
+              {unpaid.length === 0 ? (
+                <p className="py-5 text-center text-sm text-muted-foreground">
+                  Everything is paid. Nothing to chase.
+                </p>
+              ) : (
+                unpaid.slice(0, 5).map((invoice) => {
+                  const late = daysLate(invoice.issue_date, invoice.due_date, today);
+                  return (
+                    <div key={invoice.id} className="flex items-center gap-3 py-2.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">
+                          {clientName(invoice.client_id)}
+                        </p>
+                        <p className="figure text-xs text-muted-foreground">
+                          {invoice.number}
+                          {late > 0 ? ` · ${late} ${late === 1 ? "day" : "days"} over` : ""}
+                        </p>
+                      </div>
+                      {late > 0 ? (
+                        <Badge variant="outline" className="border-warning text-warning">
+                          Late
+                        </Badge>
+                      ) : null}
+                      <p className="figure text-sm font-semibold">{money(invoice.total)}</p>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <Button asChild size="sm" variant="ghost" className="mt-2 h-9 w-full text-primary">
+              <Link to="/invoices">
+                Go to invoices <ArrowRight className="size-3.5" />
+              </Link>
+            </Button>
+          </div>
+        ) : null}
       </section>
 
-      {/*
-        Names them. "1 scheduled job is past its date" says nothing about which
-        one, so a job finished this morning and a job forgotten last week read
-        identically — and the natural assumption is that the app has failed to
-        notice the one you just did.
-      */}
-      {overdue.length > 0 ? (
-        <Card className="mt-4 border-destructive/40">
-          <CardContent className="space-y-3 py-4">
-            <p className="text-sm font-medium">
-              {overdue.length === 1
-                ? "This job is past its date"
-                : `These ${overdue.length} jobs are past their date`}{" "}
-              and not marked complete:
+      {/* The next three jobs, so Home still answers "what is coming?". */}
+      {upcoming.length > 0 && tab !== "today" ? (
+        <section className="mt-3 overflow-hidden rounded-2xl border border-border bg-card">
+          <div className="flex items-center justify-between gap-2 px-4 pb-1 pt-3">
+            <p className="text-[0.6rem] uppercase tracking-[0.14em] text-muted-foreground">
+              Coming up
             </p>
-            <ul className="space-y-1">
-              {overdue.slice(0, 5).map((job) => (
-                <li key={job.id} className="flex items-baseline justify-between gap-3 text-sm">
-                  <span className="min-w-0 truncate font-medium">{clientName(job.client_id)}</span>
-                  <span className="figure shrink-0 text-xs text-muted-foreground">
-                    {format(parseISO(job.starts_at), "EEE d MMM")}
-                  </span>
-                </li>
-              ))}
-              {overdue.length > 5 ? (
-                <li className="figure text-xs text-muted-foreground">
-                  and {overdue.length - 5} more
-                </li>
-              ) : null}
-            </ul>
-            <Button asChild size="sm" variant="outline" className="h-10 w-full">
-              <Link to="/schedule">Review schedule</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {/* 2. Next 7 days */}
-      <Card className="mt-4">
-        <CardHeader className="flex-row items-center justify-between">
-          <CardTitle className="font-display text-xl font-bold tracking-tight">
-            Next 7 days
-          </CardTitle>
-          <Button asChild size="sm" variant="ghost">
-            <Link to="/schedule">Open calendar</Link>
-          </Button>
-        </CardHeader>
-        <CardContent className="divide-y divide-border border-t border-border p-0">
-          {upcoming.length === 0 ? (
-            <p className="p-5 text-sm text-muted-foreground">Nothing booked yet.</p>
-          ) : (
-            upcoming.map((job) => (
-              <div key={job.id} className="flex items-center gap-4 px-5 py-3">
-                <div className="w-12 shrink-0 text-center">
-                  <p className="figure text-[0.6rem] uppercase tracking-[0.12em] text-muted-foreground">
+            <Link to="/schedule" className="text-xs font-medium text-primary">
+              Rota
+            </Link>
+          </div>
+          <div className="divide-y divide-border px-4">
+            {upcoming.map((job) => (
+              <div key={job.id} className="flex items-center gap-3 py-2.5">
+                <div className="w-9 text-center">
+                  <p className="figure text-[0.55rem] uppercase tracking-[0.1em] text-muted-foreground">
                     {format(parseISO(job.starts_at), "EEE")}
                   </p>
-                  <p className="figure text-lg font-semibold leading-none">
+                  <p className="figure text-sm font-semibold leading-none">
                     {format(parseISO(job.starts_at), "d")}
                   </p>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium">{clientName(job.client_id)}</p>
-                  <p className="figure text-xs text-muted-foreground">
-                    {format(parseISO(job.starts_at), "HH:mm")} · {job.duration_minutes} min
-                  </p>
-                </div>
+                <p className="min-w-0 flex-1 truncate text-sm">{clientName(job.client_id)}</p>
+                <p className="figure text-xs text-muted-foreground">
+                  {format(parseISO(job.starts_at), "HH:mm")}
+                </p>
               </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
-
-      {/* 3. Hours and billing summary */}
-      <div className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-border lg:grid-cols-4">
-        {stats.map((s) => (
-          <div key={s.label} className="bg-card p-4">
-            <s.icon className="size-4 text-primary" />
-            <p className="figure mt-3 text-xl font-semibold">{s.value}</p>
-            <p className="figure text-[0.6rem] uppercase tracking-[0.12em] text-muted-foreground">
-              {s.label}
-            </p>
+            ))}
           </div>
-        ))}
-      </div>
-
-      {/* 4. Recent invoices with status */}
-      <Card className="mt-4">
-        <CardHeader className="flex-row items-center justify-between">
-          <CardTitle className="font-display text-xl font-bold tracking-tight">Billing</CardTitle>
-          <Button asChild size="sm" variant="ghost">
-            <Link to="/invoices">All invoices</Link>
-          </Button>
-        </CardHeader>
-        <CardContent className="divide-y divide-border border-t border-border p-0">
-          {recentInvoices.length === 0 ? (
-            <p className="p-5 text-sm text-muted-foreground">No invoices yet.</p>
-          ) : (
-            recentInvoices.map((inv) => {
-              const s = STATUS_STYLES[inv.status];
-              const StatusIcon = s.icon;
-              return (
-                <div key={inv.id} className="flex items-center gap-3 px-5 py-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{clientName(inv.client_id)}</p>
-                    <p className="figure truncate text-xs text-muted-foreground">
-                      {/* No year: it never fits beside the chip, and a
-                          truncated one reads worse than none. */}
-                      {inv.number} · {format(parseISO(inv.issue_date), "d MMM")}
-                    </p>
-                  </div>
-                  <span
-                    className={`figure inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[0.6rem] uppercase tracking-[0.08em] ${s.className}`}
-                  >
-                    <StatusIcon className="size-3.5" />
-                    {s.label}
-                  </span>
-                  <p className="figure w-24 shrink-0 text-right text-base font-semibold">
-                    {money(inv.total)}
-                  </p>
-                </div>
-              );
-            })
-          )}
-        </CardContent>
-      </Card>
-
-      {unbilledTotal > 0 || outstandingTotal > 0 ? (
-        <p className="mt-3 text-sm text-muted-foreground">
-          {money(unbilledTotal)} ready to bill · {money(outstandingTotal)} awaiting payment.{" "}
-          <Link
-            to="/invoices"
-            className="font-medium text-primary underline-offset-4 hover:underline"
-          >
-            Go to invoices
-          </Link>
-        </p>
+        </section>
       ) : null}
+
+      <p className="mt-3 flex items-center justify-center gap-1.5 text-[0.65rem] text-muted-foreground">
+        <PoundSterling className="size-3.5" />
+        Figures are from logged visits, not invoices.
+      </p>
     </AppShell>
   );
 }

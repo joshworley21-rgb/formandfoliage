@@ -71,6 +71,8 @@
   --color-leaf: var(--leaf);
   --color-lime: var(--lime);
   --color-lime-foreground: var(--lime-foreground);
+  --color-gold: var(--gold);
+  --color-gold-foreground: var(--gold-foreground);
   --color-band: var(--band);
   --color-band-foreground: var(--band-foreground);
   --color-success: var(--success);
@@ -79,52 +81,64 @@
 }
 
 :root {
-  --radius: 0.875rem;
-  --background: oklch(0.979 0.007 124.4);
-  --foreground: oklch(0.24 0.026 160.3);
-  --card: oklch(1 0 90);
-  --card-foreground: oklch(0.24 0.026 160.3);
-  --popover: oklch(1 0 90);
-  --popover-foreground: oklch(0.24 0.026 160.3);
-  --primary: oklch(0.476 0.092 151.2);
-  --primary-foreground: oklch(0.97 0.012 133.4);
-  --secondary: oklch(0.956 0.011 128.6);
-  --secondary-foreground: oklch(0.24 0.026 160.3);
-  --muted: oklch(0.956 0.011 128.6);
-  --muted-foreground: oklch(0.536 0.023 164);
-  --accent: oklch(0.956 0.011 128.6);
-  --accent-foreground: oklch(0.24 0.026 160.3);
-  --destructive: oklch(0.493 0.157 31.8);
-  --destructive-foreground: oklch(0.97 0.012 133.4);
-  --border: oklch(0.921 0.014 128.6);
-  --input: oklch(0.921 0.014 128.6);
-  --ring: oklch(0.476 0.092 151.2);
-  --brown: oklch(0.3 0.04 45);
-  --brown-foreground: oklch(0.97 0.012 133.4);
-  --leaf: oklch(0.693 0.158 128.2);
+  --radius: 1rem;
+
+  /* Warm paper, not white: the whole product sits on the same cream. */
+  --background: oklch(0.969 0.011 96.3);
+  --foreground: oklch(0.253 0.023 148.6);
+  --card: oklch(0.992 0.004 96.3);
+  --card-foreground: oklch(0.253 0.023 148.6);
+  --popover: oklch(0.992 0.004 96.3);
+  --popover-foreground: oklch(0.253 0.023 148.6);
+
+  /* Deep forest. Every solid block and primary button. */
+  --primary: oklch(0.283 0.038 148.2);
+  --primary-foreground: oklch(0.975 0.011 96.3);
+  --secondary: oklch(0.902 0.021 132.4);
+  --secondary-foreground: oklch(0.283 0.038 148.2);
+  --muted: oklch(0.944 0.012 103.2);
+  --muted-foreground: oklch(0.478 0.02 145.8);
+  --accent: oklch(0.902 0.021 132.4);
+  --accent-foreground: oklch(0.283 0.038 148.2);
+  --destructive: oklch(0.503 0.152 29.6);
+  --destructive-foreground: oklch(0.975 0.011 96.3);
+  --border: oklch(0.889 0.014 105.6);
+  --input: oklch(0.889 0.014 105.6);
+  --ring: oklch(0.283 0.038 148.2);
+
+  --brown: oklch(0.32 0.045 47);
+  --brown-foreground: oklch(0.975 0.011 96.3);
+  --leaf: oklch(0.612 0.09 142.4);
   /* Live state — the next job, the selected day. Never decoration. */
-  --lime: oklch(0.693 0.158 128.2);
-  --lime-foreground: oklch(0.24 0.026 160.3);
+  --lime: oklch(0.716 0.127 132.8);
+  --lime-foreground: oklch(0.253 0.023 148.6);
   --success: oklch(0.476 0.092 151.2);
   /* Money that is late, and nothing else. */
-  --warning: oklch(0.598 0.135 60.6);
-  --warning-foreground: oklch(0.97 0.012 133.4);
+  --warning: oklch(0.612 0.141 47.2);
+  --warning-foreground: oklch(0.975 0.011 96.3);
+
+  /* The muted brass used for the one action that matters on a screen. */
+  --gold: oklch(0.759 0.082 82.4);
+  --gold-foreground: oklch(0.253 0.023 148.6);
+
   /* The solid block that leads a page. */
-  --band: oklch(0.476 0.092 151.2);
-  --band-foreground: oklch(0.97 0.012 133.4);
-  --chart-1: oklch(0.35 0.04 145);
-  --chart-2: oklch(0.46 0.06 145);
-  --chart-3: oklch(0.62 0.08 145);
-  --chart-4: oklch(0.78 0.1 145);
-  --chart-5: oklch(0.55 0.07 100);
-  --sidebar: oklch(0.24 0.026 160.3);
-  --sidebar-foreground: oklch(0.942 0.012 137.8);
-  --sidebar-primary: oklch(0.476 0.092 151.2);
-  --sidebar-primary-foreground: oklch(0.97 0.012 133.4);
-  --sidebar-accent: oklch(0.306 0.024 154.6);
-  --sidebar-accent-foreground: oklch(0.942 0.012 137.8);
-  --sidebar-border: oklch(0.306 0.024 154.6);
-  --sidebar-ring: oklch(0.693 0.158 128.2);
+  --band: oklch(0.264 0.034 148.6);
+  --band-foreground: oklch(0.962 0.013 96.3);
+
+  --chart-1: oklch(0.34 0.05 148);
+  --chart-2: oklch(0.52 0.08 146);
+  --chart-3: oklch(0.67 0.09 137);
+  --chart-4: oklch(0.79 0.07 91);
+  --chart-5: oklch(0.6 0.05 98);
+
+  --sidebar: oklch(0.235 0.027 148.6);
+  --sidebar-foreground: oklch(0.942 0.012 96.3);
+  --sidebar-primary: oklch(0.759 0.082 82.4);
+  --sidebar-primary-foreground: oklch(0.253 0.023 148.6);
+  --sidebar-accent: oklch(0.306 0.03 148.6);
+  --sidebar-accent-foreground: oklch(0.942 0.012 96.3);
+  --sidebar-border: oklch(0.306 0.03 148.6);
+  --sidebar-ring: oklch(0.759 0.082 82.4);
 }
 
 .dark {
@@ -155,6 +169,8 @@
   --success: oklch(0.748 0.102 150.8);
   --warning: oklch(0.753 0.116 66.9);
   --warning-foreground: oklch(0.186 0.016 157.1);
+  --gold: oklch(0.811 0.086 84.2);
+  --gold-foreground: oklch(0.235 0.021 156.5);
   /* Not an inverted band — a deep leaf the white text still sits on. */
   --band: oklch(0.365 0.07 152);
   --band-foreground: oklch(0.942 0.012 137.8);
@@ -184,6 +200,35 @@
     /* Keeps the browser's own overscroll out of the way of pull-to-refresh. */
     overscroll-behavior-y: contain;
   }
+}
+
+/*
+ * Actions sitting on the deep forest page header. The buttons keep their
+ * variants, but the palette flips: the one action is brass, the secondary one
+ * is a cream outline, and a quiet one is simply cream text.
+ */
+.app-header-actions [data-variant="default"] {
+  background-color: var(--color-gold);
+  color: var(--color-gold-foreground);
+}
+
+.app-header-actions [data-variant="default"]:hover {
+  background-color: color-mix(in oklab, var(--color-gold) 88%, white);
+}
+
+.app-header-actions [data-variant="outline"] {
+  border-color: color-mix(in oklab, var(--color-band-foreground) 35%, transparent);
+  background-color: transparent;
+  color: var(--color-band-foreground);
+}
+
+.app-header-actions [data-variant="outline"]:hover {
+  background-color: color-mix(in oklab, var(--color-band-foreground) 12%, transparent);
+  color: var(--color-band-foreground);
+}
+
+.app-header-actions [data-variant="ghost"] {
+  color: var(--color-band-foreground);
 }
 
 /*

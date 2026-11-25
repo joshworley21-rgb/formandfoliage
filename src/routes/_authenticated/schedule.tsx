@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import {
   addDays,
+  addMinutes,
   addMonths,
   addWeeks,
   endOfMonth,
@@ -17,8 +18,10 @@ import {
 import {
   CalendarCheck,
   CalendarClock,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   ClipboardList,
   Pencil,
   MoreHorizontal,
@@ -58,6 +61,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -85,6 +89,7 @@ import { MoveJobDialog } from "@/components/MoveJobDialog";
 import { SeriesDialog } from "@/components/SeriesDialog";
 import { VisitDialog } from "@/components/VisitDialog";
 import { currentUser } from "@/lib/session";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/schedule")({
   head: () => ({
@@ -107,9 +112,12 @@ export const Route = createFileRoute("/_authenticated/schedule")({
 type View = "month" | "week" | "day";
 
 function SchedulePage() {
-  const [view, setView] = useState<View>("month");
+  const [view, setView] = useState<View>("week");
   const [cursor, setCursor] = useState(() => startOfDay(new Date()));
   const [selectedDay, setSelectedDay] = useState(() => startOfDay(new Date()));
+  // The compact rota cards open this rather than carrying five buttons apiece.
+  const [detailJob, setDetailJob] = useState<ScheduledJob | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(true);
 
   const range = useMemo(() => {
     // The day view is one day. `days` below walks start..end inclusive, so an
@@ -193,46 +201,253 @@ function SchedulePage() {
     view === "month"
       ? format(cursor, "MMMM yyyy")
       : view === "week"
-        ? `${format(range.start, "d MMM")} – ${format(range.end, "d MMM yyyy")}`
+        ? `Week of ${format(range.start, "d MMM")} – ${format(range.end, "d MMM yyyy")}`
         : format(cursor, "EEEE d MMMM yyyy");
+
+  // What the solid block under the controls adds up. Visits are money actually
+  // logged; jobs are the hours already committed on the rota.
+  const rangeVisits = visits.filter((visit) => {
+    const date = parseISO(visit.visit_date);
+    return date >= range.start && date <= range.end && !visit.missed;
+  });
+  const rangeIncome = rangeVisits.reduce((total, visit) => total + Number(visit.amount), 0);
+  const rangeMaterials = rangeVisits.reduce(
+    (total, visit) => total + Number(visit.materials_cost),
+    0,
+  );
+  const rangeNet = rangeIncome - rangeMaterials;
+  const rangeHours = jobs.reduce((total, job) => total + job.duration_minutes / 60, 0);
+
+  // One row per client for the summary panel: how many days on the round and
+  // how many hours that adds up to.
+  const clientDays = new Map<string, { days: Set<string>; hours: number }>();
+  for (const job of jobs) {
+    const entry = clientDays.get(job.client_id) ?? { days: new Set<string>(), hours: 0 };
+    entry.days.add(format(parseISO(job.starts_at), "yyyy-MM-dd"));
+    entry.hours += job.duration_minutes / 60;
+    clientDays.set(job.client_id, entry);
+  }
+  const clientSummary = [...clientDays.entries()]
+    .map(([id, entry]) => ({
+      id,
+      name: clientName(id),
+      days: entry.days.size,
+      hours: entry.hours,
+    }))
+    .sort((a, b) => b.hours - a.hours);
+
+  const totalsLabel =
+    view === "month" ? "Month totals" : view === "week" ? "Week totals" : "Day totals";
 
   return (
     <AppShell
-      title="Schedule"
-      description="Plan the round and tick jobs off as you go."
+      title="Rota"
+      description={headingLabel}
       actions={
         isStaff ? null : (
           <Button
+            variant="gold"
             onClick={() => setBookingDate(view === "month" ? selectedDay : cursor)}
             disabled={clients.length === 0}
           >
-            <Plus className="size-4" /> Book job
+            <Plus className="size-4" /> Add
           </Button>
         )
       }
     >
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1">
-          <Button variant="outline" size="icon" onClick={() => shift(-1)} aria-label="Previous">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="outline"
+            size="icon"
+            className="size-9 bg-card"
+            onClick={() => shift(-1)}
+            aria-label="Previous"
+          >
             <ChevronLeft className="size-4" />
           </Button>
-          <Button variant="outline" size="icon" onClick={() => shift(1)} aria-label="Next">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 bg-card px-3 text-xs font-semibold"
+            onClick={() => {
+              const now = startOfDay(new Date());
+              setCursor(now);
+              setSelectedDay(now);
+            }}
+          >
+            Today
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            className="size-9 bg-card"
+            onClick={() => shift(1)}
+            aria-label="Next"
+          >
             <ChevronRight className="size-4" />
           </Button>
-          <span className="ml-2 font-display text-lg font-bold tracking-tight">{headingLabel}</span>
         </div>
         <Tabs value={view} onValueChange={(v) => setView(v as View)}>
-          <TabsList>
-            <TabsTrigger value="month">Month</TabsTrigger>
+          <TabsList className="h-9">
             <TabsTrigger value="week">Week</TabsTrigger>
-            <TabsTrigger value="day">Day</TabsTrigger>
+            <TabsTrigger value="month">Month</TabsTrigger>
+            <TabsTrigger value="day">List</TabsTrigger>
           </TabsList>
         </Tabs>
       </div>
 
+      {/* The four figures that decide whether the week is working. */}
+      <section className="mt-3 rounded-2xl bg-band px-4 py-3.5 text-band-foreground">
+        <p className="text-[0.55rem] uppercase tracking-[0.18em] text-band-foreground/50">
+          {totalsLabel}
+        </p>
+        <div className="mt-2 grid grid-cols-4 divide-x divide-band-foreground/15">
+          {[
+            { label: "Income", value: money(rangeIncome), gold: true },
+            { label: "Materials", value: money(rangeMaterials), gold: false },
+            { label: "Net", value: money(rangeNet), gold: true },
+            { label: "Hours", value: hoursLabel(rangeHours), gold: false },
+          ].map((item, index) => (
+            <div key={item.label} className={index === 0 ? "pr-2" : "px-2"}>
+              <p
+                className={cn(
+                  "figure truncate text-[0.95rem] font-semibold leading-none",
+                  item.gold ? "text-gold" : "text-band-foreground",
+                )}
+              >
+                {item.value}
+              </p>
+              <p className="mt-1 truncate text-[0.55rem] text-band-foreground/50">{item.label}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {view === "week" ? (
+        <>
+          {/* Seven narrow columns, scrolled sideways the way a paper rota is. */}
+          <div className="-mx-4 mt-3 overflow-x-auto px-4 pb-1">
+            <div className="grid auto-cols-[minmax(150px,1fr)] grid-flow-col gap-2">
+              {days.map((day) => {
+                const dayJobs = jobsOn(day);
+                return (
+                  <div key={day.toISOString()} className="flex flex-col gap-2">
+                    <div
+                      className={cn(
+                        "rounded-xl border px-2 py-2 text-center",
+                        isToday(day)
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border bg-secondary/70 text-foreground",
+                      )}
+                    >
+                      <p className="figure text-[0.55rem] uppercase tracking-[0.14em] opacity-65">
+                        {format(day, "EEE")}
+                      </p>
+                      <p className="figure font-display text-xl font-bold leading-none">
+                        {format(day, "d")}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-1 flex-col gap-2">
+                      {dayJobs.map((job) => {
+                        const start = parseISO(job.starts_at);
+                        const client = clients.find((c) => c.id === job.client_id);
+                        return (
+                          <button
+                            key={job.id}
+                            type="button"
+                            onClick={() => setDetailJob(job)}
+                            className={cn(
+                              "stripe w-full rounded-lg border border-border bg-card px-2 py-2 text-left shadow-sm transition-colors hover:border-primary/40 active:bg-secondary/50",
+                              job.status === "done" && "opacity-65",
+                            )}
+                            style={{
+                              ["--stripe" as string]:
+                                job.status === "done"
+                                  ? "var(--color-primary)"
+                                  : isToday(day)
+                                    ? "var(--color-lime)"
+                                    : "var(--color-border)",
+                            }}
+                          >
+                            <p className="truncate pl-1 text-[0.72rem] font-semibold leading-tight">
+                              {clientName(job.client_id)}
+                            </p>
+                            {client?.address ? (
+                              <p className="truncate pl-1 text-[0.6rem] text-muted-foreground">
+                                {client.address}
+                              </p>
+                            ) : null}
+                            <p className="figure mt-1 pl-1 text-[0.62rem] font-medium">
+                              {format(start, "HH:mm")}–
+                              {format(addMinutes(start, job.duration_minutes), "HH:mm")}
+                            </p>
+                            <p className="figure pl-1 text-[0.58rem] text-muted-foreground">
+                              {job.duration_minutes} min
+                              {job.status === "done" ? " · done" : ""}
+                            </p>
+                          </button>
+                        );
+                      })}
+
+                      {isStaff || clients.length === 0 ? null : (
+                        <button
+                          type="button"
+                          onClick={() => setBookingDate(day)}
+                          className="flex items-center justify-center gap-1 rounded-lg border border-dashed border-border px-2 py-2 text-[0.62rem] font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+                        >
+                          <Plus className="size-3" /> Add
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Who is on the round, in place of the staff table we cannot fill. */}
+          <div className="mt-4 overflow-hidden rounded-2xl border border-border bg-card">
+            <button
+              type="button"
+              onClick={() => setSummaryOpen((open) => !open)}
+              className="flex w-full items-center justify-between gap-2 bg-primary px-4 py-2.5 text-left text-primary-foreground"
+            >
+              <span className="text-sm font-semibold">
+                Clients — {view === "week" ? "This week" : "This period"}
+              </span>
+              {summaryOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+            </button>
+            {summaryOpen ? (
+              <div className="divide-y divide-border">
+                {clientSummary.length === 0 ? (
+                  <p className="px-4 py-4 text-sm text-muted-foreground">
+                    Nothing on the rota for this period yet.
+                  </p>
+                ) : (
+                  clientSummary.slice(0, 10).map((client) => (
+                    <div key={client.id} className="flex items-center gap-3 px-4 py-2.5">
+                      <p className="min-w-0 flex-1 truncate text-sm font-medium">{client.name}</p>
+                      <p className="figure text-xs text-muted-foreground">
+                        {client.days} {client.days === 1 ? "day" : "days"}
+                      </p>
+                      <p className="figure w-12 text-right text-xs font-semibold">
+                        {client.hours % 1 === 0 ? client.hours.toFixed(0) : client.hours.toFixed(1)}
+                        hrs
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : null}
+          </div>
+        </>
+      ) : null}
+
       {view === "month" ? (
         <>
-          <Card className="overflow-hidden py-0">
+          <Card className="mt-3 overflow-hidden py-0">
             <div className="figure grid grid-cols-7 border-b border-border bg-secondary text-center text-[0.6rem] uppercase tracking-[0.1em] text-muted-foreground">
               {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
                 <div key={d} className="py-2">
@@ -321,130 +536,133 @@ function SchedulePage() {
         </>
       ) : null}
 
-      <div className="mt-5 space-y-4">
-        {(view === "month" ? [selectedDay] : days).map((day) => {
-          const dayJobs = jobsOn(day);
-          return (
-            <div key={day.toISOString()}>
-              {/* Every day heading carries its own add button, so in week view
+      {view !== "week" ? (
+        <div className="mt-5 space-y-4">
+          {(view === "month" ? [selectedDay] : days).map((day) => {
+            const dayJobs = jobsOn(day);
+            return (
+              <div key={day.toISOString()}>
+                {/* Every day heading carries its own add button, so in week view
                   the day you book on is the one you are looking at rather than
                   whichever one the cursor happens to be on. */}
-              <div className="mb-2 flex items-center gap-2">
-                {isToday(day) ? (
-                  <div className="flex flex-1 items-baseline justify-between rounded-2xl bg-band px-4 py-3 text-band-foreground">
-                    <p className="figure text-[0.6rem] uppercase tracking-[0.14em] opacity-75">
-                      Today
+                <div className="mb-2 flex items-center gap-2">
+                  {isToday(day) ? (
+                    <div className="flex flex-1 items-baseline justify-between rounded-2xl bg-band px-4 py-3 text-band-foreground">
+                      <p className="figure text-[0.6rem] uppercase tracking-[0.14em] opacity-75">
+                        Today
+                      </p>
+                      <p className="font-display text-lg font-bold leading-none">
+                        {format(day, "EEE d MMM")}
+                      </p>
+                    </div>
+                  ) : (
+                    <h2 className="figure flex-1 text-[0.65rem] uppercase tracking-[0.12em] text-muted-foreground">
+                      {format(day, "EEEE d MMMM")}
+                    </h2>
+                  )}
+                  {isStaff || clients.length === 0 ? null : (
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="size-10 shrink-0"
+                      aria-label={`Book a job on ${format(day, "EEEE d MMMM")}`}
+                      onClick={() => setBookingDate(day)}
+                    >
+                      <Plus className="size-4" />
+                    </Button>
+                  )}
+                </div>
+                {dayJobs.length === 0 ? (
+                  isStaff || clients.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                      Nothing booked.
                     </p>
-                    <p className="font-display text-lg font-bold leading-none">
-                      {format(day, "EEE d MMM")}
-                    </p>
-                  </div>
-                ) : (
-                  <h2 className="figure flex-1 text-[0.65rem] uppercase tracking-[0.12em] text-muted-foreground">
-                    {format(day, "EEEE d MMMM")}
-                  </h2>
-                )}
-                {isStaff || clients.length === 0 ? null : (
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="size-10 shrink-0"
-                    aria-label={`Book a job on ${format(day, "EEEE d MMMM")}`}
-                    onClick={() => setBookingDate(day)}
-                  >
-                    <Plus className="size-4" />
-                  </Button>
-                )}
-              </div>
-              {dayJobs.length === 0 ? (
-                isStaff || clients.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                    Nothing booked.
-                  </p>
-                ) : (
-                  /* An empty day is the one place where "book something" is
+                  ) : (
+                    /* An empty day is the one place where "book something" is
                      certainly what you came for, so the empty state is the
                      button rather than sitting next to one. */
-                  <button
-                    type="button"
-                    onClick={() => setBookingDate(day)}
-                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border px-3 py-5 text-sm text-muted-foreground transition-colors hover:bg-accent/60 active:bg-accent"
-                  >
-                    <Plus className="size-4" /> Book a job on {format(day, "EEE d MMM")}
-                  </button>
-                )
-              ) : (
-                <div className="space-y-2">
-                  {dayJobs.map((job) => (
-                    <Card
-                      key={job.id}
-                      className="stripe gap-0 overflow-hidden py-0"
-                      style={{
-                        ["--stripe" as string]:
-                          job.status === "done"
-                            ? "var(--color-primary)"
-                            : isToday(day)
-                              ? "var(--color-lime)"
-                              : "var(--color-border)",
-                      }}
+                    <button
+                      type="button"
+                      onClick={() => setBookingDate(day)}
+                      className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border px-3 py-5 text-sm text-muted-foreground transition-colors hover:bg-accent/60 active:bg-accent"
                     >
-                      {/* The two actions wanted mid-job sit on their own row at
+                      <Plus className="size-4" /> Book a job on {format(day, "EEE d MMM")}
+                    </button>
+                  )
+                ) : (
+                  <div className="space-y-2">
+                    {dayJobs.map((job) => (
+                      <Card
+                        key={job.id}
+                        className="stripe gap-0 overflow-hidden py-0"
+                        style={{
+                          ["--stripe" as string]:
+                            job.status === "done"
+                              ? "var(--color-primary)"
+                              : isToday(day)
+                                ? "var(--color-lime)"
+                                : "var(--color-border)",
+                        }}
+                      >
+                        {/* The two actions wanted mid-job sit on their own row at
                           thumb height; edit and delete stay small, because they
                           are not what this card is for. */}
-                      <CardContent className="space-y-2.5 py-3 pl-4 pr-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate font-semibold">{clientName(job.client_id)}</p>
-                            <p className="figure text-xs text-muted-foreground">
-                              {job.duration_minutes} min
-                              {job.status === "done" ? " · done" : ""}
+                        <CardContent className="space-y-2.5 py-3 pl-4 pr-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate font-semibold">{clientName(job.client_id)}</p>
+                              <p className="figure text-xs text-muted-foreground">
+                                {job.duration_minutes} min
+                                {job.status === "done" ? " · done" : ""}
+                              </p>
+                            </div>
+                            <p className="figure shrink-0 text-base font-semibold leading-none">
+                              {format(parseISO(job.starts_at), "HH:mm")}
                             </p>
                           </div>
-                          <p className="figure shrink-0 text-base font-semibold leading-none">
-                            {format(parseISO(job.starts_at), "HH:mm")}
-                          </p>
-                        </div>
 
-                        {job.notes ? (
-                          <p className="line-clamp-2 text-sm text-muted-foreground">{job.notes}</p>
-                        ) : null}
+                          {job.notes ? (
+                            <p className="line-clamp-2 text-sm text-muted-foreground">
+                              {job.notes}
+                            </p>
+                          ) : null}
 
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-10 flex-1"
-                            onClick={() => setSheetJob(job)}
-                          >
-                            <ClipboardList className="size-4" /> Job sheet
-                          </Button>
-                          {job.status !== "done" ? (
+                          <div className="flex flex-wrap items-center gap-2">
                             <Button
+                              variant="outline"
                               size="sm"
                               className="h-10 flex-1"
-                              onClick={() => setCompleting(job)}
+                              onClick={() => setSheetJob(job)}
                             >
-                              <CalendarCheck className="size-4" /> Complete
+                              <ClipboardList className="size-4" /> Job sheet
                             </Button>
-                          ) : null}
-                          {/*
+                            {job.status !== "done" ? (
+                              <Button
+                                size="sm"
+                                className="h-10 flex-1"
+                                onClick={() => setCompleting(job)}
+                              >
+                                <CalendarCheck className="size-4" /> Complete
+                              </Button>
+                            ) : null}
+                            {/*
                             A done job has no Complete button, which leaves the
                             room for the thing actually wanted afterwards: the
                             materials you forgot. Without this the only route to
                             them was the Visits screen, for work on the card in
                             front of you.
                           */}
-                          {job.status === "done" && !isStaff && visitOf(job) ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-10 flex-1"
-                              onClick={() => setEditingVisit(visitOf(job)!)}
-                            >
-                              <Receipt className="size-4" /> Edit visit
-                            </Button>
-                          ) : null}
-                          {/*
+                            {job.status === "done" && !isStaff && visitOf(job) ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-10 flex-1"
+                                onClick={() => setEditingVisit(visitOf(job)!)}
+                              >
+                                <Receipt className="size-4" /> Edit visit
+                              </Button>
+                            ) : null}
+                            {/*
                             Everything occasional behind one button. Moving,
                             editing and deleting used to sit out here competing
                             for thumb space with the two things you actually
@@ -452,68 +670,69 @@ function SchedulePage() {
                             controls — which is how a card stops being readable
                             at arm's length in a garden.
                           */}
-                          {isStaff ? null : (
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="size-10 shrink-0"
-                                  aria-label={`More for ${clientName(job.client_id)}'s job`}
-                                >
-                                  <MoreHorizontal className="size-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-56">
-                                {job.status !== "done" ? (
+                            {isStaff ? null : (
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="size-10 shrink-0"
+                                    aria-label={`More for ${clientName(job.client_id)}'s job`}
+                                  >
+                                    <MoreHorizontal className="size-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-56">
+                                  {job.status !== "done" ? (
+                                    <DropdownMenuItem
+                                      className="h-11"
+                                      onSelect={() => setMovingJob(job)}
+                                    >
+                                      <CalendarClock className="size-4" /> Move to another day
+                                    </DropdownMenuItem>
+                                  ) : null}
                                   <DropdownMenuItem
                                     className="h-11"
-                                    onSelect={() => setMovingJob(job)}
+                                    onSelect={() => setEditingJob(job)}
                                   >
-                                    <CalendarClock className="size-4" /> Move to another day
+                                    <Pencil className="size-4" /> Edit this job
                                   </DropdownMenuItem>
-                                ) : null}
-                                <DropdownMenuItem
-                                  className="h-11"
-                                  onSelect={() => setEditingJob(job)}
-                                >
-                                  <Pencil className="size-4" /> Edit this job
-                                </DropdownMenuItem>
-                                {job.series_id ? (
+                                  {job.series_id ? (
+                                    <DropdownMenuItem
+                                      className="h-11"
+                                      onSelect={() => setSeriesJob(job)}
+                                    >
+                                      <Repeat className="size-4" /> Edit the whole run
+                                    </DropdownMenuItem>
+                                  ) : null}
+                                  <DropdownMenuSeparator />
                                   <DropdownMenuItem
-                                    className="h-11"
-                                    onSelect={() => setSeriesJob(job)}
+                                    className="h-11 text-destructive focus:text-destructive"
+                                    onSelect={async () => {
+                                      const wholeSeries =
+                                        job.series_id && confirm("Delete the whole repeating run?")
+                                          ? job.series_id
+                                          : null;
+                                      await deleteJob.mutateAsync({ id: job.id, wholeSeries });
+                                      toast.success("Job removed");
+                                    }}
                                   >
-                                    <Repeat className="size-4" /> Edit the whole run
+                                    <Trash2 className="size-4" /> Delete
                                   </DropdownMenuItem>
-                                ) : null}
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  className="h-11 text-destructive focus:text-destructive"
-                                  onSelect={async () => {
-                                    const wholeSeries =
-                                      job.series_id && confirm("Delete the whole repeating run?")
-                                        ? job.series_id
-                                        : null;
-                                    await deleteJob.mutateAsync({ id: job.id, wholeSeries });
-                                    toast.success("Job removed");
-                                  }}
-                                >
-                                  <Trash2 className="size-4" /> Delete
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
 
       <JobDialog
         open={bookingDate !== null || editingJob !== null}
@@ -634,6 +853,154 @@ function SchedulePage() {
         clientName={completing ? clientName(completing.client_id) : ""}
         hideMaterials={isStaff}
       />
+
+      {/*
+        One job, opened from its rota card. The five things you can do to a
+        job live here rather than on the card, which is why the week stays
+        readable at arm's length.
+      */}
+      <Sheet
+        open={detailJob !== null}
+        onOpenChange={(open) => {
+          if (!open) setDetailJob(null);
+        }}
+      >
+        <SheetContent side="bottom" className="rounded-t-3xl">
+          {detailJob ? (
+            <>
+              <SheetHeader className="text-left">
+                <SheetTitle className="font-display text-xl">
+                  {clientName(detailJob.client_id)}
+                </SheetTitle>
+                <div className="space-y-0.5">
+                  {clients.find((c) => c.id === detailJob.client_id)?.address ? (
+                    <p className="text-sm text-muted-foreground">
+                      {clients.find((c) => c.id === detailJob.client_id)?.address}
+                    </p>
+                  ) : null}
+                  <p className="figure text-sm font-medium">
+                    {format(parseISO(detailJob.starts_at), "EEEE d MMM")} ·{" "}
+                    {format(parseISO(detailJob.starts_at), "HH:mm")}–
+                    {format(
+                      addMinutes(parseISO(detailJob.starts_at), detailJob.duration_minutes),
+                      "HH:mm",
+                    )}{" "}
+                    · {detailJob.duration_minutes} min
+                  </p>
+                </div>
+              </SheetHeader>
+
+              {detailJob.notes ? (
+                <p className="mt-3 rounded-xl bg-background px-3 py-2.5 text-sm text-muted-foreground">
+                  {detailJob.notes}
+                </p>
+              ) : null}
+
+              <div className="mt-4 grid gap-2">
+                <Button
+                  variant="outline"
+                  className="h-11 justify-start"
+                  onClick={() => {
+                    setSheetJob(detailJob);
+                    setDetailJob(null);
+                  }}
+                >
+                  <ClipboardList className="size-4" /> Job sheet
+                </Button>
+                {detailJob.status !== "done" ? (
+                  <Button
+                    variant="gold"
+                    className="h-11 justify-start"
+                    onClick={() => {
+                      setCompleting(detailJob);
+                      setDetailJob(null);
+                    }}
+                  >
+                    <CalendarCheck className="size-4" /> Complete job
+                  </Button>
+                ) : null}
+                {detailJob.status === "done" && !isStaff && visitOf(detailJob) ? (
+                  <Button
+                    variant="outline"
+                    className="h-11 justify-start"
+                    onClick={() => {
+                      setEditingVisit(visitOf(detailJob)!);
+                      setDetailJob(null);
+                    }}
+                  >
+                    <Receipt className="size-4" /> Edit visit
+                  </Button>
+                ) : null}
+                {isStaff ? null : (
+                  <>
+                    <Button
+                      variant="outline"
+                      className="h-11 justify-start"
+                      onClick={() => {
+                        setEditingJob(detailJob);
+                        setDetailJob(null);
+                      }}
+                    >
+                      <Pencil className="size-4" /> Edit this job
+                    </Button>
+                    {detailJob.status !== "done" ? (
+                      <Button
+                        variant="outline"
+                        className="h-11 justify-start"
+                        onClick={() => {
+                          setMovingJob(detailJob);
+                          setDetailJob(null);
+                        }}
+                      >
+                        <CalendarClock className="size-4" /> Move to another day
+                      </Button>
+                    ) : null}
+                    {detailJob.series_id ? (
+                      <Button
+                        variant="outline"
+                        className="h-11 justify-start"
+                        onClick={() => {
+                          setSeriesJob(detailJob);
+                          setDetailJob(null);
+                        }}
+                      >
+                        <Repeat className="size-4" /> Edit the whole run
+                      </Button>
+                    ) : null}
+                    <Button
+                      variant="ghost"
+                      className="h-11 justify-start text-destructive hover:text-destructive"
+                      onClick={async () => {
+                        const job = detailJob;
+                        setDetailJob(null);
+                        const wholeSeries =
+                          job.series_id && confirm("Delete the whole repeating run?")
+                            ? job.series_id
+                            : null;
+                        await deleteJob.mutateAsync({ id: job.id, wholeSeries });
+                        toast.success("Job removed");
+                      }}
+                    >
+                      <Trash2 className="size-4" /> Delete job
+                    </Button>
+                  </>
+                )}
+              </div>
+            </>
+          ) : null}
+        </SheetContent>
+      </Sheet>
+
+      {isStaff || clients.length === 0 ? null : (
+        <button
+          type="button"
+          onClick={() => setBookingDate(view === "month" ? selectedDay : cursor)}
+          aria-label="Add a job"
+          className="fixed bottom-[calc(env(safe-area-inset-bottom)+4.75rem)] right-4 z-30 flex size-14 items-center justify-center rounded-full bg-gold text-gold-foreground shadow-lg shadow-black/25 transition-transform active:scale-95 lg:bottom-6 lg:right-6"
+        >
+          <Plus className="size-6" />
+        </button>
+      )}
     </AppShell>
   );
 }
