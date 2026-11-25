@@ -1,6 +1,7 @@
 package uk.co.jwgardenservices.crm.ui.business
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -26,6 +27,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Build
@@ -41,6 +43,7 @@ import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.LocalGasStation
 import androidx.compose.material.icons.outlined.People
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Savings
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.TrendingDown
@@ -89,6 +92,7 @@ import uk.co.jwgardenservices.crm.data.model.RunningCostDraft
 import uk.co.jwgardenservices.crm.domain.BusinessSnapshot
 import uk.co.jwgardenservices.crm.domain.CoachAction
 import uk.co.jwgardenservices.crm.domain.CoachInsight
+import uk.co.jwgardenservices.crm.domain.CoachScorePart
 import uk.co.jwgardenservices.crm.domain.CoachTone
 import uk.co.jwgardenservices.crm.domain.CostBreakdown
 import uk.co.jwgardenservices.crm.domain.CostCategory
@@ -97,6 +101,7 @@ import uk.co.jwgardenservices.crm.domain.annualRunningCosts
 import uk.co.jwgardenservices.crm.domain.buildBusinessSnapshot
 import uk.co.jwgardenservices.crm.domain.coachInsights
 import uk.co.jwgardenservices.crm.domain.coachScore
+import uk.co.jwgardenservices.crm.domain.coachScoreParts
 import uk.co.jwgardenservices.crm.domain.costBreakdown
 import uk.co.jwgardenservices.crm.domain.dailyRunningCosts
 import uk.co.jwgardenservices.crm.domain.money
@@ -199,6 +204,7 @@ fun BusinessRunningScreen(
         )
     }
     val score = remember(snapshot) { coachScore(snapshot) }
+    val scoreParts = remember(snapshot) { coachScoreParts(snapshot) }
     val insights = remember(snapshot, costs, state.clients) {
         coachInsights(snapshot, costs, state.clients)
     }
@@ -227,7 +233,7 @@ fun BusinessRunningScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        if (tab != BusinessTab.Costs) {
+        if (tab != BusinessTab.Costs && tab != BusinessTab.Coach) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -266,6 +272,22 @@ fun BusinessRunningScreen(
                         editorOpen = true
                     },
                     onDelete = { cost -> pendingDelete = cost },
+                )
+            }
+        } else if (tab == BusinessTab.Coach) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) {
+                BusinessCoachTab(
+                    score = score,
+                    scoreParts = scoreParts,
+                    hasData = snapshot.hasData,
+                    insights = insights,
+                    onBack = { tab = BusinessTab.Overview },
+                    onRefresh = viewModel::refresh,
+                    onAction = ::handleAction,
                 )
             }
         } else if (tab == BusinessTab.Secretary) {
@@ -317,64 +339,7 @@ fun BusinessRunningScreen(
                 }
             }
 
-            BusinessTab.Coach -> {
-                item {
-                    HealthCard(
-                        score = score,
-                        snapshot = snapshot,
-                        onClick = null,
-                    )
-                }
-                if (insights.isEmpty()) {
-                    item {
-                        SectionCard(title = "Coach") {
-                            EmptyState(
-                                icon = Icons.Outlined.CheckCircle,
-                                title = "Nothing needs attention",
-                                body = "Log a few visits and running costs and the coach " +
-                                    "will start pointing at the next useful move.",
-                            )
-                        }
-                    }
-                } else {
-                    CoachTone.entries.forEach { tone ->
-                        val rows = insights.filter { it.tone == tone }
-                        if (rows.isNotEmpty()) {
-                            item {
-                                Text(
-                                    text = when (tone) {
-                                        CoachTone.Attention -> "Needs attention"
-                                        CoachTone.Opportunity -> "Opportunities"
-                                        CoachTone.Good -> "What's working"
-                                    }.uppercase(Locale.UK),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (tone == CoachTone.Attention) {
-                                        MaterialTheme.colorScheme.error
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                    modifier = Modifier.padding(top = 4.dp, start = 4.dp),
-                                )
-                            }
-                            rows.forEach { insight ->
-                                item {
-                                    InsightCard(insight = insight, onAction = ::handleAction)
-                                }
-                            }
-                        }
-                    }
-                }
-                item {
-                    Text(
-                        text = "The score weighs cash collected, margin, running costs, " +
-                            "unbilled work and how full the week is. It is calculated on " +
-                            "this phone from your own records.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 4.dp),
-                    )
-                }
-            }
+                    BusinessTab.Coach,
                     BusinessTab.Costs,
                     BusinessTab.Secretary -> Unit
                 }
@@ -421,6 +386,401 @@ fun BusinessRunningScreen(
                 TextButton(onClick = { pendingDelete = null }) { Text("Keep") }
             },
         )
+    }
+}
+
+private val CoachGreen = Color(0xFF7FD78E)
+private val CoachAttention = Color(0xFFFF9A84)
+
+@Composable
+private fun BusinessCoachTab(
+    score: Int,
+    scoreParts: List<CoachScorePart>,
+    hasData: Boolean,
+    insights: List<CoachInsight>,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit,
+    onAction: (CoachAction?) -> Unit,
+) {
+    var breakdownOpen by remember { mutableStateOf(false) }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item { CoachHeader(onBack = onBack, onRefresh = onRefresh) }
+        item {
+            CoachScoreCard(
+                score = score,
+                scoreParts = scoreParts,
+                hasData = hasData,
+                breakdownOpen = breakdownOpen,
+                onToggleBreakdown = { breakdownOpen = !breakdownOpen },
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+        }
+        item {
+            Text(
+                text = "${insights.size} ${if (insights.size == 1) "insight" else "insights"} " +
+                    "· based on your latest records",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+        }
+        if (insights.isEmpty()) {
+            item {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Nothing needs attention", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Log a few visits and running costs and the coach will start " +
+                                "pointing at the next useful move.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.65f),
+                        )
+                    }
+                }
+            }
+        } else {
+            CoachTone.entries.forEach { tone ->
+                val rows = insights.filter { it.tone == tone }
+                if (rows.isNotEmpty()) {
+                    item {
+                        CoachSectionHeader(tone = tone, count = rows.size)
+                    }
+                    rows.forEach { insight ->
+                        item {
+                            CoachInsightCard(
+                                insight = insight,
+                                onAction = onAction,
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            Text(
+                text = "The score weighs cash collected, margin, cost control, unbilled work " +
+                    "and how full the week is. It is calculated on this phone from your own records.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CoachHeader(onBack: () -> Unit, onRefresh: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.12f),
+                modifier = Modifier.size(34.dp),
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                        contentDescription = "Back to Analytics",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = "Business Coach",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.weight(1f))
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.1f),
+            ) {
+                Text(
+                    text = "PRO",
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                )
+            }
+            IconButton(onClick = onRefresh) {
+                Icon(
+                    imageVector = Icons.Outlined.Refresh,
+                    contentDescription = "Refresh",
+                    tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.75f),
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CoachScoreCard(
+    score: Int,
+    scoreParts: List<CoachScorePart>,
+    hasData: Boolean,
+    breakdownOpen: Boolean,
+    onToggleBreakdown: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.08f)),
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 18.dp, horizontal = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = "MONTHLY HEALTH SCORE",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.55f),
+            )
+            Spacer(Modifier.height(12.dp))
+            CoachScoreRing(score = score)
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = if (!hasData) "Not enough data" else scoreLabel(score),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = when {
+                    !hasData -> "Add costs and log some visits to start."
+                    score >= 80 -> "Your business is performing above average for a UK gardening company."
+                    score >= 60 -> "Solid. The biggest win is usually the overdue invoice."
+                    score >= 40 -> "Some pressure. Check cash flow and running costs."
+                    else -> "Several things need a look. Start with money already earned."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.65f),
+                textAlign = TextAlign.Center,
+            )
+            TextButton(onClick = onToggleBreakdown, contentPadding = PaddingValues(vertical = 2.dp)) {
+                Text(
+                    text = if (breakdownOpen) "Hide breakdown ▴" else "View breakdown ▾",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f),
+                )
+            }
+            if (breakdownOpen && scoreParts.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    scoreParts.forEach { part ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = part.label,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f),
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                text = "${part.points}/${part.max}",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CoachScoreRing(score: Int) {
+    Box(modifier = Modifier.size(142.dp), contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.size(142.dp)) {
+            val stroke = 12.dp.toPx()
+            val inset = stroke / 2f
+            val arcSize = Size(this.size.width - stroke, this.size.height - stroke)
+            drawArc(
+                color = Color.White.copy(alpha = 0.12f),
+                startAngle = -90f,
+                sweepAngle = 360f,
+                useCenter = false,
+                topLeft = Offset(inset, inset),
+                size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+            drawArc(
+                color = CoachGreen,
+                startAngle = -90f,
+                sweepAngle = (score.coerceIn(0, 100) / 100f) * 360f,
+                useCenter = false,
+                topLeft = Offset(inset, inset),
+                size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = score.toString(),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "/100",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.55f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CoachSectionHeader(tone: CoachTone, count: Int) {
+    val tint = when (tone) {
+        CoachTone.Attention -> CoachAttention
+        CoachTone.Opportunity -> MaterialTheme.colorScheme.tertiary
+        CoachTone.Good -> CoachGreen
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val icon = when (tone) {
+            CoachTone.Attention -> Icons.Outlined.WarningAmber
+            CoachTone.Opportunity -> Icons.Outlined.Lightbulb
+            CoachTone.Good -> Icons.Outlined.CheckCircle
+        }
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(14.dp),
+        )
+        Spacer(Modifier.width(5.dp))
+        Text(
+            text = when (tone) {
+                CoachTone.Attention -> "NEEDS ATTENTION"
+                CoachTone.Opportunity -> "OPPORTUNITIES"
+                CoachTone.Good -> "WHAT'S WORKING"
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = tint,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = count.toString(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun CoachInsightCard(
+    insight: CoachInsight,
+    onAction: (CoachAction?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tint = when (insight.tone) {
+        CoachTone.Attention -> CoachAttention
+        CoachTone.Opportunity -> MaterialTheme.colorScheme.tertiary
+        CoachTone.Good -> CoachGreen
+    }
+    val severity = when (insight.tone) {
+        CoachTone.Attention -> "HIGH"
+        CoachTone.Opportunity -> "MEDIUM"
+        CoachTone.Good -> "POSITIVE"
+    }
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.08f)),
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    shape = CircleShape,
+                    color = tint.copy(alpha = 0.14f),
+                    contentColor = tint,
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        val icon = when (insight.tone) {
+                            CoachTone.Attention -> Icons.Outlined.WarningAmber
+                            CoachTone.Opportunity -> Icons.Outlined.Lightbulb
+                            CoachTone.Good -> Icons.Outlined.CheckCircle
+                        }
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(15.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.width(9.dp))
+                Text(
+                    text = "$severity · ${insight.area.uppercase(Locale.UK)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = tint,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = insight.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = insight.body,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.65f),
+            )
+            if (insight.action != null) {
+                Spacer(Modifier.height(10.dp))
+                Button(
+                    onClick = { onAction(insight.action) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(38.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiary,
+                        contentColor = MaterialTheme.colorScheme.onTertiary,
+                    ),
+                ) {
+                    Text(insight.actionLabel ?: "Act on this", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
     }
 }
 

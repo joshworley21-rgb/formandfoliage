@@ -141,9 +141,13 @@ fun buildBusinessSnapshot(
  * 0–100. Cash collected is weighted highest because a profitable month that
  * has not been paid is not yet a good month.
  */
-fun coachScore(snapshot: BusinessSnapshot): Int {
-    if (!snapshot.hasData) return 0
+data class CoachScorePart(
+    val label: String,
+    val points: Int,
+    val max: Int,
+)
 
+private fun scoreParts(snapshot: BusinessSnapshot): List<Pair<String, Pair<Double, Int>>> {
     val cash = if (snapshot.outstanding <= 0.0) {
         25.0
     } else {
@@ -176,7 +180,29 @@ fun coachScore(snapshot: BusinessSnapshot): Int {
         else -> 15.0 * (1.0 - ((snapshot.capacityPercent - 110) / 100.0).coerceIn(0.0, 0.5))
     }
 
-    return (cash + margin + costsScore + billing + capacity).roundToInt().coerceIn(0, 100)
+    return listOf(
+        "Cash collected" to (cash to 25),
+        "Margin" to (margin to 25),
+        "Cost control" to (costsScore to 20),
+        "Billing" to (billing to 15),
+        "Capacity" to (capacity to 15),
+    )
+}
+
+fun coachScoreParts(snapshot: BusinessSnapshot): List<CoachScorePart> {
+    if (!snapshot.hasData) return emptyList()
+    return scoreParts(snapshot).map { (label, pair) ->
+        CoachScorePart(
+            label = label,
+            points = pair.first.roundToInt().coerceIn(0, pair.second),
+            max = pair.second,
+        )
+    }
+}
+
+fun coachScore(snapshot: BusinessSnapshot): Int {
+    if (!snapshot.hasData) return 0
+    return coachScoreParts(snapshot).sumOf { it.points }.coerceIn(0, 100)
 }
 
 fun scoreLabel(score: Int): String = when {
