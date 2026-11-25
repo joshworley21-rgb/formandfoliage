@@ -805,7 +805,7 @@ class AssistantService : Service() {
         // pause when it arrives.
         speech.captureInterjections = actions.wrapUpActive() || actions.sendPending() ||
             actions.chasePending() || actions.clarificationPending() ||
-            actions.readAllPending()
+            actions.readAllPending() || actions.hasPending()
         speech.fastPath = speech.captureInterjections
         AssistantMemory.lastSpokenReply = stripped
         _thinking.value = false
@@ -1417,7 +1417,7 @@ class AssistantService : Service() {
             // on. Never while an answer is pending — "no" is a real answer.
             val pendingAnswer = actions.wrapUpActive() || actions.sendPending() ||
                 actions.chasePending() || actions.clarificationPending() ||
-                actions.readAllPending()
+                actions.readAllPending() || actions.hasPending()
             if (!pendingAnswer && SpeechNormalizer.isNoise(heard)) {
                 CrashLog.note(this, TAG, "noise rejected: ${text.take(30)}")
                 return@collect

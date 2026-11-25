@@ -95,6 +95,10 @@ enum class MicSource(val androidSource: Int, val label: String) {
         MediaRecorder.AudioSource.MIC,
         "Raw microphone (no noise processing)",
     ),
+    Phone(
+        MediaRecorder.AudioSource.VOICE_RECOGNITION,
+        "Phone mic (ignore Bluetooth mic)",
+    ),
 }
 
 object AssistantPreferences {

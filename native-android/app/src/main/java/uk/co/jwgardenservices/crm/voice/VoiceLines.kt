@@ -1,6 +1,6 @@
 package uk.co.jwgardenservices.crm.voice
 
-import java.util.concurrent.atomic.AtomicInteger
+import kotlin.random.Random
 
 /**
  * Spoken-variation helper.
@@ -15,10 +15,16 @@ object VoiceLines {
     /** The owner's name, used in greetings and conversational pivots. */
     const val OWNER_NAME = "Josh"
 
-    private val counter = AtomicInteger()
+    private val recent = ArrayDeque<String>()
 
+    /** Random, avoiding the immediately previous line when there is a choice. */
     fun pick(vararg options: String): String {
-        val index = Math.floorMod(counter.getAndIncrement(), options.size)
-        return options[index]
+        if (options.isEmpty()) return ""
+        if (options.size == 1) return options[0]
+        val fresh = options.filterNot { it == recent.lastOrNull() }
+        val choice = (fresh.ifEmpty { options.toList() }).random(Random.Default)
+        recent.addLast(choice)
+        while (recent.size > 6) recent.removeFirst()
+        return choice
     }
 }

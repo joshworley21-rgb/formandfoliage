@@ -4,7 +4,9 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
@@ -569,6 +571,17 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             return
         }
         audioRecord = record
+        // A car HFP mic is convenient but noisy; this option keeps output on
+        // the car while capturing from the phone itself.
+        if (micSource == MicSource.Phone) {
+            val manager = context.getSystemService(AudioManager::class.java)
+            val builtIn = manager?.getDevices(AudioManager.GET_DEVICES_INPUTS)
+                ?.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
+            if (builtIn != null) {
+                runCatching { record.setPreferredDevice(builtIn) }
+                CrashLog.note(context, TAG, "phone mic forced (preferred ${builtIn.productName})")
+            }
+        }
         listening = true
         paused = false
         _state.update { it.copy(phase = Phase.Listening, message = null, partial = "") }
