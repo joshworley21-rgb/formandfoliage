@@ -172,8 +172,6 @@ class AssistantService : Service() {
     private val assistantContext by lazy {
         AssistantContext(businessProfile = BusinessBrain.load(this))
     }
-    private val callBriefing = CallBriefing()
-
     private var voice = KokoroVoice.BmFable
     private var speed = AssistantPreferences.DEFAULT_SPEED
 
@@ -479,32 +477,10 @@ class AssistantService : Service() {
             AssistantPreferences.pickupFlow(this@AssistantService).first()
         }.getOrDefault(pickupGreeting)
         if (wantsGreeting && _callActive.value) {
-            // The briefing names today's first/active job, so the owner can
-            // answer "log four hours and mark it done" without a client name.
-            // It is read from Room only, and only after the models are warm.
-            // Greeting fatigue: first call of the day is briefed in full,
-            // later ones shrink to a line or a word.
-            val callNumber = runCatching { AssistantMemory.noteCall(this@AssistantService) }
-                .getOrDefault(1)
-            val briefing = callBriefing.line(callNumber)
-            // The opener is fixed so every call starts with the same familiar
-            // line, whatever the schedule looks like. The briefing is a second
-            // sentence; it must never replace the greeting.
-            val batteryLine = if (lowBattery) {
-                "Battery's running low, so I'm on offline mode only."
-            } else {
-                null
-            }
-            val extra = listOfNotNull(briefing?.takeIf { it.isNotBlank() }, batteryLine)
-                .joinToString(" ")
-            // Lead with the diary when there is one; the fixed "how can I
-            // help" opener made him wait through a greeting before hearing
-            // what was actually on.
-            val greeting = if (extra.isEmpty()) {
-                PICKUP_TEXT
-            } else {
-                "Hello Josh. $extra How are you today?"
-            }
+            // A person answers the phone with a hello, not a diary read-out.
+            // The schedule is still one question away ("what's on today?").
+            val greeting = PICKUP_TEXT
+            runCatching { AssistantMemory.noteCall(this@AssistantService) }
             AssistantMemory.lastSpokenReply = greeting
             CrashLog.note(this, TAG, "pickup greeting: $greeting")
             val started = System.currentTimeMillis()
@@ -524,15 +500,8 @@ class AssistantService : Service() {
                 delay(150)
                 // Long enough for a Phonon hiccup and the local fallback to
                 // load; the drain in PhononSpeech caps its own wait.
-                withTimeoutOrNull(12_000) {
-                    if (extra.isEmpty()) {
-                        // Cached hello when there is no schedule line.
-                        speaker.speakPickup(speakerId, speed)
-                    } else {
-                        // One utterance: schedule first, friendly check-in last.
-                        speaker.speakStreaming(greeting, speakerId, speed)
-                        true
-                    }
+                withTimeoutOrNull(8_000) {
+                    speaker.speakPickup(speakerId, speed)
                 } ?: false
             } catch (error: Exception) {
                 CrashLog.note(this, TAG, "pickup failed: ${error.message}")
