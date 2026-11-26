@@ -68,10 +68,10 @@ function VisitsPage() {
       actions={
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => openNew(true)} disabled={clients.length === 0}>
-            <MinusCircle className="size-4 mr-2" /> Log missed
+            <MinusCircle className="size-4" /> Log missed
           </Button>
           <Button onClick={() => openNew(false)} disabled={clients.length === 0}>
-            <Plus className="size-4 mr-2" /> Log visit
+            <Plus className="size-4" /> Log visit
           </Button>
         </div>
       }
@@ -160,6 +160,7 @@ function VisitsPage() {
                       aria-label="Delete"
                       disabled={visit.billed}
                       onClick={async () => {
+                        if (!confirm("Delete this visit? This cannot be undone.")) return;
                         await remove.mutateAsync(visit.id);
                         toast.success("Visit deleted");
                       }}

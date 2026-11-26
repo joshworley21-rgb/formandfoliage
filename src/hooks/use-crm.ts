@@ -626,9 +626,17 @@ export function useDeleteJobPhoto() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, path }: { id: string; path: string; jobId: string }) => {
-      await supabase.storage.from("job-photos").remove([path]);
-      const { error } = await supabase.from("job_photos").delete().eq("id", id);
-      if (error) throw error;
+      // Storage deletion is best-effort: it cannot be queued, and an orphaned
+      // object in the bucket is harmless (the signed URL expires and no DB row
+      // references it). Failure here must not block the DB delete.
+      try {
+        await supabase.storage.from("job-photos").remove([path]);
+      } catch {
+        // intentionally swallowed
+      }
+      await runOrQueue(`Delete photo`, [
+        { kind: "delete", table: "job_photos", match: { id } },
+      ]);
     },
     onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ["job_photos", v.jobId] }),
   });

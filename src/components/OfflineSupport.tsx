@@ -2,8 +2,6 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { CloudUpload, RefreshCw, WifiOff } from "lucide-react";
 import { toast } from "sonner";
 import type { QueryClient } from "@tanstack/react-query";
-import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
-import { persistQueryClient } from "@tanstack/react-query-persist-client";
 import { registerOfflineSupport } from "@/lib/register-sw";
 import { flushQueue, getQueueSnapshot, startAutoSync, subscribeQueue } from "@/lib/offline-queue";
 
@@ -22,19 +20,8 @@ export function OfflineSupport({ queryClient }: { queryClient: QueryClient }) {
   useEffect(() => {
     registerOfflineSupport();
 
-    const persister = createSyncStoragePersister({
-      storage: window.localStorage,
-      key: "jw-crm-cache",
-      throttleTime: 1000,
-    });
-
-    const [unsubscribe] = persistQueryClient({
-      queryClient,
-      persister,
-      maxAge: 1000 * 60 * 60 * 24 * 7,
-      buster: "v1",
-    });
-
+    // Query-cache persistence is handled by PersistQueryClientProvider in the
+    // root. This component is only responsible for the write queue and the UI.
     const stopSync = startAutoSync((count) => {
       void queryClient.invalidateQueries();
       toast.success(count === 1 ? "1 saved change synced" : `${count} saved changes synced`);
@@ -46,7 +33,6 @@ export function OfflineSupport({ queryClient }: { queryClient: QueryClient }) {
     window.addEventListener("offline", update);
 
     return () => {
-      unsubscribe();
       stopSync();
       window.removeEventListener("online", update);
       window.removeEventListener("offline", update);
