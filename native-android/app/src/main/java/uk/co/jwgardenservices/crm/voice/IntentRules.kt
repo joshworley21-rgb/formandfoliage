@@ -286,7 +286,9 @@ object IntentRules {
             // Corrections to the visit just logged: "add £40 for green
             // waste", "change the rate to £45 an hour". The £ comes from the
             // normaliser; the plain-digit form covers unnormalised input.
-            Regex("\\badd\\s+£?\\d").containsMatchIn(text) ||
+            (Regex("\\badd\\s+£?\\d").containsMatchIn(text) &&
+                // Full stops are already stripped, so "2.5" reads "2 5" here.
+                !Regex("\\badd\\s+(?:\\d+\\s+)*\\d+\\s*(?:hours?|hrs?)\\b").containsMatchIn(text)) ||
                 text.contains("change the rate") ||
                 Regex("\\brate\\s+(?:to|of|at)\\s*£?\\d").containsMatchIn(text) ->
                 SpokenIntent.AdjustCharge

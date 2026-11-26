@@ -11,6 +11,7 @@ import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.ExperimentalApi
+import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.ThinkingConfig
 import com.google.ai.edge.litertlm.ToolSet
@@ -230,7 +231,9 @@ object LocalLlm {
                 configFor(ready.model, systemFor(ready.model), maxTokens, temperature),
             )
             try {
+                val started = System.nanoTime()
                 val message = conversation.sendMessage(question)
+                note(app, ready.model, "answered", started)
                 logBenchmark(app, ready.model, conversation)
                 message.contents.contents
                     .filterIsInstance<Content.Text>()
@@ -376,6 +379,7 @@ object LocalLlm {
             return@synchronized null
         }
         runCatching {
+            enableTimings()
             val started = System.currentTimeMillis()
             Engine(
                 EngineConfig(
@@ -430,7 +434,13 @@ object LocalLlm {
                     "decode ${info.lastDecodeTokenCount} tokens at " +
                     "${"%.1f".format(info.lastDecodeTokensPerSecond)} tok/s",
             )
-        }
+        }.onFailure { CrashLog.note(app, TAG, "${model.id}: timing unavailable (${it.message})") }
+    }
+
+    /** The runtime only collects timings when asked to, before an engine is created. */
+    @OptIn(ExperimentalApi::class)
+    private fun enableTimings() {
+        runCatching { ExperimentalFlags.enableBenchmark = true }
     }
 
     /** Wall-clock timings in the assistant log, so a model can be judged on the phone it runs on. */
@@ -452,6 +462,7 @@ object LocalLlm {
         }
         for (model in options) {
             val engine = runCatching {
+                enableTimings()
                 val started = System.currentTimeMillis()
                 Engine(
                     EngineConfig(

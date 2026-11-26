@@ -113,13 +113,13 @@ class LocalBrainTest {
         // The model has 1,280 tokens in total; about 3 characters a token is
         // a safe estimate, and the sentence and the answer need room too.
         assertTrue("prompt was ${prompt.length} chars", prompt.length < 2_600)
-        assertTrue(prompt.contains("Customers:"))
+        assertTrue(prompt.contains("Known customer names:"))
         assertTrue(!prompt.contains("Customer number 30 "))
     }
 
     @Test
     fun `no customers means no customer line`() {
-        assertTrue(!LocalBrain.intentPrompt(emptyList()).contains("Customers:"))
+        assertTrue(!LocalBrain.intentPrompt(emptyList()).contains("Known customer names:"))
     }
 
     @Test
@@ -132,7 +132,7 @@ class LocalBrainTest {
         // About 3.5 characters a token puts 700 characters at 200 tokens.
         assertTrue("prompt was ${prompt.length} chars", prompt.length <= 760)
         LocalBrain.labels.forEach { assertTrue("${it.wire} missing", prompt.contains(it.wire)) }
-        assertTrue(prompt.contains("Customers: Simon Hart"))
+        assertTrue(prompt.contains("Known customer names: Simon Hart"))
     }
 
     @Test
@@ -148,7 +148,7 @@ class LocalBrainTest {
         val full = LocalBrain.intentPrompt(clients)
         val lean = LocalBrain.intentPrompt(clients, lean = true)
         assertTrue(full.contains("label|client"))
-        assertTrue(lean.contains("label|customer"))
+        assertTrue(lean.contains("like log_hours|Simon"))
         assertEquals(SpokenIntent.LogHours, parse("log_hours|Simon", "put Simon down for a half day")?.intent)
     }
 

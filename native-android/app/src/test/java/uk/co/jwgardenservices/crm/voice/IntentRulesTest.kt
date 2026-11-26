@@ -127,4 +127,13 @@ class IntentRulesTest {
             passed >= (results.size * 80) / 100,
         )
     }
+
+    @Test
+    fun `adding hours to a visit logs hours, adding money adjusts the charge`() {
+        assertTrue(IntentRules.classify("can you add 8 hours to louisa and george's visit today").intent == SpokenIntent.LogHours)
+        assertTrue(IntentRules.classify("add 2.5 hrs for the smiths").intent == SpokenIntent.LogHours)
+        assertTrue(IntentRules.classify("add £40 for green waste").intent == SpokenIntent.AdjustCharge)
+        assertTrue(IntentRules.classify("add 40 for green waste").intent == SpokenIntent.AdjustCharge)
+        assertTrue(IntentRules.classify("change the rate to £45 an hour").intent == SpokenIntent.AdjustCharge)
+    }
 }

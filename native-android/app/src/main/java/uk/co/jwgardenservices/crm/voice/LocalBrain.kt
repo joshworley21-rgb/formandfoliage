@@ -56,7 +56,7 @@ object LocalBrain {
             .joinToString(", ")
         if (lean) {
             return buildString {
-                appendLine("Label a gardener's spoken sentence. Reply one line: label|customer")
+                appendLine("Label a gardener's spoken sentence. Reply with one line like log_hours|Simon")
                 appendLine(
                     "log_hours time worked, check_schedule diary, next_job, next_job_address, " +
                         "mark_job_done, who_owes_me unpaid invoices, today_earnings, " +
@@ -68,7 +68,7 @@ object LocalBrain {
                 appendLine("who's not paid me => who_owes_me|")
                 appendLine("the Hendersons are done => mark_job_done|Hendersons")
                 appendLine("how are you => other|")
-                if (clients.isNotEmpty()) append("Customers: $clients")
+                if (clients.isNotEmpty()) append("Known customer names: $clients")
             }.trimEnd()
         }
         return buildString {
@@ -104,7 +104,7 @@ object LocalBrain {
             appendLine("remember the Parkers' gate sticks => add_note|Parkers")
             appendLine("bought thirty quid of compost for the Parkers => add_expense|Parkers")
             appendLine("how are you doing => other|")
-            if (clients.isNotEmpty()) append("Customers: $clients")
+            if (clients.isNotEmpty()) append("Known customer names: $clients")
         }.trimEnd()
     }
 

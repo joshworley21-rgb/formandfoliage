@@ -1,6 +1,7 @@
 package uk.co.jwgardenservices.crm.voice
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** The post-ASR corrector: near misses become canonical client names. */
@@ -67,5 +68,45 @@ class AsrHotwordsTest {
     fun `an exact name wins over a similar shorter name`() {
         assertEquals("SMITHS", AsrHotwords.correct("SMITHS", listOf("SMITHS", "SMITH")))
         assertEquals("SMITH", AsrHotwords.correct("SMITH", listOf("SMITHS", "SMITH")))
+    }
+
+    // From a real call: Moonshine heard this correctly, then the corrector turned
+    // "can" into SUNNY, "add" into GTA, "eight" and "visit" into TEST, "hours"
+    // into BARK and "today" into GTA, because the common-word guard compared
+    // lower case with upper case and so never protected anything.
+    private val callNames = listOf(
+        "SUNNY", "GTA", "TEST", "BARK", "LOUISA AND GEORGE", "LOUISA", "GEORGE", "MARKOFF LEWITA",
+    )
+
+    @Test
+    fun `ordinary words are never rewritten into short names`() {
+        val said = "Can you add eight hours to Louisa and George's visit today?"
+        val fixed = AsrHotwords.correct(said, callNames)
+        assertTrue("was: $fixed", fixed.startsWith("Can you add eight hours to"))
+        assertTrue("was: $fixed", fixed.endsWith("visit today?"))
+        listOf("SUNNY", "GTA", "TEST", "BARK").forEach {
+            assertTrue("$it appeared in: $fixed", !fixed.contains(it))
+        }
+    }
+
+    @Test
+    fun `short names are only matched exactly`() {
+        assertEquals("Mark Sunny today", AsrHotwords.correct("Mark Sunny today", listOf("SUNNY")))
+        assertEquals("Mark Kenny today", AsrHotwords.correct("Mark Kenny today", listOf("SUNNY")))
+        assertEquals("add hours today", AsrHotwords.correct("add hours today", listOf("GTA", "BARK")))
+    }
+
+    @Test
+    fun `a dropped first letter still works for a long name when the word is not common`() {
+        assertEquals(
+            "MARK LOUISA TODAY",
+            AsrHotwords.correct("MARK WEAS TODAY", listOf("LOUISA")),
+        )
+    }
+
+    @Test
+    fun `common words survive even against a long sound alike name`() {
+        // TODAY and TODAYS share a Soundex tail with plenty of names.
+        assertEquals("WHAT IS ON TODAY", AsrHotwords.correct("WHAT IS ON TODAY", listOf("GATESIA", "KODAYA")))
     }
 }
