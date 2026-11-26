@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,14 +23,12 @@ import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Notes
 import androidx.compose.material.icons.outlined.RecordVoiceOver
-import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
@@ -58,13 +55,10 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import uk.co.jwgardenservices.crm.core.CrashLog
 import uk.co.jwgardenservices.crm.ui.common.OptionPicker
-import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
 import uk.co.jwgardenservices.crm.ui.common.SectionCard
-import uk.co.jwgardenservices.crm.ui.common.SegmentedPills
 import uk.co.jwgardenservices.crm.ui.common.SettingSwitchRow
 import uk.co.jwgardenservices.crm.ui.common.ShareText
 import uk.co.jwgardenservices.crm.ui.theme.JwTokens
-import uk.co.jwgardenservices.crm.voice.AssistantContext
 import uk.co.jwgardenservices.crm.voice.AssistantMemory
 import uk.co.jwgardenservices.crm.voice.AsrEngine
 import uk.co.jwgardenservices.crm.voice.AssistantPreferences
@@ -89,6 +83,8 @@ import uk.co.jwgardenservices.crm.voice.PersonaLength
 import uk.co.jwgardenservices.crm.voice.PersonaTone
 import uk.co.jwgardenservices.crm.voice.PronunciationDictionary
 import uk.co.jwgardenservices.crm.voice.SpeechEngine
+import uk.co.jwgardenservices.crm.ui.common.CompactScreenHeader
+import uk.co.jwgardenservices.crm.ui.common.SegmentedPillTabs
 
 /**
  * The offline assistant's own settings: Kokoro voice profile and the contents
@@ -280,7 +276,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     val crashReport = remember(crashRefresh) { CrashLog.read(context) }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        ScreenHeader(
+        CompactScreenHeader(
             title = "Secretary settings",
             subtitle = "Voice, personality and local models.",
             onBack = onBack,
@@ -304,7 +300,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             leadingIcon = Icons.Outlined.RecordVoiceOver,
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier.padding(JwTokens.cardPadding),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
@@ -535,7 +531,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             leadingIcon = Icons.Outlined.Cloud,
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier.padding(JwTokens.cardPadding),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 SettingSwitchRow(
@@ -662,7 +658,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             leadingIcon = Icons.Outlined.GraphicEq,
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier.padding(JwTokens.cardPadding),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
@@ -749,7 +745,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             leadingIcon = Icons.Outlined.Mic,
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier.padding(JwTokens.cardPadding),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
@@ -783,7 +779,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    SegmentedPills(
+                    SegmentedPillTabs(
                         options = AsrEngine.entries,
                         selected = asrEngine,
                         onSelect = { engine ->
@@ -851,7 +847,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             leadingIcon = Icons.Outlined.Notes,
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier.padding(JwTokens.cardPadding),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
@@ -919,7 +915,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             leadingIcon = Icons.Outlined.Call,
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier.padding(JwTokens.cardPadding),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
@@ -955,7 +951,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             leadingIcon = Icons.Outlined.Chat,
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier.padding(JwTokens.cardPadding),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 SettingSwitchRow(
@@ -1018,7 +1014,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             leadingIcon = Icons.Outlined.Memory,
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier.padding(JwTokens.cardPadding),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
@@ -1093,7 +1089,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             leadingIcon = Icons.Outlined.RecordVoiceOver,
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier.padding(JwTokens.cardPadding),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
@@ -1160,7 +1156,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             leadingIcon = Icons.Outlined.Chat,
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier.padding(JwTokens.cardPadding),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
@@ -1184,7 +1180,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text("Tone", style = MaterialTheme.typography.labelMedium)
-                SegmentedPills(
+                SegmentedPillTabs(
                     options = PersonaTone.entries,
                     selected = personaTone,
                     onSelect = { tone ->
@@ -1193,7 +1189,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     label = { it.label },
                 )
                 Text("Humour", style = MaterialTheme.typography.labelMedium)
-                SegmentedPills(
+                SegmentedPillTabs(
                     options = PersonaHumour.entries,
                     selected = personaHumour,
                     onSelect = { humour ->
@@ -1202,7 +1198,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     label = { it.label },
                 )
                 Text("Length", style = MaterialTheme.typography.labelMedium)
-                SegmentedPills(
+                SegmentedPillTabs(
                     options = PersonaLength.entries,
                     selected = personaLength,
                     onSelect = { length ->
@@ -1219,10 +1215,10 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             leadingIcon = Icons.Outlined.Mic,
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier.padding(JwTokens.cardPadding),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                SegmentedPills(
+                SegmentedPillTabs(
                     options = MicSource.entries,
                     selected = micSource,
                     onSelect = { selected ->
@@ -1298,7 +1294,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             leadingIcon = Icons.Outlined.BugReport,
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier.padding(JwTokens.cardPadding),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(

@@ -1,6 +1,5 @@
 package uk.co.jwgardenservices.crm.ui.clients
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.aspectRatio
@@ -26,9 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ChevronRight
@@ -37,12 +34,10 @@ import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.People
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -56,7 +51,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import uk.co.jwgardenservices.crm.ui.common.JwAlertDialog
@@ -70,12 +64,16 @@ import uk.co.jwgardenservices.crm.ui.common.ContactButtons
 import uk.co.jwgardenservices.crm.ui.common.DialogTitle
 import uk.co.jwgardenservices.crm.ui.common.EmptyState
 import uk.co.jwgardenservices.crm.ui.common.ErrorState
-import uk.co.jwgardenservices.crm.ui.common.HeaderPillButton
 import uk.co.jwgardenservices.crm.ui.common.JwDialog
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
-import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
 import uk.co.jwgardenservices.crm.ui.common.SettingSwitchRow
 import uk.co.jwgardenservices.crm.ui.theme.JwTokens
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import uk.co.jwgardenservices.crm.ui.common.CompactScreenHeader
+import uk.co.jwgardenservices.crm.ui.common.FilterPill
+import uk.co.jwgardenservices.crm.ui.common.JwCard
+import uk.co.jwgardenservices.crm.ui.common.PillButton
+import uk.co.jwgardenservices.crm.ui.theme.JwTheme
 
 @Composable
 fun ClientsScreen(viewModel: CrmViewModel, isStaff: Boolean) {
@@ -95,23 +93,23 @@ fun ClientsScreen(viewModel: CrmViewModel, isStaff: Boolean) {
 
     if (state.loading) {
         Column(Modifier.fillMaxSize()) {
-            ScreenHeader(title = "Clients", subtitle = "Rates, contact details and who to chase.")
+            CompactScreenHeader(title = "Clients", subtitle = "Rates and contact details")
             LoadingState(modifier = Modifier.padding(horizontal = JwTokens.screenPadding))
         }
         return
     }
 
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader(
+        CompactScreenHeader(
             title = "Clients",
             subtitle = if (isStaff) {
-                "Names, addresses and notes for the round."
+                "Names, addresses and notes"
             } else {
-                "Rates, contact details and who to chase."
+                "Rates and contact details"
             },
-            topActions = {
+            actions = {
                 if (!isStaff) {
-                    HeaderPillButton(
+                    PillButton(
                         label = "Add client",
                         icon = Icons.Outlined.Add,
                         onClick = {
@@ -127,7 +125,7 @@ fun ClientsScreen(viewModel: CrmViewModel, isStaff: Boolean) {
                 .weight(1f)
                 .fillMaxWidth(),
             contentPadding = PaddingValues(JwTokens.screenPadding),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(JwTokens.sectionGap),
         ) {
             if (state.error != null) {
                 item { ErrorState(state.error!!, viewModel::refresh) }
@@ -150,7 +148,12 @@ fun ClientsScreen(viewModel: CrmViewModel, isStaff: Boolean) {
                             }
                         }
                     },
-                    shape = RoundedCornerShape(JwTokens.controlRadius),
+                    shape = RoundedCornerShape(JwTokens.chipRadius),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedBorderColor = JwTheme.colors.cardBorder,
+                    ),
                 )
             }
 
@@ -255,13 +258,11 @@ fun ClientsScreen(viewModel: CrmViewModel, isStaff: Boolean) {
 
 @Composable
 private fun ClientCard(client: Client, isStaff: Boolean, onClick: (() -> Unit)?, onPhotos: (() -> Unit)?) {
-    Surface(
+    JwCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(enabled = onClick != null) { onClick?.invoke() },
-        shape = RoundedCornerShape(JwTokens.cardRadius),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(JwTokens.hairline, MaterialTheme.colorScheme.outline),
+        padding = PaddingValues(0.dp),
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -421,15 +422,15 @@ private fun ClientEditorDialog(
 
                 Text("How this client is charged", style = MaterialTheme.typography.titleSmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
+                    FilterPill(
+                        label = "Hourly",
                         selected = billingMode == "hourly",
                         onClick = { billingMode = "hourly" },
-                        label = { Text("Hourly") },
                     )
-                    FilterChip(
+                    FilterPill(
+                        label = "Fixed price",
                         selected = billingMode == "fixed",
                         onClick = { billingMode = "fixed" },
-                        label = { Text("Fixed price") },
                     )
                 }
                 if (billingMode == "fixed") {

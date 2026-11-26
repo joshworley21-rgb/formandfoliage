@@ -62,7 +62,7 @@ fun DateField(
         OutlinedButton(
             onClick = { open = true },
             enabled = enabled,
-            shape = RoundedCornerShape(JwTokens.fieldRadius),
+            shape = RoundedCornerShape(JwTokens.controlRadius),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),

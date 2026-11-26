@@ -62,6 +62,12 @@ val JwTypography = Typography(
         fontSize = 16.sp,
         lineHeight = 22.sp,
     ),
+    titleSmall = TextStyle(
+        fontFamily = BodyFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+    ),
     bodyLarge = TextStyle(
         fontFamily = BodyFamily,
         fontWeight = FontWeight.Normal,
@@ -86,6 +92,13 @@ val JwTypography = Typography(
         fontSize = 14.sp,
         lineHeight = 20.sp,
     ),
+    labelMedium = TextStyle(
+        fontFamily = BodyFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+    ),
+    // Uppercase eyebrow labels and figures: THIS WEEK, WEEK TOTALS, OWED TO YOU.
     labelSmall = TextStyle(
         fontFamily = FigureFamily,
         fontWeight = FontWeight.Medium,

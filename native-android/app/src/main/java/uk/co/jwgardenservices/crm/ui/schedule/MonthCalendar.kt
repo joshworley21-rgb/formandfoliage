@@ -1,6 +1,5 @@
 package uk.co.jwgardenservices.crm.ui.schedule
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -59,6 +58,8 @@ import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 import uk.co.jwgardenservices.crm.domain.formatTime
 import uk.co.jwgardenservices.crm.domain.localDate
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
+import androidx.compose.foundation.layout.PaddingValues
+import uk.co.jwgardenservices.crm.ui.common.JwCard
 
 private val monthLabelFormat = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.UK)
 
@@ -125,11 +126,9 @@ fun MonthCalendar(
             .takeWhile { !it.isAfter(end) }
             .toList()
     }
-    Surface(
+    JwCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(JwTokens.cardRadius),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        padding = PaddingValues(0.dp),
     ) {
         Box(
             modifier = Modifier.onGloballyPositioned { coordinates ->

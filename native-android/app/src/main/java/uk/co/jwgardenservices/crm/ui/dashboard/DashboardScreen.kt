@@ -1,8 +1,6 @@
 package uk.co.jwgardenservices.crm.ui.dashboard
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,7 +8,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,15 +19,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AccessTime
-import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.NotificationsNone
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -83,14 +77,17 @@ import uk.co.jwgardenservices.crm.ui.CrmViewModel
 import uk.co.jwgardenservices.crm.ui.common.ErrorState
 import uk.co.jwgardenservices.crm.ui.common.HeaderIconAction
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
-import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
-import uk.co.jwgardenservices.crm.ui.common.SectionCard
-import uk.co.jwgardenservices.crm.ui.common.SegmentedPills
-import uk.co.jwgardenservices.crm.ui.common.StatTile
 import uk.co.jwgardenservices.crm.ui.onDay
 import uk.co.jwgardenservices.crm.ui.theme.JwTheme
 import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 import uk.co.jwgardenservices.crm.voice.VoiceLines
+import uk.co.jwgardenservices.crm.ui.common.CompactScreenHeader
+import uk.co.jwgardenservices.crm.ui.common.JwCard
+import uk.co.jwgardenservices.crm.ui.common.PillButton
+import uk.co.jwgardenservices.crm.ui.common.PillStyle
+import uk.co.jwgardenservices.crm.ui.common.RecessedCard
+import uk.co.jwgardenservices.crm.ui.common.SectionLabel
+import uk.co.jwgardenservices.crm.ui.common.SegmentedPillTabs
 
 private enum class HomeTab(val label: String) {
     Week("This week"),
@@ -179,53 +176,41 @@ fun DashboardScreen(
 
     if (state.loading) {
         Column(modifier = Modifier.fillMaxSize()) {
-            ScreenHeader(title = "Home")
+            CompactScreenHeader(title = "Home")
             LoadingState("Loading your workspace…", Modifier.padding(horizontal = JwTokens.screenPadding))
         }
         return
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 22.dp),
-        ) {
-                ScreenHeader(
-                    title = "${when (LocalTime.now().hour) {
-                        in 0..11 -> "Morning"
-                        in 12..17 -> "Afternoon"
-                        else -> "Evening"
-                    }}, ${VoiceLines.OWNER_NAME}",
-                    subtitle = today.formatWeekday(),
-                    footerPadding = 126.dp,
-                    largeTitle = true,
-                    topActions = {
-                        HeaderIconAction(
-                            icon = Icons.Outlined.NotificationsNone,
-                            contentDescription = "Reminders",
-                            onClick = onOpenInvoices,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        HeaderIconAction(
-                            icon = Icons.Outlined.Mic,
-                            contentDescription = "Call Secretary",
-                            onClick = onOpenSecretary,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        HeaderIconAction(
-                            icon = Icons.Outlined.Refresh,
-                            contentDescription = "Refresh",
-                            onClick = viewModel::refresh,
-                        )
-                    },
+        CompactScreenHeader(
+            title = "${when (LocalTime.now().hour) {
+                in 0..11 -> "Morning"
+                in 12..17 -> "Afternoon"
+                else -> "Evening"
+            }}, ${VoiceLines.OWNER_NAME}",
+            subtitle = today.formatWeekday(),
+            actions = {
+                HeaderIconAction(
+                    icon = Icons.Outlined.NotificationsNone,
+                    contentDescription = "Reminders",
+                    onClick = onOpenInvoices,
                 )
+                HeaderIconAction(
+                    icon = Icons.Outlined.Mic,
+                    contentDescription = "Call Secretary",
+                    onClick = onOpenSecretary,
+                )
+                HeaderIconAction(
+                    icon = Icons.Outlined.Refresh,
+                    contentDescription = "Refresh",
+                    onClick = viewModel::refresh,
+                )
+            },
+            footer = {
                 Row(
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .offset(y = 4.dp)
                         .fillMaxWidth()
-                        .padding(horizontal = JwTokens.screenPadding)
                         .pointerInput(Unit) {
                             detectHorizontalDragGestures(
                                 onDragStart = { statDrag = 0f },
@@ -239,39 +224,25 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     HomeStat(
-                        label = "THIS WEEK",
+                        label = "This week",
                         value = moneyCompact(weekIncome),
                         projectedValue = moneyCompact(weekProjected),
                         projected = projected,
                         detail = "${weekVisits.size} ${if (weekVisits.size == 1) "visit" else "visits"} · so far",
                         hint = if (projected) "Projected to Sunday" else "Swipe to see projected →",
-                        alt = false,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(126.dp),
+                        modifier = Modifier.weight(1f),
                     )
                     HomeStat(
-                        label = "THIS MONTH",
+                        label = "This month",
                         value = moneyCompact(monthIncome),
                         projectedValue = moneyCompact(monthProjected),
                         projected = projected,
                         detail = "${monthVisits.size} ${if (monthVisits.size == 1) "visit" else "visits"} · so far",
-                        hint = if (projected) "Projected month end" else null,
-                        alt = true,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(126.dp),
+                        hint = if (projected) "Projected month end" else "Swipe to see projected →",
+                        modifier = Modifier.weight(1f),
                     )
                 }
-        }
-
-        ReminderPill(
-            reminders = reminders,
-            unbilledTotal = unbilledTotal,
-            onClick = onOpenInvoices,
-            modifier = Modifier
-                .padding(horizontal = JwTokens.screenPadding)
-                .padding(bottom = 12.dp),
+            },
         )
 
         LazyColumn(
@@ -281,10 +252,19 @@ fun DashboardScreen(
             contentPadding = PaddingValues(
                 start = JwTokens.screenPadding,
                 end = JwTokens.screenPadding,
-                bottom = 48.dp,
+                top = JwTokens.sectionGap,
+                bottom = 32.dp,
             ),
-            verticalArrangement = Arrangement.spacedBy(0.dp),
+            verticalArrangement = Arrangement.spacedBy(JwTokens.sectionGap),
         ) {
+        item {
+            ReminderBanner(
+                reminders = reminders,
+                unbilledTotal = unbilledTotal,
+                onClick = onOpenInvoices,
+            )
+        }
+
         if (state.error != null) {
             item {
                 ErrorState(state.error!!, viewModel::refresh)
@@ -292,21 +272,13 @@ fun DashboardScreen(
         }
 
         item {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 12.dp),
-                shape = RoundedCornerShape(JwTokens.cardRadius),
-                color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(JwTokens.hairline, MaterialTheme.colorScheme.outline),
-            ) {
-                Column {
-                    SegmentedPills(
+            JwCard(modifier = Modifier.fillMaxWidth(), padding = PaddingValues(0.dp)) {
+                    SegmentedPillTabs(
                         options = HomeTab.entries,
                         selected = tab,
                         onSelect = { tab = it },
                         label = { it.label },
-                        modifier = Modifier.padding(10.dp),
+                        modifier = Modifier.padding(12.dp),
                     )
                     when (tab) {
                         HomeTab.Week -> WeekPanel(
@@ -341,7 +313,6 @@ fun DashboardScreen(
                             onOpenInvoices = onOpenInvoices,
                         )
                     }
-                }
             }
         }
 
@@ -359,13 +330,17 @@ fun DashboardScreen(
                 text = "Business holds your running costs, profit and the coach.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 10.dp),
             )
         }
         }
     }
 }
 
+/**
+ * One of the two KPI cards recessed into the header. The hint and the page
+ * dots each get their own line, so neither can run into the other however
+ * narrow the phone.
+ */
 @Composable
 private fun HomeStat(
     label: String,
@@ -373,89 +348,47 @@ private fun HomeStat(
     projectedValue: String,
     projected: Boolean,
     detail: String,
-    hint: String?,
-    alt: Boolean = false,
+    hint: String,
     modifier: Modifier = Modifier,
 ) {
     val palette = JwTheme.colors
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(JwTokens.controlRadius),
-        color = if (alt) palette.kpiCardAlt else palette.kpiCard,
-        contentColor = palette.onForestMuted,
-        border = BorderStroke(1.dp, palette.kpiBorder),
-        shadowElevation = 8.dp,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxHeight()
-                .padding(14.dp),
-        ) {
-            Text(
-                text = label.uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                color = palette.onForestMuted.copy(alpha = 0.62f),
-                maxLines = 1,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = if (projected) projectedValue else value,
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = palette.brass,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = detail,
-                style = MaterialTheme.typography.bodySmall,
-                color = palette.onForestMuted.copy(alpha = 0.78f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.weight(1f))
-            if (hint != null) {
-                Text(
-                    text = hint,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontSize = 9.sp,
-                        lineHeight = 11.sp,
-                        letterSpacing = (-0.15).sp,
-                    ),
-                    fontWeight = FontWeight.Medium,
-                    color = palette.onForestMuted.copy(alpha = 0.9f),
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(6.dp))
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+    RecessedCard(modifier = modifier, padding = PaddingValues(12.dp)) {
+        SectionLabel(label, onForest = true)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = if (projected) projectedValue else value,
+            style = MaterialTheme.typography.headlineMedium,
+            color = palette.brass,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = if (projected) "projected" else detail,
+            style = MaterialTheme.typography.bodySmall,
+            color = palette.onForestMuted.copy(alpha = 0.8f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = hint,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+            ),
+            color = palette.onForestMuted.copy(alpha = 0.7f),
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Clip,
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            listOf(!projected, projected).forEach { on ->
                 Box(
                     modifier = Modifier
-                        .size(4.dp)
+                        .size(width = if (on) 12.dp else 5.dp, height = 5.dp)
                         .background(
-                            if (!projected) palette.onForestMuted else {
-                                palette.onForestMuted.copy(alpha = 0.28f)
-                            },
-                            CircleShape,
-                        ),
-                )
-                Spacer(Modifier.width(4.dp))
-                Box(
-                    modifier = Modifier
-                        .size(4.dp)
-                        .background(
-                            if (projected) palette.onForestMuted else {
-                                palette.onForestMuted.copy(alpha = 0.28f)
-                            },
+                            if (on) palette.brass else palette.onForestMuted.copy(alpha = 0.3f),
                             CircleShape,
                         ),
                 )
@@ -464,14 +397,14 @@ private fun HomeStat(
     }
 }
 
+/** What needs doing next, with the one ochre action on the screen. */
 @Composable
-private fun ReminderPill(
+private fun ReminderBanner(
     reminders: uk.co.jwgardenservices.crm.domain.ReminderSummary,
     unbilledTotal: Double,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val palette = JwTheme.colors
     val text = when {
         reminders.overdue.isNotEmpty() ->
             "${reminders.overdue.size} ${if (reminders.overdue.size == 1) "invoice" else "invoices"} overdue"
@@ -487,42 +420,35 @@ private fun ReminderPill(
     } else {
         "Review"
     }
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(JwTokens.chipRadius),
-        color = MaterialTheme.colorScheme.secondary,
-        border = BorderStroke(JwTokens.hairline, MaterialTheme.colorScheme.outline),
+    JwCard(
+        modifier = modifier.fillMaxWidth(),
+        onClick = onClick,
+        padding = PaddingValues(start = 12.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
     ) {
-        Row(
-            modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.PushPin,
-                contentDescription = null,
-                modifier = Modifier.size(17.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .background(JwTheme.colors.track, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.PushPin,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
             Spacer(Modifier.width(10.dp))
             Text(
                 text = text,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            Surface(
-                shape = RoundedCornerShape(JwTokens.chipRadius),
-                color = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ) {
-                Text(
-                    text = actionLabel,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-                )
-            }
+            Spacer(Modifier.width(8.dp))
+            PillButton(label = actionLabel, onClick = onClick)
         }
     }
 }
@@ -546,7 +472,7 @@ private fun WeekPanel(
     weekHours: Double,
 ) {
     val delta = weekNet - lastWeekNet
-    Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
+    Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = if (delta < 0) "↓" else "↑",
@@ -567,15 +493,11 @@ private fun WeekPanel(
             )
         }
         Spacer(Modifier.height(14.dp))
-        Text(
-            text = "THIS WEEK, DAY BY DAY",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        SectionLabel("This week, day by day")
         Spacer(Modifier.height(8.dp))
         WeekBars(series = series, today = today)
-        Spacer(Modifier.height(14.dp))
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Spacer(Modifier.height(12.dp))
+        HorizontalDivider()
         SummaryRow("Busiest day", if ((busiest?.revenue ?: 0.0) > 0.0) {
             "${busiest!!.day.formatWeekday().substringBefore(" ")} · ${money(busiest.revenue)}"
         } else {
@@ -583,18 +505,14 @@ private fun WeekPanel(
         })
         SummaryRow("Top client", if (topClientName != null) "$topClientName · ${money(topClientValue)}" else "—")
         SummaryRow("Capacity", "$capacity% · ${hoursLabel(weekHours)} of 40h")
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = "PROFIT & LOSS",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        HorizontalDivider()
+        Spacer(Modifier.height(12.dp))
+        SectionLabel("Profit & loss")
         SummaryRow("Income", money(weekIncome))
         SummaryRow("Labour", money(weekLabour))
         SummaryRow("Materials", money(weekMaterials))
         SummaryRow("Overheads", money(weekOverheads))
         SummaryRow("Net profit", money(weekNet), emphasis = true)
-        Spacer(Modifier.height(8.dp))
     }
 }
 
@@ -615,7 +533,7 @@ private fun WeekBars(series: List<DaySeries>, today: LocalDate) {
                     modifier = Modifier
                         .weight(1f)
                         .background(
-                            if (isToday) MaterialTheme.colorScheme.secondary else Color.Transparent,
+                            if (isToday) JwTheme.colors.track else Color.Transparent,
                             RoundedCornerShape(JwTokens.tinyRadius),
                         )
                         .padding(vertical = 5.dp),
@@ -637,7 +555,7 @@ private fun WeekBars(series: List<DaySeries>, today: LocalDate) {
                                 .width(7.dp)
                                 .height((78 * (day.labour / max)).dp.coerceAtLeast(3.dp))
                                 .background(
-                                    MaterialTheme.colorScheme.outline,
+                                    JwTheme.colors.brass,
                                     RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp),
                                 ),
                         )
@@ -645,7 +563,7 @@ private fun WeekBars(series: List<DaySeries>, today: LocalDate) {
                     Spacer(Modifier.height(4.dp))
                     Text(
                         text = day.day.formatWeekday().take(3),
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
                         color = if (isToday) {
                             MaterialTheme.colorScheme.onSurface
                         } else {
@@ -658,7 +576,7 @@ private fun WeekBars(series: List<DaySeries>, today: LocalDate) {
         Spacer(Modifier.height(4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             Legend(MaterialTheme.colorScheme.primary, "Revenue")
-            Legend(MaterialTheme.colorScheme.outline, "Labour")
+            Legend(JwTheme.colors.brass, "Labour")
         }
     }
 }
@@ -713,7 +631,7 @@ private fun TodayPanel(
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
         if (overdue.isNotEmpty()) {
             Surface(
-                shape = RoundedCornerShape(JwTokens.controlRadius),
+                shape = RoundedCornerShape(JwTokens.smallRadius),
                 color = MaterialTheme.colorScheme.errorContainer,
                 contentColor = MaterialTheme.colorScheme.onErrorContainer,
                 modifier = Modifier.fillMaxWidth(),
@@ -735,7 +653,7 @@ private fun TodayPanel(
             )
         } else {
             jobs.forEachIndexed { index, job ->
-                if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                if (index > 0) HorizontalDivider()
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -773,19 +691,13 @@ private fun TodayPanel(
             }
         }
         Spacer(Modifier.height(4.dp))
-        Surface(
+        PillButton(
+            label = "Open rota",
             onClick = onOpenSchedule,
-            shape = RoundedCornerShape(JwTokens.smallRadius),
-            color = MaterialTheme.colorScheme.secondary,
+            style = PillStyle.Quiet,
+            fill = true,
             modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                text = "Open rota",
-                style = MaterialTheme.typography.labelLarge,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(vertical = 10.dp),
-            )
-        }
+        )
     }
 }
 
@@ -802,11 +714,7 @@ private fun CashPanel(
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
         Row(verticalAlignment = Alignment.Bottom) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "OWED TO YOU",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                SectionLabel("Owed to you")
                 Text(
                     text = money(outstanding),
                     style = MaterialTheme.typography.headlineSmall,
@@ -835,7 +743,7 @@ private fun CashPanel(
             )
         } else {
             unpaid.take(5).forEachIndexed { index, invoice ->
-                if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                if (index > 0) HorizontalDivider()
                 val late = daysOverdue(invoice, today)
                 Row(
                     modifier = Modifier
@@ -864,19 +772,13 @@ private fun CashPanel(
             }
         }
         Spacer(Modifier.height(6.dp))
-        Surface(
+        PillButton(
+            label = "Open invoices",
             onClick = onOpenInvoices,
-            shape = RoundedCornerShape(JwTokens.smallRadius),
-            color = MaterialTheme.colorScheme.secondary,
+            style = PillStyle.Quiet,
+            fill = true,
             modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                text = "Open invoices",
-                style = MaterialTheme.typography.labelLarge,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(vertical = 10.dp),
-            )
-        }
+        )
     }
 }
 
@@ -894,64 +796,49 @@ private fun TaxPotBand(
     }
     val year = remember(today) { ukTaxYearContaining(today) }
     if (ratePercent <= 0.0) {
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(JwTokens.bandRadius),
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        ) {
-            Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(
-                    text = "Income tax",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    text = "Set your tax rate in Settings → Tax and this card will show what " +
-                        "to put aside and an estimated HMRC bill.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
+        JwCard(modifier = Modifier.fillMaxWidth()) {
+            SectionLabel("Income tax")
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Set your tax rate in Settings → Tax and this card will show what " +
+                    "to put aside and an estimated HMRC bill.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         return
     }
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(JwTokens.bandRadius),
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-    ) {
-        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Text(
-                text = "Tax to set aside: ${money(pot)}",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "${if (ratePercent % 1.0 == 0.0) ratePercent.toInt() else ratePercent}% " +
-                    "of invoiced this tax year (${ukTaxYearLabel(year)})",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
-            val detail = if (estimate.profit <= SelfAssessment.PERSONAL_ALLOWANCE) {
-                "Under the £12,570 allowance so far — no income tax or Class 4 on this profit."
-            } else {
-                "Income tax ${money(estimate.incomeTax)} + Class 4 NICs ${money(estimate.class4)} " +
-                    "after the £12,570 allowance."
-            }
-            Text(
-                text = "Estimated HMRC bill: ~${money(estimate.total)}",
-                style = MaterialTheme.typography.titleSmall,
-            )
-            Text(
-                text = detail,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                text = "Net after tax: ${money((estimate.profit - estimate.total).coerceAtLeast(0.0))}",
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.SemiBold,
-            )
+    JwCard(modifier = Modifier.fillMaxWidth()) {
+        SectionLabel("Tax to set aside · ${ukTaxYearLabel(year)}")
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = money(pot),
+            style = MaterialTheme.typography.headlineMedium,
+        )
+        Text(
+            text = "${if (ratePercent % 1.0 == 0.0) ratePercent.toInt() else ratePercent}% " +
+                "of invoiced this tax year",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(12.dp))
+        HorizontalDivider()
+        val detail = if (estimate.profit <= SelfAssessment.PERSONAL_ALLOWANCE) {
+            "Under the £12,570 allowance so far — no income tax or Class 4 on this profit."
+        } else {
+            "Income tax ${money(estimate.incomeTax)} + Class 4 NICs ${money(estimate.class4)} " +
+                "after the £12,570 allowance."
         }
+        SummaryRow("Estimated HMRC bill", "~${money(estimate.total)}")
+        SummaryRow(
+            "Net after tax",
+            money((estimate.profit - estimate.total).coerceAtLeast(0.0)),
+            emphasis = true,
+        )
+        Text(
+            text = detail,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }

@@ -2,7 +2,6 @@ package uk.co.jwgardenservices.crm.ui.invoices
 
 import android.util.Base64
 import android.widget.Toast
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,22 +9,21 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import uk.co.jwgardenservices.crm.ui.common.JwAlertDialog
-import uk.co.jwgardenservices.crm.ui.common.SectionCard
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -44,10 +42,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.LocalDate
-import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -70,20 +66,23 @@ import uk.co.jwgardenservices.crm.ui.CrmViewModel
 import uk.co.jwgardenservices.crm.ui.common.DateField
 import uk.co.jwgardenservices.crm.ui.common.EmptyState
 import uk.co.jwgardenservices.crm.ui.common.ErrorState
-import uk.co.jwgardenservices.crm.ui.common.HeaderPillButton
 import uk.co.jwgardenservices.crm.ui.common.DialogTitle
 import uk.co.jwgardenservices.crm.ui.common.JwDialog
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
 import uk.co.jwgardenservices.crm.ui.common.OptionPicker
-import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
-import uk.co.jwgardenservices.crm.ui.common.SystemBarAppearance
 import uk.co.jwgardenservices.crm.ui.common.StatusChip
 import uk.co.jwgardenservices.crm.ui.theme.JwTheme
 import uk.co.jwgardenservices.crm.ui.theme.JwTokens
+import uk.co.jwgardenservices.crm.ui.common.CompactScreenHeader
+import uk.co.jwgardenservices.crm.ui.common.ForestCard
+import uk.co.jwgardenservices.crm.ui.common.JwCard
+import uk.co.jwgardenservices.crm.ui.common.PillButton
+import uk.co.jwgardenservices.crm.ui.common.PillStyle
+import uk.co.jwgardenservices.crm.ui.common.SectionLabel
+import uk.co.jwgardenservices.crm.ui.common.StatusTile
 
 @Composable
 fun InvoicesScreen(viewModel: CrmViewModel) {
-    SystemBarAppearance(darkStatusBar = true)
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -102,6 +101,14 @@ fun InvoicesScreen(viewModel: CrmViewModel) {
     var draftError by remember { mutableStateOf<String?>(null) }
     var historyId by remember { mutableStateOf<String?>(null) }
     var busyId by remember { mutableStateOf<String?>(null) }
+    // Tapping a status tile in the summary card filters the list beneath it.
+    var statusFilter by remember { mutableStateOf<String?>(null) }
+    val overdueCount = invoices.count { daysOverdue(it) > 0 }
+    val visibleInvoices = when (statusFilter) {
+        "overdue" -> invoices.filter { daysOverdue(it) > 0 }
+        null -> invoices
+        else -> invoices.filter { it.status == statusFilter }
+    }
 
     fun toast(message: String) {
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
@@ -203,18 +210,18 @@ fun InvoicesScreen(viewModel: CrmViewModel) {
 
     if (state.loading) {
         Column(Modifier.fillMaxSize()) {
-            ScreenHeader(title = "Invoices", subtitle = "What is owed, and what has been sent.")
+            CompactScreenHeader(title = "Invoices", subtitle = "Owed, sent and paid")
             LoadingState(modifier = Modifier.padding(horizontal = JwTokens.screenPadding))
         }
         return
     }
 
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader(
+        CompactScreenHeader(
             title = "Invoices",
-            subtitle = "What is owed, and what has been sent.",
-            topActions = {
-                HeaderPillButton(
+            subtitle = "Owed, sent and paid",
+            actions = {
+                PillButton(
                     label = "New invoice",
                     enabled = state.clients.isNotEmpty(),
                     onClick = {
@@ -228,14 +235,32 @@ fun InvoicesScreen(viewModel: CrmViewModel) {
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            contentPadding = PaddingValues(JwTokens.screenPadding),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(
+                start = JwTokens.screenPadding,
+                end = JwTokens.screenPadding,
+                top = JwTokens.sectionGap,
+                bottom = 32.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(JwTokens.sectionGap),
         ) {
         if (state.error != null) {
             item { ErrorState(state.error!!, viewModel::refresh) }
         }
 
-        item { OwedBand(owed = owed, count = unpaid.size) }
+        item {
+            OwedBand(
+                owed = owed,
+                unpaidCount = unpaid.size,
+                counts = mapOf(
+                    "draft" to invoices.count { it.status == "draft" },
+                    "sent" to unpaid.size,
+                    "overdue" to overdueCount,
+                    "paid" to invoices.count { it.status == "paid" },
+                ),
+                filter = statusFilter,
+                onFilter = { key -> statusFilter = if (statusFilter == key) null else key },
+            )
+        }
 
         item {
             ReadyToBillCard(
@@ -269,7 +294,17 @@ fun InvoicesScreen(viewModel: CrmViewModel) {
             return@LazyColumn
         }
 
-        items(invoices, key = { it.id }) { invoice ->
+        if (visibleInvoices.isEmpty()) {
+            item {
+                Text(
+                    text = "No $statusFilter invoices. Tap the tile again to show them all.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        items(visibleInvoices, key = { it.id }) { invoice ->
             InvoiceCard(
                 invoice = invoice,
                 clientName = clientNames[invoice.clientId] ?: "Client",
@@ -388,31 +423,67 @@ fun InvoicesScreen(viewModel: CrmViewModel) {
 }
 
 @Composable
-private fun OwedBand(owed: Double, count: Int) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(JwTokens.bandRadius),
-        color = JwTheme.colors.forest,
-        contentColor = JwTheme.colors.onForestMuted,
-    ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text("OWED TO YOU", style = MaterialTheme.typography.labelSmall)
-                Text(
-                    "$count unpaid",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = JwTheme.colors.onForestMuted.copy(alpha = 0.65f),
-                )
-            }
-            Text(
-                text = money(owed),
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Bold,
-                color = JwTheme.colors.brass,
-                modifier = Modifier.padding(top = 6.dp),
+private fun OwedBand(
+    owed: Double,
+    unpaidCount: Int,
+    counts: Map<String, Int>,
+    filter: String?,
+    onFilter: (String) -> Unit,
+) {
+    val palette = JwTheme.colors
+    ForestCard(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            SectionLabel("Owed to you", onForest = true)
+            SectionLabel("$unpaidCount unpaid", onForest = true)
+        }
+        Text(
+            text = money(owed),
+            style = MaterialTheme.typography.displaySmall,
+            color = palette.brass,
+            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            StatusTile(
+                label = "Drafts",
+                count = counts["draft"] ?: 0,
+                icon = Icons.Outlined.Description,
+                tint = palette.brass,
+                active = filter == "draft",
+                onClick = { onFilter("draft") },
+                modifier = Modifier.weight(1f),
+            )
+            StatusTile(
+                label = "Sent",
+                count = counts["sent"] ?: 0,
+                icon = Icons.AutoMirrored.Outlined.Send,
+                tint = palette.onForestMuted,
+                active = filter == "sent",
+                onClick = { onFilter("sent") },
+                modifier = Modifier.weight(1f),
+            )
+            StatusTile(
+                label = "Overdue",
+                count = counts["overdue"] ?: 0,
+                icon = Icons.Outlined.ErrorOutline,
+                tint = MaterialTheme.colorScheme.errorContainer,
+                active = filter == "overdue",
+                onClick = { onFilter("overdue") },
+                modifier = Modifier.weight(1f),
+            )
+            StatusTile(
+                label = "Paid",
+                count = counts["paid"] ?: 0,
+                icon = Icons.Outlined.CheckCircle,
+                tint = palette.callBar,
+                active = filter == "paid",
+                onClick = { onFilter("paid") },
+                modifier = Modifier.weight(1f),
             )
         }
     }
@@ -437,22 +508,13 @@ private fun InvoiceCard(
     onDelete: () -> Unit,
 ) {
     val over = daysOverdue(invoice)
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(JwTokens.cardRadius),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(
-            1.dp,
-            if (over > 0) warning.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline,
-        ),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+    JwCard(modifier = Modifier.fillMaxWidth()) {
+        Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = invoice.number,
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
                     )
                     Text(
                         text = clientName,
@@ -962,39 +1024,28 @@ private fun ReadyToBillCard(
     if (groups.isEmpty()) return
     val totalReady = groups.sumOf { it.third }
     val visitCount = groups.sumOf { it.second.size }
-    SectionCard(title = "Ready to bill") {
-        Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+    JwCard(modifier = Modifier.fillMaxWidth()) {
+        Column {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 8.dp),
+                    .padding(bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
+                    Text("Ready to bill", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        text = "READY TO INVOICE",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = "$visitCount unbilled ${if (visitCount == 1) "visit" else "visits"}",
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text(
-                        text = money(totalReady),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
                 }
-                Surface(
-                    shape = RoundedCornerShape(JwTokens.chipRadius),
-                    color = MaterialTheme.colorScheme.secondary,
-                ) {
-                    Text(
-                        text = "$visitCount ${if (visitCount == 1) "visit" else "visits"}",
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                    )
-                }
+                Text(
+                    text = money(totalReady),
+                    style = MaterialTheme.typography.titleLarge,
+                )
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            HorizontalDivider()
             groups.forEach { (clientId, rows, total) ->
                 val client = clients.firstOrNull { it.id == clientId } ?: return@forEach
                 Row(
@@ -1004,11 +1055,7 @@ private fun ReadyToBillCard(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = client.name,
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold,
-                        )
+                        Text(text = client.name, style = MaterialTheme.typography.titleSmall)
                         Text(
                             text = "${rows.size} unbilled ${if (rows.size == 1) "visit" else "visits"} · ${money(total)}" +
                                 " · since ${parseDate(rows.first().visitDate)?.formatDayMonth() ?: rows.first().visitDate}",
@@ -1016,26 +1063,20 @@ private fun ReadyToBillCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Surface(
+                    PillButton(
+                        label = "Bill all",
                         onClick = { onCreate(client, rows.map { it.id }) },
                         enabled = !busy,
-                        shape = RoundedCornerShape(JwTokens.chipRadius),
-                        color = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                    ) {
-                        Text(
-                            text = "Bill all",
-                            style = MaterialTheme.typography.labelLarge,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                        )
-                    }
+                        style = PillStyle.Forest,
+                    )
                 }
+                HorizontalDivider()
             }
             Text(
                 text = "Creates one invoice per client from all their unbilled visits. Drafts stay in the list below so you can adjust before sending.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp),
+                modifier = Modifier.padding(top = 10.dp),
             )
         }
     }

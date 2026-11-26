@@ -10,21 +10,17 @@ import androidx.compose.ui.platform.LocalContext
 import uk.co.jwgardenservices.crm.ui.common.JwAlertDialog
 import uk.co.jwgardenservices.crm.data.reminders.ReminderWorker
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
@@ -35,33 +31,20 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -72,9 +55,7 @@ import androidx.navigation.compose.rememberNavController
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
 import uk.co.jwgardenservices.crm.ui.business.BusinessRunningScreen
 import uk.co.jwgardenservices.crm.ui.clients.ClientsScreen
-import uk.co.jwgardenservices.crm.ui.components.BrandMark
 import uk.co.jwgardenservices.crm.ui.common.ActionRow
-import uk.co.jwgardenservices.crm.ui.common.LocalStatusBarInsetConsumed
 import uk.co.jwgardenservices.crm.ui.common.SystemBarAppearance
 import uk.co.jwgardenservices.crm.ui.dashboard.DashboardScreen
 import uk.co.jwgardenservices.crm.ui.enquiries.EnquiriesScreen
@@ -88,6 +69,9 @@ import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 import uk.co.jwgardenservices.crm.ui.visits.VisitsScreen
 import uk.co.jwgardenservices.crm.ui.voice.AssistantScreen
 import uk.co.jwgardenservices.crm.ui.voice.AssistantSettingsScreen
+import uk.co.jwgardenservices.crm.ui.common.AppBottomBar
+import uk.co.jwgardenservices.crm.ui.common.BottomBarEntry
+import uk.co.jwgardenservices.crm.ui.common.SectionLabel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -120,14 +104,13 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
     } else {
         AppDestination.primaryItems
     }
-    // Settings lives in the top bar gear, so it is not repeated here.
+    // Secretary is a tab inside Business, so More does not repeat it.
     val moreItems = if (isStaff) {
         emptyList()
     } else {
         AppDestination.moreItems.filter { it != AppDestination.Secretary }
     }
 
-    val hasBanners = failedWrites.isNotEmpty() || crmState.pendingWrites > 0
     SystemBarAppearance(darkStatusBar = true)
 
     fun navigate(destination: AppDestination) {
@@ -147,70 +130,51 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
         // the reference. Settings and sign-out live in More.
 
         bottomBar = {
-            val moreSelected = moreItems.any { it.route == currentRoute }
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
-                    .navigationBarsPadding(),
-            ) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(68.dp)
-                        .padding(horizontal = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    barItems.forEach { destination ->
-                        BottomBarItem(
-                            label = destination.label,
-                            selected = currentRoute == destination.route,
-                            icon = destination.icon,
-                            modifier = Modifier.weight(1f),
-                            onClick = { navigate(destination) },
-                        )
-                    }
-                    if (moreItems.isNotEmpty()) {
-                        BottomBarItem(
-                            label = "More",
-                            selected = moreSelected,
-                            icon = Icons.Outlined.MoreHoriz,
-                            modifier = Modifier.weight(1f),
-                            onClick = { moreOpen = true },
-                        )
-                    }
-                }
+            val entries = barItems.map { destination ->
+                BottomBarEntry(
+                    label = destination.label,
+                    icon = destination.icon,
+                    selected = currentRoute == destination.route,
+                    onClick = { navigate(destination) },
+                )
+            } + if (moreItems.isNotEmpty()) {
+                listOf(
+                    BottomBarEntry(
+                        label = "More",
+                        icon = Icons.Outlined.MoreHoriz,
+                        selected = moreItems.any { it.route == currentRoute } ||
+                            currentRoute == "assistant-settings",
+                        onClick = { moreOpen = true },
+                    ),
+                )
+            } else {
+                emptyList()
             }
+            AppBottomBar(entries)
         },
     ) { padding ->
+        // The one status-bar layer in the app: a forest strip that every header
+        // continues from. Screens and headers add no inset of their own.
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .padding(padding)
+                .background(JwTheme.colors.forest)
+                .statusBarsPadding()
+                .background(MaterialTheme.colorScheme.background),
         ) {
-            if (hasBanners) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(JwTheme.colors.forest)
-                        .statusBarsPadding(),
-                ) {
-                    if (failedWrites.isNotEmpty()) {
-                        FailedWritesBanner(
-                            count = failedWrites.size,
-                            onClick = { failedOpen = true },
-                        )
-                    }
-                    if (crmState.pendingWrites > 0) {
-                        PendingWritesBanner(
-                            count = crmState.pendingWrites,
-                            offline = crmState.offline,
-                        )
-                    }
-                }
+            if (failedWrites.isNotEmpty()) {
+                FailedWritesBanner(
+                    count = failedWrites.size,
+                    onClick = { failedOpen = true },
+                )
             }
-            CompositionLocalProvider(LocalStatusBarInsetConsumed provides hasBanners) {
+            if (crmState.pendingWrites > 0) {
+                PendingWritesBanner(
+                    count = crmState.pendingWrites,
+                    offline = crmState.offline,
+                )
+            }
             NavHost(
                 navController = navController,
                 startDestination = if (isStaff) {
@@ -276,7 +240,6 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                     }
                 }
             }
-            }
         }
     }
 
@@ -285,7 +248,7 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
             onDismissRequest = { moreOpen = false },
             sheetState = sheetState,
             containerColor = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(JwTokens.bandRadius),
+            shape = RoundedCornerShape(topStart = JwTokens.sheetRadius, topEnd = JwTokens.sheetRadius),
         ) {
             Column(
                 modifier = Modifier
@@ -294,13 +257,9 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                     .padding(horizontal = JwTokens.screenPadding)
                     .padding(bottom = 24.dp),
             ) {
-                Text(
-                    text = "MORE",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                SectionLabel("More")
                 Spacer(Modifier.height(4.dp))
-                Text("Everything else", style = MaterialTheme.typography.titleLarge)
+                Text("Everything else", style = MaterialTheme.typography.headlineSmall)
                 Spacer(Modifier.height(12.dp))
                 moreItems.forEach { destination ->
                     ActionRow(
@@ -313,7 +272,7 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                         },
                     )
                 }
-                HorizontalDivider(Modifier.padding(vertical = 10.dp))
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 ActionRow(
                     title = "Sign out",
                     icon = Icons.AutoMirrored.Outlined.Logout,
@@ -391,59 +350,6 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
 }
 
 @Composable
-private fun BottomBarItem(
-    label: String,
-    selected: Boolean,
-    icon: ImageVector,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    val palette = JwTheme.colors
-    val colour = if (selected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-    }
-    Column(
-        modifier = modifier
-            .fillMaxHeight()
-            .clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Surface(
-            shape = RoundedCornerShape(JwTokens.controlRadius),
-            color = if (selected) palette.forest else Color.Transparent,
-            contentColor = if (selected) palette.onForestMuted else colour,
-        ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = label,
-                    tint = if (selected) palette.brass else colour,
-                    modifier = Modifier.size(19.dp),
-                )
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontSize = 9.sp,
-                        letterSpacing = 0.sp,
-                    ),
-                    color = if (selected) palette.onForestMuted else colour,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                    maxLines = 1,
-                    textAlign = TextAlign.Center,
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun FailedWritesBanner(count: Int, onClick: () -> Unit) {
     Surface(
         modifier = Modifier
@@ -456,7 +362,7 @@ private fun FailedWritesBanner(count: Int, onClick: () -> Unit) {
             text = "$count ${if (count == 1) "change" else "changes"} could not sync — tap to review",
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = JwTokens.screenPadding, vertical = 8.dp),
         )
     }
 }
@@ -465,8 +371,8 @@ private fun FailedWritesBanner(count: Int, onClick: () -> Unit) {
 private fun PendingWritesBanner(count: Int, offline: Boolean) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.secondary,
-        contentColor = MaterialTheme.colorScheme.onSecondary,
+        color = JwTheme.colors.forestRecessed,
+        contentColor = JwTheme.colors.onForestMuted,
     ) {
         Text(
             text = if (offline) {
@@ -475,30 +381,7 @@ private fun PendingWritesBanner(count: Int, offline: Boolean) {
                 "$count ${if (count == 1) "change" else "changes"} waiting to sync"
             },
             style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-        )
-    }
-}
-
-@Composable
-private fun PlaceholderScreen(title: String, description: String) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(title, style = MaterialTheme.typography.displaySmall)
-        Text(
-            text = description,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(12.dp))
-        Text(
-            text = "This screen is next on the rewrite list. The web app remains the working version until it lands.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = JwTokens.screenPadding, vertical = 8.dp),
         )
     }
 }

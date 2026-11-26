@@ -34,10 +34,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import uk.co.jwgardenservices.crm.ui.common.SectionCard
-import uk.co.jwgardenservices.crm.ui.common.SegmentedPills
 import uk.co.jwgardenservices.crm.voice.CalendarSync
 import uk.co.jwgardenservices.crm.voice.CalendarTag
 import uk.co.jwgardenservices.crm.voice.DeviceCalendar
+import uk.co.jwgardenservices.crm.ui.common.SegmentedPillTabs
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 
 /**
  * One setting per calendar, not per event: a Business calendar is read with
@@ -76,7 +77,7 @@ fun CalendarSyncSection() {
         leadingIcon = Icons.Outlined.CalendarMonth,
     ) {
         Column(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier.padding(JwTokens.cardPadding),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
@@ -131,7 +132,7 @@ fun CalendarSyncSection() {
                     }
                 }
                 val selected = tags[calendar.id] ?: CalendarTag.Ignore
-                SegmentedPills(
+                SegmentedPillTabs(
                     options = CalendarTag.entries,
                     selected = selected,
                     onSelect = { tag ->

@@ -22,7 +22,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Business
-import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Email
@@ -75,7 +74,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
@@ -83,19 +81,17 @@ import uk.co.jwgardenservices.crm.data.model.Settings
 import uk.co.jwgardenservices.crm.data.model.TeamMember
 import uk.co.jwgardenservices.crm.data.model.SettingsDraft
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
-import uk.co.jwgardenservices.crm.ui.common.HeaderPillButton
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
-import uk.co.jwgardenservices.crm.ui.common.OptionPicker
-import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
 import uk.co.jwgardenservices.crm.ui.common.SectionCard
-import uk.co.jwgardenservices.crm.ui.common.SegmentedPills
 import uk.co.jwgardenservices.crm.ui.common.SettingSwitchRow
 import uk.co.jwgardenservices.crm.ui.common.ShareText
-import uk.co.jwgardenservices.crm.ui.theme.JwTheme
 import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 import uk.co.jwgardenservices.crm.ui.theme.LocalSetThemeMode
 import uk.co.jwgardenservices.crm.ui.theme.LocalThemeMode
 import uk.co.jwgardenservices.crm.ui.theme.ThemeMode
+import uk.co.jwgardenservices.crm.ui.common.CompactScreenHeader
+import uk.co.jwgardenservices.crm.ui.common.PillButton
+import uk.co.jwgardenservices.crm.ui.common.SegmentedPillTabs
 
 private data class SettingsForm(
     val businessName: String = "Form & Foliage",
@@ -298,18 +294,18 @@ fun SettingsScreen(
 
     if (state.loading) {
         Column(Modifier.fillMaxSize()) {
-            ScreenHeader(title = "Settings", subtitle = "The details that appear on every invoice and quote.")
+            CompactScreenHeader(title = "Settings", subtitle = "Business details and preferences")
             LoadingState(modifier = Modifier.padding(horizontal = JwTokens.screenPadding))
         }
         return
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        ScreenHeader(
+        CompactScreenHeader(
             title = "Settings",
-            subtitle = "The details that appear on every invoice and quote.",
-            topActions = {
-                HeaderPillButton(
+            subtitle = "Business details and preferences",
+            actions = {
+                PillButton(
                     label = if (state.saving) "Saving…" else "Save",
                     enabled = !state.saving,
                     onClick = ::save,
@@ -340,11 +336,11 @@ fun SettingsScreen(
                 leadingIcon = Icons.Outlined.Palette,
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp),
+                    modifier = Modifier.padding(JwTokens.cardPadding),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text("Theme", style = MaterialTheme.typography.titleSmall)
-                    SegmentedPills(
+                    SegmentedPillTabs(
                         options = ThemeMode.entries,
                         selected = themeMode,
                         onSelect = setThemeMode,
@@ -366,7 +362,7 @@ fun SettingsScreen(
                 leadingIcon = Icons.Outlined.Mic,
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp),
+                    modifier = Modifier.padding(JwTokens.cardPadding),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
@@ -391,7 +387,7 @@ fun SettingsScreen(
                 leadingIcon = Icons.Outlined.Business,
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp),
+                    modifier = Modifier.padding(JwTokens.cardPadding),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     // The app is Form & Foliage; the paperwork carries the
@@ -529,7 +525,7 @@ fun SettingsScreen(
                 leadingIcon = Icons.Outlined.Language,
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp),
+                    modifier = Modifier.padding(JwTokens.cardPadding),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     OutlinedTextField(
@@ -576,7 +572,7 @@ fun SettingsScreen(
                 leadingIcon = Icons.Outlined.AutoAwesome,
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp),
+                    modifier = Modifier.padding(JwTokens.cardPadding),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(
@@ -736,7 +732,7 @@ fun SettingsScreen(
                 leadingIcon = Icons.Outlined.Group,
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp),
+                    modifier = Modifier.padding(JwTokens.cardPadding),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(
@@ -818,7 +814,7 @@ fun SettingsScreen(
                 leadingIcon = Icons.AutoMirrored.Outlined.ReceiptLong,
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp),
+                    modifier = Modifier.padding(JwTokens.cardPadding),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     OutlinedTextField(
@@ -875,7 +871,7 @@ fun SettingsScreen(
                 leadingIcon = Icons.Outlined.Savings,
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp),
+                    modifier = Modifier.padding(JwTokens.cardPadding),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(
@@ -908,7 +904,7 @@ fun SettingsScreen(
                 subtitle = "Lock the workspace when the app reopens.",
                 leadingIcon = Icons.Outlined.Lock,
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
+                Column(modifier = Modifier.padding(JwTokens.cardPadding)) {
                     SettingSwitchRow(
                         title = "Require app lock",
                         description = "Ask for your fingerprint or phone PIN when the app reopens.",
@@ -929,7 +925,7 @@ fun SettingsScreen(
                 leadingIcon = Icons.Outlined.FileDownload,
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp),
+                    modifier = Modifier.padding(JwTokens.cardPadding),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(
@@ -978,7 +974,7 @@ fun SettingsScreen(
                 leadingIcon = Icons.Outlined.Email,
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp),
+                    modifier = Modifier.padding(JwTokens.cardPadding),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     OutlinedTextField(
@@ -1011,7 +1007,7 @@ fun SettingsScreen(
                 leadingIcon = Icons.Outlined.RequestQuote,
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp),
+                    modifier = Modifier.padding(JwTokens.cardPadding),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     OutlinedTextField(
