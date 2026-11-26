@@ -39,6 +39,11 @@ object TtsProsody {
 
     private val money = Regex("£(\\d+(?:\\.\\d+)?)")
     private val commaRun = Regex("\\s*,\\s*")
+    private val controlCharacters = Regex("[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F]")
+    private val shortHours = Regex("\\b(\\d+(?:\\.\\d+)?)\\s*(?:h|hr|hrs)\\b", RegexOption.IGNORE_CASE)
+    private val shortMinutes = Regex("\\b(\\d+)\\s*(?:m|min|mins)\\b", RegexOption.IGNORE_CASE)
+    private val parenthetical = Regex("\\(([^)]*)\\)")
+    private val bracketed = Regex("\\[([^]]*)]")
 
     /** Full month names or their usual abbreviations, longest form first. */
     private const val MONTH = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|" +
@@ -99,9 +104,16 @@ object TtsProsody {
         }
     }
 
+    /** Strip pace/control characters before any engine sees the text. */
+    fun clean(text: String): String =
+        controlCharacters.replace(extract(text).second, " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
     /** Lead-in shaping and local pronunciations, safe for every engine. */
     fun smooth(text: String): String {
-        val trimmed = PronunciationDictionary.apply(text.trim())
+        val cleaned = clean(text)
+        val trimmed = PronunciationDictionary.apply(cleaned)
         if (trimmed.isEmpty()) return trimmed
         val match = leadIn.find(trimmed) ?: return trimmed
         val rest = trimmed.substring(match.range.last + 1).trimStart()
@@ -117,6 +129,24 @@ object TtsProsody {
      */
     fun forPhonon(text: String): String {
         var shaped = smooth(text)
+        // Original spoken commas become breath pauses; commas added around a
+        // parenthetical name stay as commas so the aside reads naturally.
+        shaped = commaRun.replace(shaped, " — ")
+        shaped = parenthetical.replace(shaped) { match ->
+            ", ${titleCase(match.groupValues[1])}, "
+        }
+        shaped = bracketed.replace(shaped) { match ->
+            ", ${titleCase(match.groupValues[1])}, "
+        }
+        shaped = shortHours.replace(shaped) { match ->
+            val value = match.groupValues[1]
+            "$value ${if (value == "1") "hour" else "hours"}"
+        }
+        shaped = shortMinutes.replace(shaped) { match ->
+            val value = match.groupValues[1]
+            "$value ${if (value == "1") "minute" else "minutes"}"
+        }
+        shaped = shaped.replace(Regex("\\s+"), " ").replace(Regex("\\s+,"), ",").trim()
         shaped = spokenDates(shaped)
         shaped = weekdayAbbreviation.replace(shaped) { match ->
             weekdayNames[match.groupValues[1].lowercase()] ?: match.value
@@ -124,7 +154,6 @@ object TtsProsody {
         shaped = monthAbbreviation.replace(shaped) { match ->
             monthName(match.groupValues[1])
         }
-        shaped = commaRun.replace(shaped, " — ")
         return money.replace(shaped) { match -> spokenMoney(match.groupValues[1]) }
     }
 
@@ -198,15 +227,23 @@ object TtsProsody {
         val value = raw.toDoubleOrNull() ?: return "$raw pounds"
         val pounds = value.toInt()
         val pence = ((value - pounds) * 100).toInt().coerceIn(0, 99)
-        return when {
-            pounds >= 200 -> "$raw pounds"
-            pence > 0 -> "${words(pounds)} pounds ${penceWords(pence)}"
-            else -> "${words(pounds)} quid"
+        return if (pence > 0) {
+            "$pounds pounds ${penceWords(pence)}"
+        } else {
+            "$pounds pounds"
         }
     }
 
     private fun penceWords(pence: Int): String =
         if (pence < 10) "oh ${words(pence)}" else words(pence)
+
+    private fun titleCase(value: String): String = value
+        .trim()
+        .split(Regex("\\s+"))
+        .filter { it.isNotEmpty() }
+        .joinToString(" ") { word ->
+            word.lowercase().replaceFirstChar { it.uppercase() }
+        }
 
     /** Words for 0-199, British style with the "and". */
     private fun words(value: Int): String = when {

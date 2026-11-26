@@ -56,6 +56,8 @@ enum class KokoroVoice(val speakerId: Int, val label: String) {
 
 /** OpenAI TTS voices supported by `voice-speak`. */
 enum class OpenAiVoice(val id: String, val label: String) {
+    Marin("marin", "Marin — natural, flagship"),
+    Cedar("cedar", "Cedar — warm, grounded"),
     Fable("fable", "Fable — warm British"),
     Onyx("onyx", "Onyx — deep"),
     Nova("nova", "Nova — bright"),
@@ -68,7 +70,7 @@ enum class OpenAiVoice(val id: String, val label: String) {
     ;
 
     companion object {
-        val DEFAULT = Fable
+        val DEFAULT = Marin
     }
 }
 
@@ -80,6 +82,7 @@ private val ONLINE_VOICE_KEY = booleanPreferencesKey("online_voice")
 private val OPENAI_VOICE_KEY = stringPreferencesKey("openai_voice")
 private val PIPER_KEY = stringPreferencesKey("piper_voice")
 private val MIC_SOURCE_KEY = stringPreferencesKey("mic_source")
+private val PREFER_PHONE_MIC_KEY = booleanPreferencesKey("prefer_phone_mic")
 private val PHONON_KEY = booleanPreferencesKey("phonon_enabled")
 private val PICKUP_KEY = booleanPreferencesKey("pickup_greeting")
 private val USED_KEY = booleanPreferencesKey("assistant_used")
@@ -125,7 +128,7 @@ enum class MicSource(val androidSource: Int, val label: String) {
     ),
     Phone(
         MediaRecorder.AudioSource.VOICE_RECOGNITION,
-        "Phone mic (ignore Bluetooth mic)",
+        "Phone mic fallback (headset if present)",
     ),
 }
 
@@ -190,6 +193,23 @@ object AssistantPreferences {
     suspend fun setMicSource(context: Context, source: MicSource) {
         context.assistantDataStore.edit { preferences ->
             preferences[MIC_SOURCE_KEY] = source.name
+        }
+    }
+
+    /**
+     * Record from the phone's built-in VOICE_RECOGNITION mic while Bluetooth
+     * carries the reply as normal media audio over A2DP, rather than opening a
+     * narrowband HFP/SCO link. Off by default so a hands-free headset keeps
+     * its HFP/SCO route; opt in when the headset's own mic is too quiet.
+     */
+    fun preferPhoneMicFlow(context: Context): Flow<Boolean> =
+        context.assistantDataStore.data.map { preferences ->
+            preferences[PREFER_PHONE_MIC_KEY] ?: false
+        }
+
+    suspend fun setPreferPhoneMic(context: Context, enabled: Boolean) {
+        context.assistantDataStore.edit { preferences ->
+            preferences[PREFER_PHONE_MIC_KEY] = enabled
         }
     }
 

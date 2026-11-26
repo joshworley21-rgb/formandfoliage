@@ -19,6 +19,7 @@ import android.os.BatteryManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -43,6 +44,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -145,6 +147,9 @@ class AssistantService : Service() {
     val turns: StateFlow<List<AssistantTurn>> = _turns.asStateFlow()
 
     private var foreground = false
+
+    /** Keeps recognition and speech running while the screen is off. */
+    private var callWakeLock: PowerManager.WakeLock? = null
     private var cloudConversation = true
     private var localThinking = true
     private var drivingMode = false
@@ -153,6 +158,13 @@ class AssistantService : Service() {
     private var bluetoothDriving = false
     private var onlineVoice = false
     private var openAiVoice = OpenAiVoice.DEFAULT
+
+    /**
+     * Keep the reply on HD Bluetooth media audio (A2DP) while capturing from
+     * the phone's own VOICE_RECOGNITION mic, instead of opening narrowband
+     * Bluetooth SCO for the whole call.
+     */
+    private var preferPhoneMic = true
     private var personaTone = PersonaTone.Warm
     private var personaHumour = PersonaHumour.Normal
     private var personaLength = PersonaLength.Normal
@@ -289,18 +301,31 @@ class AssistantService : Service() {
             })
         }
         CrashLog.note(this, TAG, "service created")
-        scope.launch { AssistantPreferences.voiceFlow(this@AssistantService).collect { voice = it; speaker.clearFiller() } }
-        scope.launch { AssistantPreferences.speedFlow(this@AssistantService).collect { speed = it; speaker.clearFiller() } }
-        // Selecting a downloaded Piper voice rebuilds the engine on the next reply.
+        // DataStore re-emits the whole preferences map on any settings write;
+        // distinctUntilChanged keeps unrelated changes from unloading a warm
+        // voice or clearing cached clips mid-call.
         scope.launch {
-            AssistantPreferences.piperVoiceFlow(this@AssistantService).drop(1).collect {
-                speaker.reload()
-            }
+            AssistantPreferences.voiceFlow(this@AssistantService)
+                .distinctUntilChanged()
+                .collect { voice = it; speaker.clearFiller() }
         }
         scope.launch {
-            AssistantPreferences.phononFlow(this@AssistantService).drop(1).collect {
-                speaker.reload()
-            }
+            AssistantPreferences.speedFlow(this@AssistantService)
+                .distinctUntilChanged()
+                .collect { speed = it; speaker.clearFiller() }
+        }
+        // Selecting a downloaded Piper voice rebuilds the engine on the next reply.
+        scope.launch {
+            AssistantPreferences.piperVoiceFlow(this@AssistantService)
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { speaker.reload() }
+        }
+        scope.launch {
+            AssistantPreferences.phononFlow(this@AssistantService)
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { speaker.reload() }
         }
         // Swapping between int8 and the downloaded fp32 model should take
         // effect on the next reply, without restarting the Assistant.
@@ -309,6 +334,7 @@ class AssistantService : Service() {
             // change. Reloading on it unloaded a warm fp32 engine at every
             // call start, which cost several seconds before the first word.
             AssistantPreferences.highQualityFlow(this@AssistantService)
+                .distinctUntilChanged()
                 .drop(1)
                 .collect { speaker.reload() }
         }
@@ -359,6 +385,17 @@ class AssistantService : Service() {
             AssistantPreferences.openAiVoiceFlow(this@AssistantService).collect { openAiVoice = it }
         }
         scope.launch {
+            AssistantPreferences.preferPhoneMicFlow(this@AssistantService)
+                .distinctUntilChanged()
+                .collect {
+                    preferPhoneMic = it
+                    if (_callActive.value) {
+                        routeCallAudio()
+                        refreshInputRoute()
+                    }
+                }
+        }
+        scope.launch {
             AssistantPreferences.pickupFlow(this@AssistantService).collect { pickupGreeting = it }
         }
         scope.launch {
@@ -398,6 +435,7 @@ class AssistantService : Service() {
             _dialling.value = !warm
             if (!warm) ringback.start()
         }
+        acquireCallWakeLock()
         _callActive.value = true
         callActiveNow = true
         mediaSession?.isActive = true
@@ -930,9 +968,9 @@ class AssistantService : Service() {
     private fun startThinkingMask() {
         thinkingMask?.cancel()
         thinkingMask = scope.launch {
-            // A beat first: a local rule answer should not be preceded by
-            // "let me check" when it is already ready.
-            delay(220)
+            // A local answer under this threshold should start immediately;
+            // only a genuinely slow turn earns a thinking clip.
+            delay(450)
             var rounds = 0
             while (_thinking.value && _callActive.value) {
                 CrashLog.note(this@AssistantService, TAG, "thinking filler ${rounds + 1}")
@@ -973,6 +1011,16 @@ class AssistantService : Service() {
      * small talk is left alone so it does not feel like a script.
      */
     private suspend fun sayAnswer(text: String, ending: ReplyEnding = ReplyEnding.None) {
+        // The answer is ready: stop any pending filler before the short
+        // listening beat, so a fast turn never says "let me check" after it
+        // has already answered.
+        thinkingMask?.let { mask ->
+            if (mask.isActive) {
+                mask.cancel()
+                speaker.stopPlayback()
+            }
+        }
+        thinkingMask = null
         // A short beat reads as listening rather than parsing.
         if (!speech.fastPath) delay(180)
         val lead = correctionLead
@@ -984,7 +1032,10 @@ class AssistantService : Service() {
             !drivingMode &&
             personaLength == PersonaLength.Normal &&
             clean.isNotEmpty() &&
-            !clean.endsWith("?")
+            !clean.contains('?') &&
+            !Regex("\\b(which|who|what|where|when)\\b.*" +
+                "\\b(client|name|one|visit|job|invoice)\\b", RegexOption.IGNORE_CASE)
+                .containsMatchIn(clean)
         if (wantsCheckIn) {
             say("$human ${VoiceLines.taskCheckIn()}")
         } else {
@@ -1191,6 +1242,7 @@ class AssistantService : Service() {
         speech.stopListening()
         abandonAudioFocus()
         releaseCallAudio()
+        releaseCallWakeLock()
         runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
         foreground = false
         val summary = CallLedger.actions.value.map { it.label }.take(6).joinToString("; ")
@@ -1221,7 +1273,13 @@ class AssistantService : Service() {
         if (on) {
             val manager = getSystemService(AudioManager::class.java) ?: return
             runCatching {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (preferPhoneMic) {
+                    // No communication device in media mode; the speakerphone
+                    // flag is enough to move the A2DP-style media stream.
+                    manager.mode = AudioManager.MODE_NORMAL
+                    @Suppress("DEPRECATION")
+                    manager.setSpeakerphoneOn(true)
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     val speaker = manager.availableCommunicationDevices.firstOrNull {
                         it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
                     }
@@ -1258,6 +1316,34 @@ class AssistantService : Service() {
         if (_speakerOn.value) return
         val manager = getSystemService(AudioManager::class.java) ?: return
         runCatching {
+            // Prefer-phone-mic: do not open a narrowband SCO link. Leave the
+            // reply on A2DP media audio (MODE_NORMAL) and let the recogniser
+            // use the built-in 16 kHz microphone.
+            if (preferPhoneMic && hasBluetoothOutput(manager)) {
+                val alreadyNormal = manager.mode == AudioManager.MODE_NORMAL &&
+                    (Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                        manager.communicationDevice == null)
+                manager.mode = AudioManager.MODE_NORMAL
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    manager.clearCommunicationDevice()
+                } else {
+                    @Suppress("DEPRECATION")
+                    if (manager.isBluetoothScoOn) {
+                        manager.stopBluetoothSco()
+                        manager.isBluetoothScoOn = false
+                    }
+                    @Suppress("DEPRECATION")
+                    manager.setSpeakerphoneOn(false)
+                }
+                if (!alreadyNormal) {
+                    CrashLog.note(
+                        this,
+                        TAG,
+                        "call audio → bluetooth a2dp (phone mic, MODE_NORMAL)",
+                    )
+                }
+                return@runCatching
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val preferences = listOf(
                     AudioDeviceInfo.TYPE_BLE_HEADSET,
@@ -1268,6 +1354,16 @@ class AssistantService : Service() {
                 val device = manager.availableCommunicationDevices
                     .firstOrNull { it.type in preferences }
                 val current = manager.communicationDevice
+                // A Bluetooth headset needs communication mode for HFP/SCO.
+                // Keep it active so Phonon's AudioTrack leaves over the same
+                // SCO link instead of drifting to A2DP or the earpiece.
+                val btSelected = device?.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    device?.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                    current?.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    current?.type == AudioDeviceInfo.TYPE_BLE_HEADSET
+                if (btSelected && manager.mode != AudioManager.MODE_IN_COMMUNICATION) {
+                    manager.mode = AudioManager.MODE_IN_COMMUNICATION
+                }
                 if (device != null) {
                     if (current?.type != device.type) {
                         manager.setCommunicationDevice(device)
@@ -1299,6 +1395,7 @@ class AssistantService : Service() {
                 }
                 @Suppress("DEPRECATION")
                 if (sco && !manager.isBluetoothScoOn) {
+                    manager.mode = AudioManager.MODE_IN_COMMUNICATION
                     manager.startBluetoothSco()
                     manager.isBluetoothScoOn = true
                     CrashLog.note(this, TAG, "call audio → bluetooth sco (legacy)")
@@ -1317,6 +1414,15 @@ class AssistantService : Service() {
             }
         }.onFailure { CrashLog.record(this, it, "routeCallAudio") }
     }
+
+    /** True when a Bluetooth device can carry media output for this call. */
+    private fun hasBluetoothOutput(manager: AudioManager): Boolean =
+        manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+            it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                it.type == AudioDeviceInfo.TYPE_BLE_SPEAKER
+        }
 
     /**
      * Follow plug and pair events for the length of the call: climbing into
@@ -1432,6 +1538,7 @@ class AssistantService : Service() {
                 @Suppress("DEPRECATION")
                 manager.setSpeakerphoneOn(false)
             }
+            manager.mode = AudioManager.MODE_NORMAL
         }
     }
 
@@ -2406,6 +2513,7 @@ class AssistantService : Service() {
         // initialized" after the call ended.
         abandonAudioFocus()
         releaseCallAudio()
+        releaseCallWakeLock()
         runCatching { mediaSession?.release() }
         mediaSession = null
         scope.cancel()
@@ -2467,6 +2575,34 @@ class AssistantService : Service() {
         }
         focusRequest = null
         audioManager = null
+    }
+
+    /**
+     * A foreground microphone service still lets the CPU doze on some OEMs.
+     * Hold a partial wake lock for the call so the recogniser, ringback and
+     * speech loop keep running with the screen off.
+     */
+    private fun acquireCallWakeLock() {
+        if (callWakeLock?.isHeld == true) return
+        val power = getSystemService(PowerManager::class.java) ?: return
+        callWakeLock = runCatching {
+            power.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "FormAndFoliage:SecretaryCall",
+            ).apply {
+                setReferenceCounted(false)
+                acquire(2 * 60 * 60 * 1000L)
+            }
+        }.getOrNull()
+        CrashLog.note(this, TAG, "call wakelock=${callWakeLock?.isHeld == true}")
+    }
+
+    private fun releaseCallWakeLock() {
+        callWakeLock?.let { lock ->
+            runCatching { if (lock.isHeld) lock.release() }
+            CrashLog.note(this, TAG, "call wakelock released")
+        }
+        callWakeLock = null
     }
 
     private fun startInForeground(text: String = LISTENING_TEXT) {

@@ -155,7 +155,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = true)
     val micSource by AssistantPreferences.micSourceFlow(context)
         .collectAsStateWithLifecycle(initialValue = MicSource.Recognition)
-    val phononEnabled by AssistantPreferences.phononFlow(context)
+    val preferPhoneMic by AssistantPreferences.preferPhoneMicFlow(context)
         .collectAsStateWithLifecycle(initialValue = false)
     val phononState by PhononDownloader.state.collectAsStateWithLifecycle()
     val piperState by PiperVoiceDownloader.state.collectAsStateWithLifecycle()
@@ -299,8 +299,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         }
 
         SectionCard(
-            title = "Phonon 31m (manual alternative)",
-            subtitle = "Whole-call voice, off by default.",
+            title = "Phonon 31m (call voice)",
+            subtitle = "The only in-call TTS engine.",
             leadingIcon = Icons.Outlined.RecordVoiceOver,
         ) {
             Column(
@@ -309,8 +309,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             ) {
                 Text(
                     text = "Phonon 31m is Apache 2.0, about 62 MB, and streams audio while it " +
-                        "speaks on the CPU. It is off by default. Turning it on switches the " +
-                        "whole call to Phonon; fillers, backchannels and replies never mix engines.",
+                        "speaks on the CPU. It is the only in-call voice: fillers, backchannels, " +
+                        "pickups and replies all use the selected Phonon voice.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -331,17 +331,6 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 }
 
                 if (phononInstalled) {
-                    SettingSwitchRow(
-                        title = "Use Phonon for the whole call",
-                        description = "One engine throughout. Kokoro is the default when this is off.",
-                        checked = phononEnabled,
-                        onCheckedChange = { enabled ->
-                            scope.launch {
-                                AssistantPreferences.setPhonon(context, enabled)
-                                KokoroEngine.get(context).reload()
-                            }
-                        },
-                    )
                     Text(
                         text = "Voice",
                         style = MaterialTheme.typography.labelMedium,
@@ -455,7 +444,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         }
                     }
                     OutlinedButton(
-                        enabled = phononEnabled,
+                        enabled = true,
                         onClick = { pickVoiceFile.launch("*/*") },
                     ) { Text("Import custom voice (.safetensors)") }
                     Text(
@@ -468,7 +457,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     )
 
                     TextButton(
-                        enabled = phononEnabled && !voiceDownloading,
+                        enabled = !voiceDownloading,
                         onClick = {
                             previewingVoice = true
                             scope.launch {
@@ -541,120 +530,6 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         }
 
         SectionCard(
-            title = "Kokoro 82M (primary)",
-            subtitle = "Conversational voice.",
-            leadingIcon = Icons.Outlined.VolumeUp,
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "Kokoro int8 runs on four CPU threads and speaks the whole call, " +
-                        "including fillers and backchannels, when Phonon is off. Choose one of " +
-                        "the British voices or the cached cab blend.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OptionPicker(
-                    options = KokoroVoice.entries,
-                    selected = voice,
-                    label = { it?.label ?: KokoroVoice.DEFAULT.label },
-                    onSelect = { selected ->
-                        scope.launch {
-                            AssistantPreferences.setVoice(context, selected)
-                            KokoroEngine.get(context).reload()
-                        }
-                    },
-                )
-                val pickCustomVoice = rememberLauncherForActivityResult(
-                    ActivityResultContracts.GetContent(),
-                ) { uri ->
-                    if (uri == null) return@rememberLauncherForActivityResult
-                    val name = KokoroCustomVoices.import(context, uri)
-                    if (name == null) {
-                        customVoiceError = "That file is not a 510 × 256 float32 Kokoro voice."
-                    } else {
-                        customVoiceError = null
-                        kokoroCustomVoices = KokoroCustomVoices.list(context)
-                        scope.launch {
-                            AssistantPreferences.setCustomKokoroVoice(context, name)
-                            KokoroEngine.get(context).reload()
-                        }
-                    }
-                }
-                Text("Custom voice", style = MaterialTheme.typography.labelMedium)
-                OptionPicker(
-                    options = listOf("") + kokoroCustomVoices.map { it.name },
-                    selected = selectedCustomVoice,
-                    label = { name ->
-                        if (name.isNullOrBlank()) "Built-in voices" else name
-                    },
-                    onSelect = { name ->
-                        scope.launch {
-                            AssistantPreferences.setCustomKokoroVoice(context, name)
-                            KokoroEngine.get(context).reload()
-                        }
-                    },
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedButton(onClick = { pickCustomVoice.launch("*/*") }) {
-                        Text("Import .bin")
-                    }
-                    if (selectedCustomVoice.isNotBlank()) {
-                        OutlinedButton(
-                            onClick = {
-                                val name = selectedCustomVoice
-                                scope.launch {
-                                    KokoroCustomVoices.delete(context, name)
-                                    AssistantPreferences.setCustomKokoroVoice(context, null)
-                                    kokoroCustomVoices = KokoroCustomVoices.list(context)
-                                    KokoroEngine.get(context).reload()
-                                }
-                            },
-                        ) { Text("Remove custom") }
-                    }
-                }
-                Text(
-                    text = "A custom 510 × 256 float32 .bin overrides the built-in voice above. " +
-                        "Files can also be placed in app storage under kokoro-custom.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                customVoiceError?.let {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-                TextButton(
-                    onClick = {
-                        previewingVoice = true
-                        scope.launch {
-                            try {
-                                KokoroEngine.get(context).speak(
-                                    PREVIEW_TEXT,
-                                    voice.speakerId,
-                                    draftSpeed,
-                                )
-                            } catch (_: Exception) {
-                                // The reply path reports its own errors.
-                            } finally {
-                                previewingVoice = false
-                            }
-                        }
-                    },
-                ) {
-                    Text(if (previewingVoice) "Playing sample…" else "Preview Kokoro voice")
-                }
-            }
-        }
-
-        SectionCard(
             title = "Online voice (OpenAI)",
             subtitle = "Cloud voice with offline fallback.",
             leadingIcon = Icons.Outlined.Cloud,
@@ -676,6 +551,11 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     },
                 )
                 Text("OpenAI voice", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    text = "OpenAI recommends Marin or Cedar for the best quality.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 OptionPicker(
                     options = OpenAiVoice.entries,
                     selected = openAiVoice,
@@ -1350,13 +1230,22 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     },
                     label = { it.label },
                 )
+                SettingSwitchRow(
+                    title = "Prefer phone mic over Bluetooth mic",
+                    description = "Keeps replies on HD Bluetooth media audio (A2DP) and " +
+                        "records from the phone's built-in 16 kHz mic instead of opening a " +
+                        "narrowband SCO link. Turn off to use the headset's hands-free mic.",
+                    checked = preferPhoneMic,
+                    onCheckedChange = { enabled ->
+                        scope.launch { AssistantPreferences.setPreferPhoneMic(context, enabled) }
+                    },
+                )
                 Text(
                     text = "Best recognition is the reliable default. Barge-in uses " +
                         "VOICE_COMMUNICATION, which applies echo cancellation but is silent " +
                         "on this Samsung — choose it only if you need to talk over the voice. " +
-                        "On a Bluetooth car kit the car's hands-free mic is used; if it " +
-                        "struggles, try Raw microphone with the phone nearer. Applies on the " +
-                        "next call.",
+                        "With the phone-mic preference on, the mic source above is bypassed " +
+                        "for the built-in mic on a Bluetooth call. Applies on the next call.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

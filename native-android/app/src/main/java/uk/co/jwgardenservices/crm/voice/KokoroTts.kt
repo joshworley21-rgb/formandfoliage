@@ -88,44 +88,14 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         speakerId: Int = KokoroVoice.DEFAULT.speakerId,
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
     ) {
-        val (pace, stripped) = TtsProsody.extract(text)
-        val clean = TtsProsody.smooth(stripped)
+        val clean = TtsProsody.clean(text)
         if (closed || clean.isEmpty()) return
-        if (phononActive()) {
-            val spoken = runCatching { phononSpeech().speak(text, speed) }.getOrDefault(false)
-            if (spoken) return
-            CrashLog.note(context, TAG, "Phonon whole-engine reply failed; using Kokoro")
-        }
-        CrashLog.note(context, TAG, "speak: ${clean.take(80)} (sid=$speakerId, speed=$speed)")
-        speakLock.withLock {
-            if (closed) return@withLock
-            stopRequested = false
-            val engine = ensureEngine()
-            if (engine == null) {
-                // Phonon is an optional fallback, never the conversational
-                // voice while Kokoro is available.
-                if (phononActive()) {
-                    runCatching { phononSpeech().speak(clean) }
-                        .onSuccess { CrashLog.note(context, TAG, "Phonon fallback spoken=$it") }
-                }
-                return@withLock
-            }
-            // Piper voices are single-speaker; Kokoro has 54 slots. Sending Kokoro's
-            // speaker id to a VITS model can index past its table.
-            val sid = speakerFor(engine, speakerId)
-            val audio = withContext(Dispatchers.Default) {
-                generate(engine, 
-                    clean,
-                    sid,
-                    (speed * pace).coerceIn(AssistantPreferences.MIN_SPEED, AssistantPreferences.MAX_SPEED),
-                )
-            }
-            if (!closed) play(audio)
-        }
+        val spoken = runCatching { phononSpeech().speak(text, speed) }.getOrDefault(false)
+        CrashLog.note(context, TAG, "phonon reply spoken=$spoken text=${clean.take(60)}")
     }
 
     /** True when the voice engine is already loaded, so a call can resume fast. */
-    fun isWarm(): Boolean = tts != null || phonon?.isReady == true
+    fun isWarm(): Boolean = phonon?.isReady == true
 
     /**
      * Unload the voice model while the app is backgrounded with no call.
@@ -135,37 +105,12 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         if (closed) return
         runCatching { phonon?.close() }
         phonon = null
-        speakLock.withLock {
-            loadLock.withLock {
-                runCatching { tts?.release() }
-                tts = null
-                pocketReference = null
-                fillers.clear()
-                pickup = null
-                pickupText = null
-                backchannels.clear()
-            }
-        }
     }
 
     /** Load the model in the background so the first reply is not delayed by it. */
     suspend fun warmUp() {
         if (closed) return
-        if (phononActive()) {
-            runCatching { phononSpeech().warmUp() }
-            return
-        }
-        ensureEngine()
-    }
-
-    private suspend fun phononActive(): Boolean {
-        // An explicitly chosen local voice wins over Phonon; clearing it goes
-        // back to Phonon without changing the Phonon toggle.
-        val local = AssistantPreferences.piperVoiceFlow(context).first()
-            ?.takeIf { PiperVoiceDownloader.isInstalled(context, it) }
-        if (local != null) return false
-        return AssistantPreferences.phononFlow(context).first() &&
-            PhononDownloader.isInstalled(context)
+        runCatching { phononSpeech().warmUp() }
     }
 
     private fun phononSpeech(): PhononSpeech =
@@ -181,38 +126,19 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
     ) {
         if (closed) return
-        if (phononActive()) {
-            val filler = FILLER_TEXTS[fillerIndex % FILLER_TEXTS.size]
-            fillerIndex++
-            val spoken = try {
-                phononSpeech().speak(filler)
-            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                // The answer became ready before the filler started; that is
-                // normal, not an error.
-                throw cancelled
-            } catch (error: Exception) {
-                CrashLog.note(context, TAG, "filler Phonon threw: ${error.message}")
-                false
-            }
-            CrashLog.note(context, TAG, "filler Phonon spoken=$spoken")
-            if (spoken) return
-            // Phonon can report success while producing nothing, or fail on
-            // very short text. Fall through to the local cached clip rather
-            // than leaving dead air.
+        val filler = FILLER_TEXTS[fillerIndex % FILLER_TEXTS.size]
+        fillerIndex++
+        val spoken = try {
+            phononSpeech().speak(filler)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            // The answer became ready before the filler started; that is
+            // normal, not an error.
+            throw cancelled
+        } catch (error: Exception) {
+            CrashLog.note(context, TAG, "filler Phonon threw: ${error.message}")
+            false
         }
-        speakLock.withLock {
-            if (closed) return@withLock
-            val engine = ensureEngine() ?: return@withLock
-            val sid = speakerFor(engine, speakerId)
-            val index = fillerIndex % FILLER_TEXTS.size
-            fillerIndex++
-            val audio = fillers[index] ?: withContext(Dispatchers.Default) {
-                generate(engine, FILLER_TEXTS[index], sid, speed)
-            }.also { fillers[index] = it }
-            stopRequested = false
-            val played = play(audio)
-            CrashLog.note(context, TAG, "filler local played=$played text=${FILLER_TEXTS[index]}")
-        }
+        CrashLog.note(context, TAG, "filler Phonon spoken=$spoken")
     }
 
     /**
@@ -226,20 +152,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         text: String = VoiceLines.backchannel(),
     ) {
         if (closed) return
-        if (phononActive()) {
-            runCatching { phononSpeech().speak(text) }
-            return
-        }
-        speakLock.withLock {
-            if (closed) return@withLock
-            val engine = ensureEngine() ?: return@withLock
-            val sid = speakerFor(engine, speakerId)
-            val audio = backchannels[text] ?: withContext(Dispatchers.Default) {
-                generate(engine, text, sid, speed)
-            }.also { backchannels[text] = it }
-            stopRequested = false
-            play(audio, volume = 0.35f)
-        }
+        runCatching { phononSpeech().speak(text) }
     }
 
     /**
@@ -252,37 +165,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         pickupText: String = VoiceLines.pickup(),
     ) {
         if (closed) return
-        if (phononActive()) {
-            runCatching { phononSpeech().warmUp() }
-            return
-        }
-        speakLock.withLock {
-            if (closed) return@withLock
-            val engine = ensureEngine() ?: return@withLock
-            val sid = speakerFor(engine, speakerId)
-            // The four phrases the turn loop reaches for first, plus both
-            // backchannels, are pre-synthesised with the exact active voice.
-            FILLER_TEXTS.take(4).forEachIndexed { index, text ->
-                if (fillers[index] == null) {
-                    fillers[index] = withContext(Dispatchers.Default) {
-                        generate(engine, text, sid, speed)
-                    }
-                }
-            }
-            VoiceLines.BACKCHANNELS.forEach { text ->
-                if (!backchannels.containsKey(text)) {
-                    backchannels[text] = withContext(Dispatchers.Default) {
-                        generate(engine, text, sid, speed)
-                    }
-                }
-            }
-            if (pickup == null || this@KokoroTts.pickupText != pickupText) {
-                pickup = withContext(Dispatchers.Default) {
-                    generate(engine, pickupText, sid, speed)
-                }
-                this@KokoroTts.pickupText = pickupText
-            }
-        }
+        runCatching { phononSpeech().warmUp() }
     }
 
     /** Answer the call with the greeting, using the cached clip when warm. */
@@ -292,28 +175,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         text: String = VoiceLines.pickup(),
     ): Boolean {
         if (closed) return false
-        if (phononActive()) {
-            val spoken = runCatching { phononSpeech().speak(text, speed) }.getOrDefault(false)
-            if (spoken) return true
-            CrashLog.note(context, TAG, "Phonon whole-engine pickup failed; using Kokoro")
-        }
-        return speakLock.withLock {
-            if (closed) return@withLock false
-            val engine = ensureEngine() ?: return@withLock false
-            val sid = speakerFor(engine, speakerId)
-            val audio = if (pickup != null && pickupText == text) {
-                pickup!!
-            } else {
-                withContext(Dispatchers.Default) {
-                    generate(engine, text, sid, speed)
-                }.also {
-                    pickup = it
-                    pickupText = text
-                }
-            }
-            stopRequested = false
-            play(audio)
-        }
+        return runCatching { phononSpeech().speak(text, speed) }.getOrDefault(false)
     }
 
     /**
@@ -324,18 +186,8 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         speakerId: Int = KokoroVoice.DEFAULT.speakerId,
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
     ) {
-        if (closed || phononActive()) return
-        speakLock.withLock {
-            if (closed) return@withLock
-            val engine = ensureEngine() ?: return@withLock
-            val sid = speakerFor(engine, speakerId)
-            for (index in 4 until FILLER_TEXTS.size) {
-                if (fillers[index] != null) continue
-                fillers[index] = withContext(Dispatchers.Default) {
-                    generate(engine, FILLER_TEXTS[index], sid, speed)
-                }
-            }
-        }
+        if (closed) return
+        runCatching { phononSpeech().warmUp() }
     }
 
     /** Drop the cached clips when the voice or speed changes. */
@@ -357,80 +209,23 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         speakerId: Int = KokoroVoice.DEFAULT.speakerId,
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
     ) {
-        val (_, stripped) = TtsProsody.extract(text)
-        val clean = TtsProsody.smooth(stripped)
+        val clean = TtsProsody.clean(text)
         if (closed || clean.isEmpty()) return
         val chunks = speechChunks(clean)
         val base = speed * ClauseProsody.BASE_SPEED
         stopRequested = false
-        if (phononActive()) {
-            var spokenAny = false
-            chunks.forEachIndexed { index, chunk ->
-                if (closed || stopRequested) return
-                val clauseSpeed = (base * ClauseProsody.speedMultiplier(chunk))
-                    .coerceIn(0.5f, 1.6f)
-                val spoken = runCatching { phononSpeech().speak(chunk, clauseSpeed) }
-                    .getOrDefault(false)
-                spokenAny = spokenAny || spoken
-                if (!spoken) return@forEachIndexed
-                if (index < chunks.lastIndex) delay(ClauseProsody.BREATH_MS.toLong())
-            }
-            if (spokenAny) return
-            CrashLog.note(context, TAG, "Phonon whole-engine clauses failed; using Kokoro")
+        var spokenAny = false
+        chunks.forEachIndexed { index, chunk ->
+            if (closed || stopRequested) return
+            val clauseSpeed = (base * ClauseProsody.speedMultiplier(chunk))
+                .coerceIn(0.5f, 1.6f)
+            val spoken = runCatching { phononSpeech().speak(chunk, clauseSpeed) }
+                .getOrDefault(false)
+            spokenAny = spokenAny || spoken
+            if (!spoken) return@forEachIndexed
+            if (index < chunks.lastIndex) delay(ClauseProsody.BREATH_MS.toLong())
         }
-        if (chunks.size <= 1) {
-            val chunk = chunks.firstOrNull() ?: clean
-            speak(
-                chunk,
-                speakerId,
-                (base * ClauseProsody.speedMultiplier(chunk))
-                    .coerceIn(0.5f, 1.6f),
-            )
-            return
-        }
-        CrashLog.note(context, TAG, "speakStreaming: ${chunks.size} clauses")
-        speakLock.withLock {
-            if (closed) return@withLock
-            stopRequested = false
-            val engine = ensureEngine()
-            if (engine == null) {
-                if (phononActive()) {
-                    runCatching { phononSpeech().speak(clean) }
-                }
-                return@withLock
-            }
-            val sid = speakerFor(engine, speakerId)
-            coroutineScope {
-                val audio = Channel<Pair<GeneratedAudio, Int>>(2)
-                val producer = launch(Dispatchers.Default) {
-                    try {
-                        for ((index, chunk) in chunks.withIndex()) {
-                            if (stopRequested || closed) break
-                            val clauseSpeed = (base *
-                                ClauseProsody.speedMultiplier(chunk))
-                                .coerceIn(0.5f, 1.6f)
-                            val breath = if (index < chunks.lastIndex) {
-                                ClauseProsody.BREATH_MS
-                            } else {
-                                0
-                            }
-                            audio.send(generate(engine, chunk, sid, clauseSpeed) to breath)
-                        }
-                    } finally {
-                        audio.close()
-                    }
-                }
-                try {
-                    for ((generated, breath) in audio) {
-                        if (stopRequested || closed) break
-                        play(generated, trailingSilenceMs = breath)
-                    }
-                } finally {
-                    producer.cancel()
-                    audio.close()
-                }
-            }
-        }
+        CrashLog.note(context, TAG, "phonon clauses spoken=$spokenAny")
     }
 
     /** Cut playback short, e.g. when a phone call takes the audio focus. */
@@ -465,17 +260,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         if (closed) return
         runCatching { phonon?.close() }
         phonon = null
-        speakLock.withLock {
-            loadLock.withLock {
-                runCatching { tts?.release() }
-                tts = null
-                fillers.clear()
-                backchannels.clear()
-                pickup = null
-                pickupText = null
-            }
-        }
-        CrashLog.note(context, TAG, "engine reloaded after a voice change")
+        CrashLog.note(context, TAG, "Phonon voice reloaded")
     }
 
     private suspend fun ensureEngine(): OfflineTts? {
@@ -860,10 +645,10 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             val sentenceEnd = last == '.' || last == '!' || last == '?'
             val clauseEnd = last == ',' || last == ';' || last == ':' || last == '—' ||
                 last == '–'
-            // Flush at a sentence boundary, after a clause once there are four
-            // words to say, or at six words regardless. The first audio then
-            // starts a clause earlier on longer replies.
-            if (sentenceEnd || words >= 6 || (clauseEnd && words >= 4)) {
+            // Group 10–18 words per clause. Short replies stay one chunk;
+            // longer replies breathe at natural punctuation instead of every
+            // few words.
+            if (sentenceEnd || words >= 18 || (clauseEnd && words >= 10)) {
                 chunks += buffer.toString()
                 buffer.setLength(0)
                 words = 0

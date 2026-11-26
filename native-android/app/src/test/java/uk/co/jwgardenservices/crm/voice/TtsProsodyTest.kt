@@ -31,15 +31,25 @@ class TtsProsodyTest {
     @Test
     fun `phonon money reads like a tradesperson`() {
         val shaped = TtsProsody.forPhonon("Draft invoice for Simon, £180.")
-        assertTrue(shaped.contains("one hundred and eighty quid"))
+        assertTrue(shaped.contains("180 pounds"))
         assertTrue(!shaped.contains("£"))
 
         val pence = TtsProsody.forPhonon("Logged 2 hours, £87.50.")
-        assertTrue(pence.contains("eighty seven pounds fifty"))
+        assertTrue(pence.contains("87 pounds fifty"))
 
         val large = TtsProsody.forPhonon("In drafts: £845.")
         assertTrue(large.contains("845 pounds"))
         assertTrue(!large.contains("£845"))
+    }
+
+    @Test
+    fun `control characters, shorthand and parentheticals are spoken naturally`() {
+        val shaped = TtsProsody.forPhonon("Logged 5 h for Hazel (Badgers oak), £175.00.")
+        assertTrue(shaped.contains("5 hours"))
+        assertTrue(shaped.contains("Badgers Oak"))
+        assertTrue(shaped.contains("175 pounds"))
+        assertTrue(!shaped.contains(""))
+        assertTrue(!shaped.contains("("))
     }
 
     @Test

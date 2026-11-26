@@ -110,6 +110,69 @@ private class InputAgc {
         get() = (20.0 * log10(gain.coerceAtLeast(0.001f).toDouble())).toFloat()
 }
 
+/**
+ * Wind and handling-noise control for a Bluetooth HFP/SCO headset.
+ *
+ * Hardware AGC is usually unavailable on that route, so a 100 Hz single-pole
+ * high-pass removes the low rumble first, then a light AGC lifts the voice
+ * toward RMS 0.12. The gain is limited to 1.5–3.5x and ramped per 100 ms frame,
+ * so it does not pump or suddenly amplify a gust of wind. The result is
+ * softly clipped to ±1.0 before it reaches Silero VAD or Moonshine.
+ */
+private class HeadsetAudio {
+    private var lastInput = 0f
+    private var lastOutput = 0f
+    private var gain = 2.2f
+
+    fun reset() {
+        lastInput = 0f
+        lastOutput = 0f
+        gain = 2.2f
+    }
+
+    fun process(raw: FloatArray): FloatArray {
+        if (raw.isEmpty()) return raw
+        val filtered = FloatArray(raw.size)
+        var energy = 0.0
+        for (index in raw.indices) {
+            val sample = raw[index]
+            val out = HPF_ALPHA * (lastOutput + sample - lastInput)
+            lastInput = sample
+            lastOutput = out
+            filtered[index] = out
+            energy += out * out
+        }
+        val rms = sqrt(energy / raw.size).toFloat()
+        val desired = if (rms < 0.0025f) {
+            1.5f
+        } else {
+            (TARGET_RMS / rms).coerceIn(MIN_GAIN, MAX_GAIN).toFloat()
+        }
+        // ~100 ms frame smoothing: a gust cannot jump the gain to maximum.
+        gain += (desired - gain) * 0.25f
+        return FloatArray(raw.size) { index ->
+            softClip(filtered[index] * gain)
+        }
+    }
+
+    private fun softClip(value: Float): Float {
+        val magnitude = kotlin.math.abs(value)
+        if (magnitude <= 0.9f) return value
+        val over = (magnitude - 0.9f) / 0.1f
+        val shaped = 0.9f + 0.1f * kotlin.math.tanh(over.toDouble()).toFloat()
+        return if (value < 0f) -shaped else shaped
+    }
+
+    private companion object {
+        const val TARGET_RMS = 0.12f
+        const val MIN_GAIN = 1.5f
+        const val MAX_GAIN = 3.5f
+
+        /** 100 Hz one-pole high-pass at 16 kHz. */
+        const val HPF_ALPHA = 0.9622f
+    }
+}
+
 class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     enum class Phase {
@@ -236,6 +299,14 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @Volatile
     private var silentFallbackSource: MicSource? = null
 
+    /** True when the owner prefers the phone mic over a Bluetooth HFP mic. */
+    @Volatile
+    private var preferPhoneMic = false
+
+    /** True when this session explicitly pinned the built-in microphone. */
+    @Volatile
+    private var forcedBuiltInMic = false
+
     /** Quiet "Mm-hmm" while the owner is talking; wired headsets only. */
     @Volatile
     var onBackchannel: (() -> Unit)? = null
@@ -245,6 +316,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     private var listenWanted = false
 
     private var gainController: AutomaticGainControl? = null
+
+    /** Wind filter + light AGC for Bluetooth HFP/SCO capture. */
+    private val headsetAudio = HeadsetAudio()
 
     @Volatile
     private var pausedAt = 0L
@@ -555,6 +629,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         try {
         if (released || listening) return
         listenWanted = true
+        headsetAudio.reset()
 
         val selected = engineOverride
             ?: AssistantPreferences.asrEngineFlow(context).first()
@@ -591,13 +666,24 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         }
 
         val savedSource = AssistantPreferences.micSourceFlow(context).first()
-        val micSource = silentFallbackSource ?: savedSource
+        // The preference only applies to Bluetooth calls; without a headset
+        // the owner's chosen mic source is left alone.
+        val preferSetting = AssistantPreferences.preferPhoneMicFlow(context).first()
+        val bluetoothConnected = context.getSystemService(AudioManager::class.java)
+            ?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            ?.any { it.type in BLUETOOTH_OUTPUT_TYPES } == true
+        preferPhoneMic = preferSetting && bluetoothConnected
+        // Prefer-phone-mic captures on the built-in VOICE_RECOGNITION source
+        // at 16 kHz while Bluetooth carries the reply as normal media audio.
+        val micSource = silentFallbackSource
+            ?: if (preferPhoneMic) MicSource.Phone else savedSource
         bargeEnabled = true
         CrashLog.note(
             context,
             TAG,
             "mic=${micSource.name}" +
                 when {
+                    preferPhoneMic -> " (prefer phone mic)"
                     silentFallbackSource != null -> " (silent-source fallback from ${savedSource.name})"
                     else -> ""
                 },
@@ -610,7 +696,51 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             return
         }
         audioRecord = record
-        val onHeadset = record.routedDevice?.type in setOf(
+        // With prefer-phone-mic on, always pin the built-in microphone. With it
+        // off, a connected headset is the cleanest mic on a call and is kept;
+        // the built-in mic is forced only when there is no headset.
+        forcedBuiltInMic = false
+        if (micSource == MicSource.Phone || preferPhoneMic) {
+            val manager = context.getSystemService(AudioManager::class.java)
+            val inputs = manager?.getDevices(AudioManager.GET_DEVICES_INPUTS).orEmpty()
+            val headset = inputs.firstOrNull {
+                it.type in setOf(
+                    AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                    AudioDeviceInfo.TYPE_BLE_HEADSET,
+                    AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                    AudioDeviceInfo.TYPE_USB_HEADSET,
+                    AudioDeviceInfo.TYPE_USB_DEVICE,
+                )
+            }
+            if (preferPhoneMic || headset == null) {
+                val builtIn = inputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
+                if (builtIn != null) {
+                    runCatching { record.setPreferredDevice(builtIn) }
+                    forcedBuiltInMic = true
+                    CrashLog.note(
+                        context,
+                        TAG,
+                        if (preferPhoneMic) {
+                            "phone mic forced (prefer phone mic, ${builtIn.productName})"
+                        } else {
+                            "phone mic forced (preferred ${builtIn.productName})"
+                        },
+                    )
+                } else {
+                    CrashLog.note(context, TAG, "no built-in mic found; using the route default")
+                }
+            } else {
+                CrashLog.note(
+                    context,
+                    TAG,
+                    "headset mic kept (${headset.productName}); phone mic not forced",
+                )
+            }
+        }
+        // Classify the guard from the route the record actually got, not the
+        // saved preference. A forced built-in mic must not inherit the
+        // sensitive headset threshold from a headset that is merely paired.
+        val onHeadset = !forcedBuiltInMic && record.routedDevice?.type in setOf(
             android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
             android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
             android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
@@ -637,17 +767,6 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 "threshold=${"%.3f".format(bargeRmsThreshold)} " +
                 "frames=$bargeFramesNeeded grace=${bargeGraceMs}ms",
         )
-        // A car HFP mic is convenient but noisy; this option keeps output on
-        // the car while capturing from the phone itself.
-        if (micSource == MicSource.Phone) {
-            val manager = context.getSystemService(AudioManager::class.java)
-            val builtIn = manager?.getDevices(AudioManager.GET_DEVICES_INPUTS)
-                ?.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
-            if (builtIn != null) {
-                runCatching { record.setPreferredDevice(builtIn) }
-                CrashLog.note(context, TAG, "phone mic forced (preferred ${builtIn.productName})")
-            }
-        }
         listening = true
         paused = false
         _state.update { it.copy(phase = Phase.Listening, message = null, partial = "") }
@@ -763,10 +882,26 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @SuppressLint("MissingPermission") // checked by startListening before this point
     private fun process(engine: OnlineRecognizer, record: AudioRecord) {
         val stream = engine.createStream()
-        // A car's hands-free mic is noisier than a desk; a low threshold makes
-        // Silero hear road noise as speech for the whole journey.
-        val onBluetooth = record.routedDevice?.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
-        val vad = createVad(if (onBluetooth) 0.5f else 0.25f)
+        // A Bluetooth HFP/BLE mic is usually quiet and noisy; the software
+        // gain lifts it and the VAD threshold stays low enough to hear speech.
+        val onBluetooth = record.routedDevice?.type in BLUETOOTH_INPUT_TYPES
+        val headsetRoute = !forcedBuiltInMic &&
+            record.routedDevice?.type in HEADSET_ROUTE_TYPES
+        val fallbackGain = if (gainController == null) SOFTWARE_MIC_GAIN else 1f
+        val vad = createVad(
+            if (headsetRoute) VAD_THRESHOLD_HEADSET else VAD_THRESHOLD_SPEAKER,
+        )
+        CrashLog.note(
+            context,
+            TAG,
+            if (headsetRoute) {
+                "mic HPF+AGC (100Hz, target=0.12, 1.5-3.5x) " +
+                    "vad=${"%.2f".format(VAD_THRESHOLD_HEADSET)}"
+            } else {
+                "mic gain=${"%.1f".format(fallbackGain)}x " +
+                    "vad=${"%.2f".format(VAD_THRESHOLD_SPEAKER)}"
+            },
+        )
         var hasSpeech = false
         var producedText = false
         var quietSignalBeats = 0
@@ -849,7 +984,12 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                         pausePreRoll.addLast(buffer[index])
                     }
                     while (pausePreRoll.size > PAUSE_PRE_ROLL_SAMPLES) pausePreRoll.removeFirst()
-                    val pausedSamples = FloatArray(read) { buffer[it] / 32768.0f }
+                    val pausedRaw = FloatArray(read) { buffer[it] / 32768.0f }
+                    val pausedSamples = if (headsetRoute) {
+                        headsetAudio.process(pausedRaw)
+                    } else {
+                        boosted(pausedRaw, fallbackGain)
+                    }
                     vad?.acceptWaveform(pausedSamples)
                     val bargeVoiced = vad?.isSpeechDetected() == true
                     if (maybeBargeIn(buffer, read, bargeVoiced)) {
@@ -903,7 +1043,11 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 }
                 // AGC, not a step ladder: it follows the voice instead of the
                 // quietest recent frame, and never attenuates loud speech.
-                val samples = agc.process(raw)
+                val samples = if (headsetRoute) {
+                    headsetAudio.process(raw)
+                } else {
+                    agc.process(boosted(raw, fallbackGain))
+                }
                 vad?.acceptWaveform(samples)
                 val vadVoiced = vad?.isSpeechDetected() == true
                 // Silero misses quiet speech; raw RMS does not. Either is
@@ -1089,8 +1233,24 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
      * endpoint. A 0.4 s pre-roll keeps the first syllable.
      */
     private fun processOffline(record: AudioRecord) {
-        val onBluetooth = record.routedDevice?.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
-        val vad = createVad(if (onBluetooth) 0.5f else 0.25f)
+        val onBluetooth = record.routedDevice?.type in BLUETOOTH_INPUT_TYPES
+        val headsetRoute = !forcedBuiltInMic &&
+            record.routedDevice?.type in HEADSET_ROUTE_TYPES
+        val fallbackGain = if (gainController == null) SOFTWARE_MIC_GAIN else 1f
+        val vad = createVad(
+            if (headsetRoute) VAD_THRESHOLD_HEADSET else VAD_THRESHOLD_SPEAKER,
+        )
+        CrashLog.note(
+            context,
+            TAG,
+            if (headsetRoute) {
+                "moonshine mic HPF+AGC (100Hz, target=0.12, 1.5-3.5x) " +
+                    "vad=${"%.2f".format(VAD_THRESHOLD_HEADSET)}"
+            } else {
+                "moonshine mic gain=${"%.1f".format(fallbackGain)}x " +
+                    "vad=${"%.2f".format(VAD_THRESHOLD_SPEAKER)}"
+            },
+        )
         var hasSpeech = false
         var lastVoiceAt = 0L
         var pausedClean = false
@@ -1141,7 +1301,12 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                         pausePreRoll.addLast(buffer[index])
                     }
                     while (pausePreRoll.size > PAUSE_PRE_ROLL_SAMPLES) pausePreRoll.removeFirst()
-                    val pausedSamples = FloatArray(read) { buffer[it] / 32768.0f }
+                    val pausedRaw = FloatArray(read) { buffer[it] / 32768.0f }
+                    val pausedSamples = if (headsetRoute) {
+                        headsetAudio.process(pausedRaw)
+                    } else {
+                        boosted(pausedRaw, fallbackGain)
+                    }
                     vad?.acceptWaveform(pausedSamples)
                     val bargeVoiced = vad?.isSpeechDetected() == true
                     if (maybeBargeIn(buffer, read, bargeVoiced)) {
@@ -1149,9 +1314,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                         // seed it with the pre-roll (oldest first) so "Yep"
                         // decodes whole.
                         for (sample in pausePreRoll) utterance.add(sample / 32768.0f)
-                        for (index in 0 until read) {
-                            utterance.add(buffer[index] / 32768.0f)
-                        }
+                        for (sample in pausedSamples) utterance.add(sample)
                         pausePreRoll.clear()
                         hasSpeech = true
                         lastVoiceAt = SystemClock.elapsedRealtime()
@@ -1181,7 +1344,11 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 } else {
                     noiseFloor * 0.999f + frameRms * 0.001f
                 }
-                val samples = agc.process(raw)
+                val samples = if (headsetRoute) {
+                    headsetAudio.process(raw)
+                } else {
+                    agc.process(boosted(raw, fallbackGain))
+                }
                 vad?.acceptWaveform(samples)
                 // Energy fallback: Silero misses quiet phone speech, but the
                 // floor keeps a car's road noise from opening a turn.
@@ -1214,27 +1381,56 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 } else {
                     if (voiced) lastVoiceAt = now
                     for (sample in samples) utterance.add(sample)
-                    // Moonshine has no live partials, so it cannot use the
-                    // word-aware endpointer: use the patient wait so a
-                    // thought is never cut off between utterances.
-                    val waitMs = SmartEndpointing.PATIENT_MS +
+                    // Moonshine has no live partials. End quickly after the
+                    // VAD hears silence instead of buffering seconds of dead
+                    // air and decoding an empty window.
+                    val waitMs = OFFLINE_ENDPOINT_MS +
                         if (onBluetooth) SmartEndpointing.BLUETOOTH_EXTRA_MS else 0L
                     val endpoint = !voiced && now - lastVoiceAt >= waitMs
                     if (endpoint || utterance.size >= MAX_UTTERANCE_SAMPLES) {
-                        val text = decodeOffline(utterance)
-                        utterance.clear()
-                        hasSpeech = false
-                        vad?.reset()
-                        if (text.isNotEmpty()) {
-                            pauseForSpeech()
-                            // Decoding blocked the loop, so the record buffer
-                            // holds pre-decode audio. Flush it before the next
-                            // listening turn so it cannot become a phantom line.
-                            runCatching {
-                                record.stop()
-                                record.startRecording()
+                        var utterEnergy = 0.0
+                        for (sample in utterance) utterEnergy += sample * sample
+                        val utterRms = sqrt(
+                            utterEnergy / utterance.size.coerceAtLeast(1),
+                        ).toFloat()
+                        val speech = trimSpeech(
+                            utterance,
+                            maxOf(RMS_SPEECH_THRESHOLD, noiseFloor * 1.6f),
+                        )
+                        if (utterRms < POST_GAIN_MIN_RMS || speech.speechMs < MIN_SPEECH_MS) {
+                            CrashLog.note(
+                                context,
+                                TAG,
+                                "moonshine skipped blank turn " +
+                                    "rms=${"%.4f".format(utterRms)} " +
+                                    "speech=${speech.speechMs}ms",
+                            )
+                            utterance.clear()
+                            hasSpeech = false
+                            vad?.reset()
+                            // A click used to mark sawSignal forever, which
+                            // disabled the no-mic-sound detector for the rest
+                            // of the call. Restart that watch on a blank turn.
+                            sawSignal = false
+                            silentFrames = 0
+                            silentPeak = 0f
+                        } else {
+                            val text = decodeOffline(speech.samples)
+                            utterance.clear()
+                            hasSpeech = false
+                            vad?.reset()
+                            if (text.isNotEmpty()) {
+                                pauseForSpeech()
+                                // Decoding blocked the loop, so the record
+                                // buffer holds pre-decode audio. Flush it
+                                // before the next listening turn so it cannot
+                                // become a phantom line.
+                                runCatching {
+                                    record.stop()
+                                    record.startRecording()
+                                }
+                                publish(text)
                             }
-                            publish(text)
                         }
                     }
                 }
@@ -1375,11 +1571,60 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     }
 
     /**
+     * Bluetooth SCO/BLE mic audio arrives quiet because the platform's AGC is
+     * often unavailable. Lift it before VAD and the recogniser see it, with a
+     * hard clamp so a loud transient cannot overflow the float pipeline.
+     */
+    private fun boosted(samples: FloatArray, gain: Float): FloatArray {
+        if (gain == 1f) return samples
+        return FloatArray(samples.size) { (samples[it] * gain).coerceIn(-1f, 1f) }
+    }
+
+    private data class TrimmedSpeech(val samples: List<Float>, val speechMs: Long)
+
+    /**
+     * Trim leading and trailing near-silence in 20 ms frames. The returned
+     * speechMs counts only frames above [threshold], so a buffer of clicks or
+     * room noise is rejected before Moonshine is asked to decode it.
+     */
+    private fun trimSpeech(samples: List<Float>, threshold: Float): TrimmedSpeech {
+        if (samples.isEmpty()) return TrimmedSpeech(emptyList(), 0L)
+        val frame = SAMPLE_RATE / 50
+        var first = -1
+        var last = -1
+        var voicedFrames = 0
+        var start = 0
+        while (start < samples.size) {
+            val end = minOf(start + frame, samples.size)
+            var energy = 0.0
+            for (index in start until end) {
+                val sample = samples[index]
+                energy += sample * sample
+            }
+            val rms = sqrt(energy / (end - start)).toFloat()
+            if (rms >= threshold) {
+                if (first < 0) first = start
+                last = end
+                voicedFrames++
+            }
+            start = end
+        }
+        if (first < 0) return TrimmedSpeech(emptyList(), 0L)
+        val pad = SAMPLE_RATE / 10
+        val clip = samples.subList(
+            maxOf(0, first - pad),
+            minOf(samples.size, last + pad),
+        )
+        val speechMs = voicedFrames.toLong() * frame * 1000L / SAMPLE_RATE
+        return TrimmedSpeech(clip, speechMs)
+    }
+
+    /**
      * Silero VAD decides when the owner has stopped, instead of relying only
      * on the recognizer's trailing-silence heuristic. Loaded from assets; if
      * it cannot be created, the recognizer's endpoint still ends the turn.
      */
-    private fun createVad(threshold: Float = 0.25f): Vad? {
+    private fun createVad(threshold: Float = VAD_THRESHOLD_SPEAKER): Vad? {
         // Real file path, like the ASR model: the AssetManager buffer path is
         // unreliable and a wrong native path can abort the process.
         val modelFile = runCatching { copyVadAsset() }.getOrElse { error ->
@@ -1391,7 +1636,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 sileroVadModelConfig = SileroVadModelConfig(
                     model = modelFile.absolutePath,
                     threshold = threshold,
-                    minSilenceDuration = 0.3f,
+                    minSilenceDuration = VAD_MIN_SILENCE_SECONDS,
                     minSpeechDuration = 0.15f,
                     windowSize = 512,
                     maxSpeechDuration = 10f,
@@ -1552,7 +1797,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         const val BARGE_GRACE_MS = 350L
 
         /** Sustained speech-level energy for 3 × 100 ms means a real interruption. */
-        const val BARGE_RMS = 0.04
+        const val BARGE_RMS = 0.045
         const val BARGE_FRAMES = 3
 
         /** A loudspeaker needs a clearly louder, longer interruption. */
@@ -1567,8 +1812,42 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
          */
         const val RMS_SPEECH_THRESHOLD = 0.008f
 
-        /** Audio kept before VAD reports speech, so the first word is not clipped. */
-        const val PRE_ROLL_SAMPLES = SAMPLE_RATE * 4 / 10
+        /** 250 ms kept before VAD reports speech, so the first word is not clipped. */
+        const val PRE_ROLL_SAMPLES = SAMPLE_RATE * 25 / 100
+
+        /** Fixed lift for a quiet Bluetooth headset or a missing platform AGC. */
+        const val SOFTWARE_MIC_GAIN = 2.2f
+
+        /** Silero speech thresholds: headsets are quiet, the speaker is noisy. */
+        const val VAD_THRESHOLD_HEADSET = 0.28f
+        const val VAD_THRESHOLD_SPEAKER = 0.25f
+
+        /** End a turn 400 ms after the VAD hears silence. */
+        const val VAD_MIN_SILENCE_SECONDS = 0.4f
+        const val OFFLINE_ENDPOINT_MS = 400L
+
+        /** Reject post-gain buffers that are effectively flat or too short. */
+        const val POST_GAIN_MIN_RMS = 0.015f
+        const val MIN_SPEECH_MS = 250L
+
+        val BLUETOOTH_INPUT_TYPES = setOf(
+            android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            android.media.AudioDeviceInfo.TYPE_BLE_HEADSET,
+        )
+
+        val BLUETOOTH_OUTPUT_TYPES = setOf(
+            android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+            android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            android.media.AudioDeviceInfo.TYPE_BLE_HEADSET,
+            android.media.AudioDeviceInfo.TYPE_BLE_SPEAKER,
+        )
+
+        val HEADSET_ROUTE_TYPES = BLUETOOTH_INPUT_TYPES + setOf(
+            android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+            android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
+            android.media.AudioDeviceInfo.TYPE_USB_DEVICE,
+        )
 
         /** How much pre-barge audio is replayed into the recogniser. */
         const val PAUSE_PRE_ROLL_SAMPLES = SAMPLE_RATE * 2

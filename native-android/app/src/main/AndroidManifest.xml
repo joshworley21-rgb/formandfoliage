@@ -12,6 +12,7 @@
     <!-- Only read to stand the assistant down when a real GSM call arrives;
          the defence degrades silently when this has not been granted. -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 

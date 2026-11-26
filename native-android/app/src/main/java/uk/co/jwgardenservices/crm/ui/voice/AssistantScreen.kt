@@ -153,7 +153,8 @@ fun AssistantScreen() {
         val bound = service
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_STOP -> bound?.pauseListening()
+                // A connected call keeps the microphone and CPU alive with the
+                // screen off. Only leaving the Secretary screen unbinds/pauses.
                 Lifecycle.Event.ON_START -> if (bound?.callActive?.value == true) bound.ensureListening()
                 else -> Unit
             }

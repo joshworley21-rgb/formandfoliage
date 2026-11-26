@@ -2,6 +2,8 @@ package uk.co.jwgardenservices.crm.voice
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.SystemClock
@@ -228,6 +230,21 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
     }
 
     private fun buildPlayer(): AudioTrack? {
+        // On a Bluetooth HFP/SCO call, voice-communication usage keeps the
+        // synthesised reply on the same SCO link as the call. USAGE_ASSISTANT
+        // can drift to A2DP or the earpiece and sounds muffled on a headset.
+        val usage = runCatching {
+            val manager = context.getSystemService(AudioManager::class.java)
+            val onSco = manager?.communicationDevice?.type in setOf(
+                AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                AudioDeviceInfo.TYPE_BLE_HEADSET,
+            )
+            if (manager?.mode == AudioManager.MODE_IN_COMMUNICATION && onSco) {
+                AudioAttributes.USAGE_VOICE_COMMUNICATION
+            } else {
+                AudioAttributes.USAGE_ASSISTANT
+            }
+        }.getOrDefault(AudioAttributes.USAGE_ASSISTANT)
         val minBytes = AudioTrack.getMinBufferSize(
             SAMPLE_RATE,
             AudioFormat.CHANNEL_OUT_MONO,
@@ -237,7 +254,7 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
         val player = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                    .setUsage(usage)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build(),
             )
