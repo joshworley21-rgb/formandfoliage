@@ -2,6 +2,7 @@ package uk.co.jwgardenservices.crm.voice
 
 import android.app.ActivityManager
 import android.content.Context
+import android.net.Uri
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
@@ -9,6 +10,7 @@ import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.ThinkingConfig
 import java.io.File
@@ -18,6 +20,8 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -102,6 +106,10 @@ object LocalLlm {
         if (jobs[model]?.isActive == true) return
         val app = context.applicationContext
         val flow = states.getValue(model)
+        if (!model.downloadable) {
+            flow.value = State.Failed("${model.label} needs a login to download. Import the file instead.")
+            return
+        }
         jobs[model] = scope.launch {
             try {
                 download(app, model, flow)
@@ -113,6 +121,64 @@ object LocalLlm {
                 flow.value = State.Failed(error.message ?: "Download failed.")
             }
         }
+    }
+
+    /** Copy a model file the owner downloaded themselves, e.g. a gated one, into the app. */
+    fun importFrom(context: Context, model: LlmModel, uri: Uri) {
+        if (jobs[model]?.isActive == true) return
+        val app = context.applicationContext
+        val flow = states.getValue(model)
+        jobs[model] = scope.launch {
+            try {
+                copyIn(app, model, uri, flow)
+                flow.value = State.Done
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                partFile(app, model).delete()
+                throw cancelled
+            } catch (error: Exception) {
+                partFile(app, model).delete()
+                CrashLog.note(app, TAG, "${model.id} import failed: ${error.message}")
+                flow.value = State.Failed(error.message ?: "Import failed.")
+            }
+        }
+    }
+
+    private suspend fun copyIn(context: Context, model: LlmModel, uri: Uri, flow: MutableStateFlow<State>) {
+        val target = file(context, model)
+        target.parentFile?.mkdirs()
+        val part = partFile(context, model)
+        part.delete()
+        flow.value = State.Working(0, model.bytes)
+        val input = context.contentResolver.openInputStream(uri)
+            ?: throw IOException("Could not open that file.")
+        input.use { source ->
+            FileOutputStream(part).use { output ->
+                val buffer = ByteArray(256 * 1024)
+                var done = 0L
+                while (true) {
+                    currentCoroutineContext().ensureActive()
+                    val read = source.read(buffer)
+                    if (read < 0) break
+                    done += read
+                    if (done > model.bytes) break
+                    output.write(buffer, 0, read)
+                    flow.value = State.Working(done, model.bytes)
+                }
+            }
+        }
+        if (part.length() != model.bytes) {
+            val size = part.length() / (1024 * 1024)
+            part.delete()
+            throw IOException(
+                "That file does not match: expected ${model.fileName} " +
+                    "(${model.bytes / (1024 * 1024)} MB), got about $size MB.",
+            )
+        }
+        if (!part.renameTo(target)) {
+            part.copyTo(target, overwrite = true)
+            part.delete()
+        }
+        CrashLog.note(context, TAG, "${model.id} imported")
     }
 
     fun cancel(model: LlmModel = LlmModel.Small) {
@@ -138,6 +204,15 @@ object LocalLlm {
         question: String,
         maxTokens: Int = 80,
         temperature: Double = 0.4,
+    ): String? = generate(context, { system }, question, maxTokens, temperature)
+
+    /** [systemFor] runs once the model is chosen, so slower models can be given a shorter prompt. */
+    suspend fun generate(
+        context: Context,
+        systemFor: (LlmModel) -> String,
+        question: String,
+        maxTokens: Int = 80,
+        temperature: Double = 0.4,
     ): String? = withContext(Dispatchers.Default) {
         val app = context.applicationContext
         // A new question cancels the pending idle close; otherwise the timer
@@ -148,12 +223,11 @@ object LocalLlm {
 
         val answer: String? = runCatching {
             val conversation: Conversation = ready.engine.createConversation(
-                configFor(ready.model, system, maxTokens, temperature),
+                configFor(ready.model, systemFor(ready.model), maxTokens, temperature),
             )
             try {
-                val started = System.nanoTime()
                 val message = conversation.sendMessage(question)
-                note(app, ready.model, "answered", started)
+                logBenchmark(app, ready.model, conversation)
                 message.contents.contents
                     .filterIsInstance<Content.Text>()
                     .joinToString(" ") { it.text }
@@ -177,13 +251,20 @@ object LocalLlm {
         system: String,
         question: String,
         maxTokens: Int = 100,
+    ): Flow<String> = stream(context, { system }, question, maxTokens)
+
+    fun stream(
+        context: Context,
+        systemFor: (LlmModel) -> String,
+        question: String,
+        maxTokens: Int = 100,
     ): Flow<String> = flow {
         val app = context.applicationContext
         idleJob?.cancel()
         idleJob = null
         val ready = load(app) ?: return@flow
         val conversation: Conversation = ready.engine.createConversation(
-            configFor(ready.model, system, maxTokens, 0.4),
+            configFor(ready.model, systemFor(ready.model), maxTokens, 0.4),
         )
         var finished = false
         var firstWord = true
@@ -203,6 +284,7 @@ object LocalLlm {
             }
             finished = true
             note(app, ready.model, "reply finished", started)
+            logBenchmark(app, ready.model, conversation)
         } finally {
             if (!finished) runCatching { conversation.cancelProcess() }
             runCatching { conversation.close() }
@@ -247,7 +329,24 @@ object LocalLlm {
         }
     }
 
-    /** Timings in the assistant log, so a model can be judged on the phone it runs on. */
+    /** The runtime's own numbers: time to first token and prefill and decode speed. */
+    @OptIn(ExperimentalApi::class)
+    private fun logBenchmark(app: Context, model: LlmModel, conversation: Conversation) {
+        runCatching {
+            val info = conversation.getBenchmarkInfo()
+            CrashLog.note(
+                app,
+                TAG,
+                "${model.id}: TTFT ${"%.2f".format(info.timeToFirstTokenInSecond)} s, " +
+                    "prefill ${info.lastPrefillTokenCount} tokens at " +
+                    "${"%.0f".format(info.lastPrefillTokensPerSecond)} tok/s, " +
+                    "decode ${info.lastDecodeTokenCount} tokens at " +
+                    "${"%.1f".format(info.lastDecodeTokensPerSecond)} tok/s",
+            )
+        }
+    }
+
+    /** Wall-clock timings in the assistant log, so a model can be judged on the phone it runs on. */
     private fun note(app: Context, model: LlmModel, what: String, startedNanos: Long) {
         val seconds = (System.nanoTime() - startedNanos) / 1_000_000_000.0
         CrashLog.note(app, TAG, "${model.id}: $what after ${"%.1f".format(seconds)} s")
@@ -324,7 +423,7 @@ object LocalLlm {
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(120, TimeUnit.SECONDS)
             .build()
-        val request = Request.Builder().url(model.url).apply {
+        val request = Request.Builder().url(requireNotNull(model.url)).apply {
             if (have > 0) header("Range", "bytes=$have-")
         }.build()
         client.newCall(request).execute().use { response ->

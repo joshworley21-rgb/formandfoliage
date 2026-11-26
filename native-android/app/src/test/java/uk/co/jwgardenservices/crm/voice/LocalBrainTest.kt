@@ -121,4 +121,63 @@ class LocalBrainTest {
     fun `no customers means no customer line`() {
         assertTrue(!LocalBrain.intentPrompt(emptyList()).contains("Customers:"))
     }
+
+    @Test
+    fun `the lean intent prompt stays near 200 tokens and keeps every label`() {
+        val typical = listOf(
+            "Simon Hart", "The Hendersons", "Rose Cottage", "Parkers",
+            "Mrs Bell", "Old Rectory", "Smith Farm", "Oak Lodge",
+        )
+        val prompt = LocalBrain.intentPrompt(typical, lean = true)
+        // About 3.5 characters a token puts 700 characters at 200 tokens.
+        assertTrue("prompt was ${prompt.length} chars", prompt.length <= 760)
+        LocalBrain.labels.forEach { assertTrue("${it.wire} missing", prompt.contains(it.wire)) }
+        assertTrue(prompt.contains("Customers: Simon Hart"))
+    }
+
+    @Test
+    fun `the lean intent prompt caps long customer lists`() {
+        val many = (1..40).map { "Customer number $it of the long list" }
+        val prompt = LocalBrain.intentPrompt(many, lean = true)
+        assertTrue("prompt was ${prompt.length} chars", prompt.length <= 950)
+        assertTrue(!prompt.contains("Customer number 11 "))
+    }
+
+    @Test
+    fun `lean and full prompts reply in the same label format`() {
+        val full = LocalBrain.intentPrompt(clients)
+        val lean = LocalBrain.intentPrompt(clients, lean = true)
+        assertTrue(full.contains("label|client"))
+        assertTrue(lean.contains("label|customer"))
+        assertEquals(SpokenIntent.LogHours, parse("log_hours|Simon", "put Simon down for a half day")?.intent)
+    }
+
+    @Test
+    fun `the lean conversation prompt is short even with long inputs`() {
+        val typical = LocalBrain.leanPrompt(
+            owner = "Josh",
+            clock = "Thursday 26 November, 20:30",
+            facts = listOf("prefers texts to calls", "van is a white Transit", "based in Aylesbury"),
+            profile = "Lawn care, hedge cutting and garden clearance across Aylesbury since 2012.",
+            style = "Speak warmly, with contractions. Keep answers to one or two short sentences.",
+        )
+        assertTrue("typical was ${typical.length} chars", typical.length <= 700)
+        val worst = LocalBrain.leanPrompt(
+            owner = "Josh",
+            clock = "Thursday 26 November, 20:30",
+            facts = List(8) { "a very long fact about the business that goes on and on ".repeat(5) },
+            profile = "profile text ".repeat(200),
+            style = "style ".repeat(100),
+        )
+        assertTrue("worst was ${worst.length} chars", worst.length <= 1_050)
+        assertTrue(worst.contains("It is Thursday 26 November"))
+    }
+
+    @Test
+    fun `prompts choose the short form only for lean models`() {
+        val prompts = LocalBrain.Prompts(full = "FULL", lean = "LEAN")
+        assertEquals("FULL", prompts.forModel(LlmModel.Small))
+        assertEquals("LEAN", prompts.forModel(LlmModel.Gemma))
+        assertEquals("LEAN", prompts.forModel(LlmModel.Large))
+    }
 }

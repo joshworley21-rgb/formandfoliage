@@ -152,11 +152,6 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     var localLlmInstalled by remember {
         mutableStateOf(LocalLlm.isInstalled(context, LlmModel.Small))
     }
-    val largeState by LocalLlm.stateFor(LlmModel.Large).collectAsStateWithLifecycle()
-    var largeInstalled by remember {
-        mutableStateOf(LocalLlm.isInstalled(context, LlmModel.Large))
-    }
-    var largeSaved by remember { mutableLongStateOf(LocalLlm.savedBytes(context, LlmModel.Large)) }
     val localModel by AssistantPreferences.localModelFlow(context)
         .collectAsStateWithLifecycle(initialValue = LlmModel.Small)
     var localLlmSaved by remember { mutableLongStateOf(LocalLlm.savedBytes(context)) }
@@ -201,17 +196,6 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     val asrEngine by AssistantPreferences.asrEngineFlow(context)
         .collectAsStateWithLifecycle(initialValue = AsrEngine.Moonshine)
 
-    LaunchedEffect(largeState) {
-        when (val snapshot = largeState) {
-            is LocalLlm.State.Done -> {
-                largeInstalled = true
-                largeSaved = 0
-                LocalLlm.clearResult(LlmModel.Large)
-            }
-            is LocalLlm.State.Working -> largeSaved = snapshot.done
-            else -> largeSaved = LocalLlm.savedBytes(context, LlmModel.Large)
-        }
-    }
     LaunchedEffect(localLlmState) {
         when (val snapshot = localLlmState) {
             is LocalLlm.State.Done -> {
@@ -1155,85 +1139,36 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         }
 
         SectionCard(
-            title = "Bigger local model (experimental)",
-            subtitle = "Qwen3 1.7B, still fully on this phone.",
+            title = "More accurate local models (experimental)",
+            subtitle = "Still fully on this phone.",
             leadingIcon = Icons.Outlined.Memory,
         ) {
             Column(
                 modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 Text(
-                    text = "Understands loose phrasing and answers more sensibly, but it is " +
-                        "slower to the first word and needs about 3 GB of free memory while a " +
-                        "call is open. If memory is short it quietly falls back to the small " +
-                        "model. The assistant log records its timings so you can judge it on " +
-                        "this phone. 932 MB, downloaded once.",
+                    text = "Understand loose phrasing and answer more sensibly than the small " +
+                        "model, at the cost of a longer wait for the first word. They use a " +
+                        "shorter prompt, fall back to the small model if memory is short, and " +
+                        "write their timings to the assistant log. Only one is used at a time.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                SettingSwitchRow(
-                    title = "Use the bigger model",
-                    description = "Switch off to go back to the small, faster one.",
-                    checked = localModel == LlmModel.Large && largeInstalled,
-                    enabled = largeInstalled,
-                    onCheckedChange = { enabled ->
-                        scope.launch {
-                            AssistantPreferences.setLocalModel(
-                                context,
-                                if (enabled) LlmModel.Large else LlmModel.Small,
-                            )
-                        }
-                    },
+                OptionalModelRow(
+                    model = LlmModel.Gemma,
+                    selected = localModel,
+                    blurb = "Google's Gemma 3 1B. About 2.6 s to the first word on a Galaxy S22+ " +
+                        "with a long prompt. It needs a Hugging Face login to download: get " +
+                        "gemma3-1b-it-int4.litertlm from litert-community/Gemma3-1B-IT in your " +
+                        "browser, then import it here.",
                 )
-                val working = largeState as? LocalLlm.State.Working
-                if (working != null) {
-                    LinearProgressIndicator(
-                        progress = { working.progress },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = "Downloading ${working.done / MEGABYTE} of " +
-                            "${working.total / MEGABYTE} MB",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    TextButton(onClick = { LocalLlm.cancel(LlmModel.Large) }) { Text("Cancel") }
-                } else if (largeInstalled) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "Installed",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f),
-                        )
-                        TextButton(
-                            onClick = {
-                                scope.launch {
-                                    AssistantPreferences.setLocalModel(context, LlmModel.Small)
-                                }
-                                LocalLlm.remove(context, LlmModel.Large)
-                                largeInstalled = false
-                                largeSaved = 0
-                            },
-                        ) { Text("Remove") }
-                    }
-                } else {
-                    OutlinedButton(onClick = { LocalLlm.start(context, LlmModel.Large) }) {
-                        Text(
-                            if (largeSaved > 0) {
-                                "Resume download (${largeSaved / MEGABYTE} MB saved)"
-                            } else {
-                                "Download bigger model (932 MB)"
-                            },
-                        )
-                    }
-                }
-                (largeState as? LocalLlm.State.Failed)?.let { failure ->
-                    Text(
-                        text = failure.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
+                OptionalModelRow(
+                    model = LlmModel.Large,
+                    selected = localModel,
+                    blurb = "Qwen3 1.7B. Slower on the CPU and needs about 3 GB free while a call " +
+                        "is open.",
+                )
             }
         }
 
@@ -1482,6 +1417,101 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
 
         }
         Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun OptionalModelRow(model: LlmModel, selected: LlmModel, blurb: String) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val state by LocalLlm.stateFor(model).collectAsStateWithLifecycle()
+    var installed by remember { mutableStateOf(LocalLlm.isInstalled(context, model)) }
+    var saved by remember { mutableLongStateOf(LocalLlm.savedBytes(context, model)) }
+    val megabytes = model.bytes / MEGABYTE
+    LaunchedEffect(state) {
+        when (val snapshot = state) {
+            is LocalLlm.State.Done -> {
+                installed = true
+                saved = 0
+                LocalLlm.clearResult(model)
+            }
+            is LocalLlm.State.Working -> saved = snapshot.done
+            else -> saved = LocalLlm.savedBytes(context, model)
+        }
+    }
+    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) LocalLlm.importFrom(context, model, uri)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(model.label, style = MaterialTheme.typography.titleSmall)
+        Text(
+            text = blurb,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        SettingSwitchRow(
+            title = "Use ${model.label}",
+            description = "Switch off to go back to the small, faster model.",
+            checked = selected == model && installed,
+            enabled = installed,
+            onCheckedChange = { enabled ->
+                scope.launch {
+                    AssistantPreferences.setLocalModel(context, if (enabled) model else LlmModel.Small)
+                }
+            },
+        )
+        val working = state as? LocalLlm.State.Working
+        if (working != null) {
+            LinearProgressIndicator(
+                progress = { working.progress },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = "${if (model.downloadable) "Downloading" else "Importing"} " +
+                    "${working.done / MEGABYTE} of ${working.total / MEGABYTE} MB",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            TextButton(onClick = { LocalLlm.cancel(model) }) { Text("Cancel") }
+        } else if (installed) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Installed",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    onClick = {
+                        if (selected == model) {
+                            scope.launch { AssistantPreferences.setLocalModel(context, LlmModel.Small) }
+                        }
+                        LocalLlm.remove(context, model)
+                        installed = false
+                        saved = 0
+                    },
+                ) { Text("Remove") }
+            }
+        } else if (model.downloadable) {
+            OutlinedButton(onClick = { LocalLlm.start(context, model) }) {
+                Text(
+                    if (saved > 0) {
+                        "Resume download ($megabytes MB, ${saved / MEGABYTE} MB saved)"
+                    } else {
+                        "Download ($megabytes MB)"
+                    },
+                )
+            }
+        } else {
+            OutlinedButton(onClick = { pickFile.launch(arrayOf("*/*")) }) {
+                Text("Import ${model.fileName} ($megabytes MB)")
+            }
+        }
+        (state as? LocalLlm.State.Failed)?.let { failure ->
+            Text(
+                text = failure.message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
     }
 }

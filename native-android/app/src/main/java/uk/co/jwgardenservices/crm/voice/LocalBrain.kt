@@ -39,16 +39,38 @@ object LocalBrain {
     )
 
     private const val MAX_CLIENTS = 24
+    private const val LEAN_CLIENTS = 10
     private const val MAX_NAME = 24
 
-    /** Kept short: the model's whole context is 1,280 tokens. */
-    fun intentPrompt(clientNames: List<String>): String {
+    /**
+     * Kept short: the small model's whole context is 1,280 tokens. [lean] is
+     * for the slower models, where time to the first word is mostly prefill:
+     * labels and four examples, about 220 tokens.
+     */
+    fun intentPrompt(clientNames: List<String>, lean: Boolean = false): String {
         val clients = clientNames
             .map { it.trim().take(MAX_NAME) }
             .filter { it.isNotEmpty() }
             .distinct()
-            .take(MAX_CLIENTS)
+            .take(if (lean) LEAN_CLIENTS else MAX_CLIENTS)
             .joinToString(", ")
+        if (lean) {
+            return buildString {
+                appendLine("Label a gardener's spoken sentence. Reply one line: label|customer")
+                appendLine(
+                    "log_hours time worked, check_schedule diary, next_job, next_job_address, " +
+                        "mark_job_done, who_owes_me unpaid invoices, today_earnings, " +
+                        "weekly_earnings, month_earnings, hours_this_week, client_info, last_visit, " +
+                        "best_client, profit, running_costs, add_note, add_expense, unbilled, " +
+                        "client_list, invoice_status, next_job_for_client, weather, other chat",
+                )
+                appendLine("stick Simon down for a half day => log_hours|Simon")
+                appendLine("who's not paid me => who_owes_me|")
+                appendLine("the Hendersons are done => mark_job_done|Hendersons")
+                appendLine("how are you => other|")
+                if (clients.isNotEmpty()) append("Customers: $clients")
+            }.trimEnd()
+        }
         return buildString {
             appendLine("Label one spoken sentence from a UK self-employed gardener.")
             appendLine("Reply with ONE line only: label|client")
@@ -161,4 +183,27 @@ object LocalBrain {
         "\\b(weather|rain\\w*|forecast|sun\\w*|cold|warm|wind\\w*|hot|snow\\w*|frost\\w*|" +
             "temperature|dry|wet|shower\\w*|storm\\w*)\\b",
     )
+
+    /** The system prompt for answers, in the full and the short form. */
+    class Prompts(val full: String, val lean: String) {
+        fun forModel(model: LlmModel): String = if (model.leanPrompts) lean else full
+    }
+
+    /**
+     * About 200 tokens: who it is, the clock, a few facts and one line of the
+     * business profile, so a slow model reaches its first word sooner.
+     */
+    fun leanPrompt(owner: String, clock: String, facts: List<String>, profile: String, style: String): String {
+        val known = facts.map { it.trim().take(80) }.filter { it.isNotEmpty() }.take(3)
+            .joinToString("; ").ifBlank { "a UK gardening business" }
+        return buildString {
+            appendLine("You are $owner's secretary for a UK gardening business, on the phone.")
+            appendLine("Calm, warm, British, with contractions. Answer in one or two short spoken")
+            appendLine("sentences. Never repeat the question or say you are an AI. If unsure, say so briefly.")
+            appendLine("It is $clock. Facts: $known.")
+            val about = profile.replace(Regex("\\s+"), " ").trim().take(220)
+            if (about.isNotEmpty()) appendLine("Business: $about")
+            append(style.take(160))
+        }.trimEnd()
+    }
 }

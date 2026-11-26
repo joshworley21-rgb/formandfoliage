@@ -1,19 +1,23 @@
 package uk.co.jwgardenservices.crm.voice
 
 /**
- * The on-device models the assistant can think with. Both are Qwen3 files from
- * the litert-community repositories on Hugging Face (Apache 2.0, no login).
+ * The on-device models the assistant can think with, all LiteRT-LM files from
+ * the litert-community repositories on Hugging Face. The Qwen3 files download
+ * directly; Gemma needs a login there, so it is imported from a file instead.
  */
 enum class LlmModel(
     val id: String,
     val label: String,
     val fileName: String,
-    val url: String,
+    /** Null when the file needs a login to download and has to be imported instead. */
+    val url: String?,
     val bytes: Long,
     /** Memory the system must report as available before this model is loaded. */
     val minFreeMb: Long,
     /** Qwen3-1.7B reasons by default; the answer would be buried in a long preamble. */
     val reasonsByDefault: Boolean,
+    /** Slower models take a short prompt: time to the first word is mostly prefill. */
+    val leanPrompts: Boolean,
 ) {
     Small(
         id = "qwen3-0.6b",
@@ -24,6 +28,17 @@ enum class LlmModel(
         bytes = 347_251_840L,
         minFreeMb = 900L,
         reasonsByDefault = false,
+        leanPrompts = false,
+    ),
+    Gemma(
+        id = "gemma3-1b",
+        label = "Gemma 3 1B",
+        fileName = "gemma3-1b-it-int4.litertlm",
+        url = null,
+        bytes = 584_417_280L,
+        minFreeMb = 1_500L,
+        reasonsByDefault = false,
+        leanPrompts = true,
     ),
     Large(
         id = "qwen3-1.7b",
@@ -34,8 +49,11 @@ enum class LlmModel(
         bytes = 977_184_032L,
         minFreeMb = 3_000L,
         reasonsByDefault = true,
+        leanPrompts = true,
     ),
     ;
+
+    val downloadable: Boolean get() = url != null
 
     companion object {
         fun fromId(id: String?): LlmModel = entries.firstOrNull { it.id == id } ?: Small

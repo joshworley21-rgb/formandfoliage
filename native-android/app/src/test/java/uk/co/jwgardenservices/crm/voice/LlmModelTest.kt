@@ -68,4 +68,37 @@ class LlmModelTest {
     fun `models have distinct files so installing one never overwrites the other`() {
         assertEquals(LlmModel.entries.size, LlmModel.entries.map { it.fileName }.toSet().size)
     }
+
+    @Test
+    fun `gemma is imported from a file and the qwen files download`() {
+        assertEquals(false, LlmModel.Gemma.downloadable)
+        assertEquals(true, LlmModel.Small.downloadable)
+        assertEquals(true, LlmModel.Large.downloadable)
+        assertEquals(584_417_280L, LlmModel.Gemma.bytes)
+    }
+
+    @Test
+    fun `gemma leads when chosen and installed and falls back to the small model`() {
+        val all = setOf(LlmModel.Small, LlmModel.Gemma, LlmModel.Large)
+        assertEquals(
+            listOf(LlmModel.Gemma, LlmModel.Small),
+            LlmModel.candidates(LlmModel.Gemma, all, availableMb = 2_000),
+        )
+        assertEquals(
+            listOf(LlmModel.Small),
+            LlmModel.candidates(LlmModel.Gemma, all, availableMb = 1_200),
+        )
+        assertEquals(
+            listOf(LlmModel.Small),
+            LlmModel.candidates(LlmModel.Gemma, setOf(LlmModel.Small), availableMb = 4_000),
+        )
+    }
+
+    @Test
+    fun `only the slower models take the short prompt`() {
+        assertEquals(false, LlmModel.Small.leanPrompts)
+        assertEquals(true, LlmModel.Gemma.leanPrompts)
+        assertEquals(true, LlmModel.Large.leanPrompts)
+        assertEquals(false, LlmModel.Gemma.reasonsByDefault)
+    }
 }

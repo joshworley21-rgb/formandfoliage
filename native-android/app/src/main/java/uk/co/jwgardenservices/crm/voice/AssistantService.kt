@@ -2051,7 +2051,9 @@ class AssistantService : Service() {
             !looksLikeFactualQuestion(text)
         ) {
             val answer = withTimeoutOrNull(25_000) {
-                LocalLlm.generate(this@AssistantService, localPrompt(), text)
+                localPrompts().let { prompts ->
+                    LocalLlm.generate(this@AssistantService, { prompts.forModel(it) }, text)
+                }
             }
             if (!answer.isNullOrBlank()) {
                 val spoken = spokenLocalAnswer(answer, text)
@@ -2255,7 +2257,7 @@ class AssistantService : Service() {
         Regex("^(can you |could you )?(have a look|take a look|look|check|check that)[?.!]*$")
             .matches(lower.trim())
 
-    private suspend fun localPrompt(): String {
+    private suspend fun localPrompts(): LocalBrain.Prompts {
         // Keep the 0.6B context tight: facts only. Old turns were making it
         // answer a previous weather question instead of the current one.
         val facts = runCatching { AssistantMemory.facts(this).map { it.text } }
@@ -2274,7 +2276,7 @@ class AssistantService : Service() {
             ?.replace(Regex("\\s+"), " ")
             ?.take(700)
             .orEmpty()
-        return """
+        val full = """
             You are ${VoiceLines.OWNER_NAME}'s personal secretary for a UK gardening business, speaking
             on the phone. Be calm, warm and efficient, like a good British secretary.
             Use contractions and everyday British phrasing. Answer only the question
@@ -2293,6 +2295,14 @@ class AssistantService : Service() {
             ${runCatching { AssistantMemory.lastCall(this) }.getOrNull()?.let { "Last call: $it" } ?: ""}
             ${personalityInstruction()}
         """.trimIndent()
+        val lean = LocalBrain.leanPrompt(
+            owner = VoiceLines.OWNER_NAME,
+            clock = clock,
+            facts = facts,
+            profile = profile.orEmpty(),
+            style = personalityInstruction(),
+        )
+        return LocalBrain.Prompts(full, lean)
     }
 
     private fun localBrainReady(): Boolean =
@@ -2306,7 +2316,7 @@ class AssistantService : Service() {
         val reply = withTimeoutOrNull(12_000) {
             LocalLlm.generate(
                 this@AssistantService,
-                LocalBrain.intentPrompt(names),
+                { model -> LocalBrain.intentPrompt(names, lean = model.leanPrompts) },
                 text,
                 maxTokens = 20,
                 temperature = 0.1,
@@ -2322,7 +2332,7 @@ class AssistantService : Service() {
      * caller can fall through to the next option.
      */
     private suspend fun answerLocally(question: String): Boolean {
-        val system = localPrompt()
+        val prompts = localPrompts()
         val cap = if (personaLength == PersonaLength.Short) 1 else 2
         val sentences = Channel<String>(Channel.UNLIMITED)
         val said = StringBuilder()
@@ -2349,7 +2359,7 @@ class AssistantService : Service() {
             }
             withTimeoutOrNull(25_000) {
                 try {
-                    LocalLlm.stream(this@AssistantService, system, question)
+                    LocalLlm.stream(this@AssistantService, { prompts.forModel(it) }, question)
                         .takeWhile { chunk ->
                             stream.push(chunk).forEach(::offer)
                             sent < cap
