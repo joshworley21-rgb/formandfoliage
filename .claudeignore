@@ -1,0 +1,38 @@
+# Build & dependency outputs
+build/
+.gradle/
+dist/
+dist-app/
+.output/
+.next/
+node_modules/
+__pycache__/
+*.apk
+*.aab
+*.jar
+
+# Lockfiles, minified & generated assets
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+bun.lock
+*.min.js
+*.min.css
+*.map
+src/routeTree.gen.ts
+
+# Models, audio & logs
+*.onnx
+*.bin
+*.gguf
+*.safetensors
+*.wav
+*.mp3
+*.pcm
+*.log
+crash_reports/
+
+# Git & IDE metadata
+.git/
+.idea/
+.vscode/
