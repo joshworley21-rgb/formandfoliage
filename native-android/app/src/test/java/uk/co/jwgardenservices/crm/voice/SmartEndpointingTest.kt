@@ -44,4 +44,24 @@ class SmartEndpointingTest {
             SmartEndpointing.waitMs("the garden needs a cut", onBluetooth = true),
         )
     }
+
+    @Test
+    fun `a noisy background adds a beat and quiet does not`() {
+        assertEquals(
+            SmartEndpointing.NORMAL_MS + SmartEndpointing.NOISY_EXTRA_MS,
+            SmartEndpointing.waitMs("the garden needs a cut", noiseFloor = SmartEndpointing.NOISY_FLOOR),
+        )
+        assertEquals(
+            SmartEndpointing.NORMAL_MS,
+            SmartEndpointing.waitMs("the garden needs a cut", noiseFloor = 0.01f),
+        )
+    }
+
+    @Test
+    fun `noise and bluetooth stack`() {
+        assertEquals(
+            SmartEndpointing.PATIENT_MS + SmartEndpointing.BLUETOOTH_EXTRA_MS + SmartEndpointing.NOISY_EXTRA_MS,
+            SmartEndpointing.waitMs("log two hours and", onBluetooth = true, noiseFloor = 0.05f),
+        )
+    }
 }

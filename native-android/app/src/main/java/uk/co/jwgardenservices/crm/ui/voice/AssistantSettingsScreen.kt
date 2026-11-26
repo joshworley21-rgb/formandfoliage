@@ -67,6 +67,7 @@ import uk.co.jwgardenservices.crm.voice.KokoroCustomVoices
 import uk.co.jwgardenservices.crm.voice.KokoroHqDownloader
 import uk.co.jwgardenservices.crm.voice.KokoroEngine
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
+import uk.co.jwgardenservices.crm.voice.LlmModel
 import uk.co.jwgardenservices.crm.voice.LocalLlm
 import uk.co.jwgardenservices.crm.voice.MicSource
 import uk.co.jwgardenservices.crm.voice.MicTest
@@ -82,6 +83,7 @@ import uk.co.jwgardenservices.crm.voice.PersonaHumour
 import uk.co.jwgardenservices.crm.voice.PersonaLength
 import uk.co.jwgardenservices.crm.voice.PersonaTone
 import uk.co.jwgardenservices.crm.voice.PronunciationDictionary
+import uk.co.jwgardenservices.crm.voice.SpeechDenoiser
 import uk.co.jwgardenservices.crm.voice.SpeechEngine
 import uk.co.jwgardenservices.crm.ui.common.CompactScreenHeader
 import uk.co.jwgardenservices.crm.ui.common.SegmentedPillTabs
@@ -123,6 +125,10 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = true)
     val drivingMode by AssistantPreferences.drivingModeFlow(context)
         .collectAsStateWithLifecycle(initialValue = false)
+    val denoise by AssistantPreferences.denoiseFlow(context)
+        .collectAsStateWithLifecycle(initialValue = false)
+    val denoiseState by SpeechDenoiser.state.collectAsStateWithLifecycle()
+    var denoiseInstalled by remember { mutableStateOf(SpeechDenoiser.isInstalled(context)) }
     val autoDrivingMode by AssistantPreferences.autoDrivingModeFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
     val personaTone by AssistantPreferences.personaToneFlow(context)
@@ -143,7 +149,13 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = emptyMap())
     LaunchedEffect(pronunciations) { PronunciationDictionary.userEntries = pronunciations }
     val localLlmState by LocalLlm.state.collectAsStateWithLifecycle()
-    var localLlmInstalled by remember { mutableStateOf(LocalLlm.isInstalled(context)) }
+    var localLlmInstalled by remember {
+        mutableStateOf(LocalLlm.isInstalled(context, LlmModel.Small))
+    }
+    val localModel by AssistantPreferences.localModelFlow(context)
+        .collectAsStateWithLifecycle(initialValue = LlmModel.Small)
+    val toolRouterOn by AssistantPreferences.toolRouterFlow(context)
+        .collectAsStateWithLifecycle(initialValue = false)
     var localLlmSaved by remember { mutableLongStateOf(LocalLlm.savedBytes(context)) }
     val pickupGreeting by AssistantPreferences.pickupFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
@@ -245,6 +257,13 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
             is NemotronDownloader.State.Working -> Unit
             else -> nemotronSaved = NemotronDownloader.savedBytes(context)
+        }
+    }
+    LaunchedEffect(denoiseState) {
+        if (denoiseState is SpeechDenoiser.State.Done) {
+            denoiseInstalled = true
+            AssistantPreferences.setDenoise(context, true)
+            SpeechDenoiser.clearResult()
         }
     }
     LaunchedEffect(punctuationState) {
@@ -521,6 +540,44 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
+                }
+            }
+        }
+
+        SectionCard(
+            title = "Noise suppression",
+            subtitle = "Engine and road noise.",
+            leadingIcon = Icons.Outlined.Mic,
+        ) {
+            Column(
+                modifier = Modifier.padding(JwTokens.cardPadding),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                SettingSwitchRow(
+                    title = "Clean up the microphone",
+                    description = "A tiny on-device model (0.5 MB) removes engine, road and wind " +
+                        "noise before the words are recognised. Try it in the van and switch " +
+                        "it off if names get worse.",
+                    checked = denoise && denoiseInstalled,
+                    onCheckedChange = { enabled ->
+                        when {
+                            !enabled -> scope.launch { AssistantPreferences.setDenoise(context, false) }
+                            denoiseInstalled -> scope.launch { AssistantPreferences.setDenoise(context, true) }
+                            else -> SpeechDenoiser.start(context)
+                        }
+                    },
+                )
+                when (val state = denoiseState) {
+                    is SpeechDenoiser.State.Working -> Text(
+                        text = "Downloading the noise model…",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    is SpeechDenoiser.State.Failed -> Text(
+                        text = state.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    else -> Unit
                 }
             }
         }
@@ -1084,6 +1141,91 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         }
 
         SectionCard(
+            title = "More accurate local models (experimental)",
+            subtitle = "Still fully on this phone.",
+            leadingIcon = Icons.Outlined.Memory,
+        ) {
+            Column(
+                modifier = Modifier.padding(JwTokens.cardPadding),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text(
+                    text = "Understand loose phrasing and answer more sensibly than the small " +
+                        "model, at the cost of a longer wait for the first word. They use a " +
+                        "shorter prompt, fall back to the small model if memory is short, and " +
+                        "write their timings to the assistant log. Only one is used at a time.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OptionalModelRow(
+                    model = LlmModel.Gemma,
+                    active = localModel == LlmModel.Gemma,
+                    onToggle = { on ->
+                        scope.launch {
+                            AssistantPreferences.setLocalModel(context, if (on) LlmModel.Gemma else LlmModel.Small)
+                        }
+                    },
+                    onRemoved = {
+                        if (localModel == LlmModel.Gemma) {
+                            scope.launch { AssistantPreferences.setLocalModel(context, LlmModel.Small) }
+                        }
+                    },
+                    blurb = "Google's Gemma 3 1B. About 2.6 s to the first word on a Galaxy S22+ " +
+                        "with a long prompt. It needs a Hugging Face login to download: get " +
+                        "gemma3-1b-it-int4.litertlm from litert-community/Gemma3-1B-IT in your " +
+                        "browser, then import it here.",
+                )
+                OptionalModelRow(
+                    model = LlmModel.Large,
+                    active = localModel == LlmModel.Large,
+                    onToggle = { on ->
+                        scope.launch {
+                            AssistantPreferences.setLocalModel(context, if (on) LlmModel.Large else LlmModel.Small)
+                        }
+                    },
+                    onRemoved = {
+                        if (localModel == LlmModel.Large) {
+                            scope.launch { AssistantPreferences.setLocalModel(context, LlmModel.Small) }
+                        }
+                    },
+                    blurb = "Qwen3 1.7B. Slower on the CPU and needs about 3 GB free while a call " +
+                        "is open.",
+                )
+            }
+        }
+
+        SectionCard(
+            title = "Action picker (experimental)",
+            subtitle = "FunctionGemma chooses the action.",
+            leadingIcon = Icons.Outlined.Memory,
+        ) {
+            Column(
+                modifier = Modifier.padding(JwTokens.cardPadding),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "For sentences the built-in rules do not recognise, a tiny model picks " +
+                        "one of six actions (log hours, diary, note, mark done, who owes, " +
+                        "materials) and fills in the details, so \"put Simon down for a half " +
+                        "day\" becomes four hours. Everything it returns is checked against " +
+                        "what you actually said before anything is saved. It runs on the " +
+                        "phone, about 0.5 GB of memory while a call is open, and its timings " +
+                        "go in the assistant log. Gemma terms of use apply to the model.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OptionalModelRow(
+                    model = LlmModel.Router,
+                    active = toolRouterOn,
+                    onToggle = { on -> scope.launch { AssistantPreferences.setToolRouter(context, on) } },
+                    onRemoved = { scope.launch { AssistantPreferences.setToolRouter(context, false) } },
+                    switchDescription = "Switch off to go back to the rules and the chat model only.",
+                    blurb = "FunctionGemma 270M, fine-tuned for phone actions by Google.",
+                )
+            }
+        }
+
+        SectionCard(
             title = "Pronunciations",
             subtitle = "Shared by recognition and speech.",
             leadingIcon = Icons.Outlined.RecordVoiceOver,
@@ -1328,6 +1470,102 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
 
         }
         Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun OptionalModelRow(
+    model: LlmModel,
+    blurb: String,
+    active: Boolean,
+    onToggle: (Boolean) -> Unit,
+    onRemoved: () -> Unit,
+    switchDescription: String = "Switch off to go back to the small, faster model.",
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val state by LocalLlm.stateFor(model).collectAsStateWithLifecycle()
+    var installed by remember { mutableStateOf(LocalLlm.isInstalled(context, model)) }
+    var saved by remember { mutableLongStateOf(LocalLlm.savedBytes(context, model)) }
+    val megabytes = model.bytes / MEGABYTE
+    LaunchedEffect(state) {
+        when (val snapshot = state) {
+            is LocalLlm.State.Done -> {
+                installed = true
+                saved = 0
+                LocalLlm.clearResult(model)
+            }
+            is LocalLlm.State.Working -> saved = snapshot.done
+            else -> saved = LocalLlm.savedBytes(context, model)
+        }
+    }
+    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) LocalLlm.importFrom(context, model, uri)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(model.label, style = MaterialTheme.typography.titleSmall)
+        Text(
+            text = blurb,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        SettingSwitchRow(
+            title = "Use ${model.label}",
+            description = switchDescription,
+            checked = active && installed,
+            enabled = installed,
+            onCheckedChange = onToggle,
+        )
+        val working = state as? LocalLlm.State.Working
+        if (working != null) {
+            LinearProgressIndicator(
+                progress = { working.progress },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = "${if (model.downloadable) "Downloading" else "Importing"} " +
+                    "${working.done / MEGABYTE} of ${working.total / MEGABYTE} MB",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            TextButton(onClick = { LocalLlm.cancel(model) }) { Text("Cancel") }
+        } else if (installed) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Installed",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    onClick = {
+                        onRemoved()
+                        LocalLlm.remove(context, model)
+                        installed = false
+                        saved = 0
+                    },
+                ) { Text("Remove") }
+            }
+        } else if (model.downloadable) {
+            OutlinedButton(onClick = { LocalLlm.start(context, model) }) {
+                Text(
+                    if (saved > 0) {
+                        "Resume download ($megabytes MB, ${saved / MEGABYTE} MB saved)"
+                    } else {
+                        "Download ($megabytes MB)"
+                    },
+                )
+            }
+        } else {
+            OutlinedButton(onClick = { pickFile.launch(arrayOf("*/*")) }) {
+                Text("Import ${model.fileName} ($megabytes MB)")
+            }
+        }
+        (state as? LocalLlm.State.Failed)?.let { failure ->
+            Text(
+                text = failure.message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
     }
 }

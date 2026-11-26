@@ -83,10 +83,13 @@ private val OPENAI_VOICE_KEY = stringPreferencesKey("openai_voice")
 private val PIPER_KEY = stringPreferencesKey("piper_voice")
 private val MIC_SOURCE_KEY = stringPreferencesKey("mic_source")
 private val PREFER_PHONE_MIC_KEY = booleanPreferencesKey("prefer_phone_mic")
+private val DENOISE_KEY = booleanPreferencesKey("denoise")
 private val PHONON_KEY = booleanPreferencesKey("phonon_enabled")
 private val PICKUP_KEY = booleanPreferencesKey("pickup_greeting")
 private val USED_KEY = booleanPreferencesKey("assistant_used")
 private val LOCAL_THINKING_KEY = booleanPreferencesKey("local_thinking")
+private val LOCAL_MODEL_KEY = stringPreferencesKey("local_model")
+private val TOOL_ROUTER_KEY = booleanPreferencesKey("tool_router")
 private val PRONUNCIATION_KEY = stringPreferencesKey("pronunciation")
 private val DRIVING_KEY = booleanPreferencesKey("driving_mode")
 private val AUTO_DRIVING_KEY = booleanPreferencesKey("auto_driving_mode")
@@ -209,6 +212,14 @@ object AssistantPreferences {
             preferences[PREFER_PHONE_MIC_KEY] ?: false
         }
 
+    /** Neural noise suppression ahead of the recogniser. Off until compared on a drive. */
+    fun denoiseFlow(context: Context): Flow<Boolean> =
+        context.assistantDataStore.data.map { it[DENOISE_KEY] ?: false }
+
+    suspend fun setDenoise(context: Context, enabled: Boolean) {
+        context.assistantDataStore.edit { it[DENOISE_KEY] = enabled }
+    }
+
     suspend fun setPreferPhoneMic(context: Context, enabled: Boolean) {
         context.assistantDataStore.edit { preferences ->
             preferences[PREFER_PHONE_MIC_KEY] = enabled
@@ -290,6 +301,23 @@ object AssistantPreferences {
     /** Free on-device answers; the model loads only when a question needs it. */
     fun localThinkingFlow(context: Context): Flow<Boolean> =
         context.assistantDataStore.data.map { it[LOCAL_THINKING_KEY] ?: true }
+
+    /** Which on-device model answers; the small one stands in whenever the chosen one cannot load. */
+    fun localModelFlow(context: Context): Flow<LlmModel> =
+        context.assistantDataStore.data.map { LlmModel.fromId(it[LOCAL_MODEL_KEY]) }
+
+    suspend fun setLocalModel(context: Context, model: LlmModel) {
+        context.assistantDataStore.edit { it[LOCAL_MODEL_KEY] = model.id }
+        LocalLlm.preferred = model
+    }
+
+    /** Let the small FunctionGemma model pick app actions for sentences the rules miss. */
+    fun toolRouterFlow(context: Context): Flow<Boolean> =
+        context.assistantDataStore.data.map { it[TOOL_ROUTER_KEY] ?: false }
+
+    suspend fun setToolRouter(context: Context, enabled: Boolean) {
+        context.assistantDataStore.edit { it[TOOL_ROUTER_KEY] = enabled }
+    }
 
     suspend fun setLocalThinking(context: Context, enabled: Boolean) {
         context.assistantDataStore.edit { it[LOCAL_THINKING_KEY] = enabled }

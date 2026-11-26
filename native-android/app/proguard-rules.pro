@@ -13,3 +13,6 @@
 -dontwarn org.slf4j.**
 -dontwarn io.ktor.**
 -keep class io.ktor.** { *; }
+
+# The action picker reads these tool definitions by reflection.
+-keep class uk.co.jwgardenservices.crm.voice.RouterTools { *; }

@@ -43,6 +43,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -50,6 +51,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -155,6 +157,7 @@ class AssistantService : Service() {
     private var callWakeLock: PowerManager.WakeLock? = null
     private var cloudConversation = true
     private var localThinking = true
+    private var toolRouterOn = false
     private var drivingMode = false
     private var manualDrivingMode = false
     private var autoDrivingMode = true
@@ -352,6 +355,14 @@ class AssistantService : Service() {
         scope.launch {
             AssistantPreferences.localThinkingFlow(this@AssistantService)
                 .collect { localThinking = it }
+        }
+        scope.launch {
+            AssistantPreferences.localModelFlow(this@AssistantService)
+                .collect { LocalLlm.preferred = it }
+        }
+        scope.launch {
+            AssistantPreferences.toolRouterFlow(this@AssistantService)
+                .collect { toolRouterOn = it }
         }
         scope.launch {
             AssistantPreferences.drivingModeFlow(this@AssistantService).collect {
@@ -631,6 +642,9 @@ class AssistantService : Service() {
         scope.launch {
             if (localThinking && LocalLlm.isInstalled(this@AssistantService)) {
                 LocalLlm.warm(this@AssistantService)
+            }
+            if (toolRouterOn && LocalLlm.isInstalled(this@AssistantService, LlmModel.Router)) {
+                LocalLlm.warmRouter(this@AssistantService)
             }
         }
     }
@@ -1934,6 +1948,52 @@ class AssistantService : Service() {
             }
         }
 
+        // 1.7 The on-device model, before any network: it labels what the
+        //     rules and the phrase matcher missed, and answers chat and
+        //     business questions as a stream, speaking each sentence as soon
+        //     as it is written. The cloud below is only for what this cannot
+        //     do, and not used at all when online answers are switched off.
+        // The action picker comes first: it can turn "put Simon down for a half
+        // day" into 4 hours, which the rules and the labeller cannot.
+        if (!quick.requiresCloud && toolRouterReady()) {
+            val routed = routeWithTools(text)
+            if (routed != null && (!temporal || routed.intent in dateIndependentIntents)) {
+                CrashLog.note(
+                    this,
+                    TAG,
+                    "intent=router:${routed.intent.wire} in ${System.currentTimeMillis() - started}ms",
+                )
+                runIntent(routed.text, IntentResult(routed.intent, routed.client, false))
+                return
+            }
+        }
+        var localTried = false
+        if (!quick.requiresCloud && localBrainReady()) {
+            localTried = true
+            val understood = localIntent(text)
+            if (understood != null && (!temporal || understood.intent in dateIndependentIntents)) {
+                CrashLog.note(
+                    this,
+                    TAG,
+                    "intent=local:${understood.intent.wire} in ${System.currentTimeMillis() - started}ms",
+                )
+                runIntent(text, understood)
+                return
+            }
+            if (quick.intent == SpokenIntent.Other && looksLikeQuestion(text) &&
+                !looksLikeFactualQuestion(text) && smallTalk(text) == null
+            ) {
+                if (answerLocally(text)) {
+                    CrashLog.note(
+                        this,
+                        TAG,
+                        "local answer streamed in ${System.currentTimeMillis() - started}ms",
+                    )
+                    return
+                }
+            }
+        }
+
         // 2. Exactly one optional cloud call. The business snapshot is built
         //    only now, and only when a cloud call is actually allowed: a local
         //    answer never pays for the Room/DataStore reads.
@@ -2002,6 +2062,7 @@ class AssistantService : Service() {
         // this fallback and closed again after a minute idle. It can reason
         // about short questions; live facts still prefer the free web APIs.
         if (
+            !localTried &&
             quick.intent == SpokenIntent.Other &&
             chatter == null &&
             memo == null &&
@@ -2012,7 +2073,9 @@ class AssistantService : Service() {
             !looksLikeFactualQuestion(text)
         ) {
             val answer = withTimeoutOrNull(25_000) {
-                LocalLlm.generate(this@AssistantService, localPrompt(), text)
+                localPrompts().let { prompts ->
+                    LocalLlm.generate(this@AssistantService, { prompts.forModel(it) }, text)
+                }
             }
             if (!answer.isNullOrBlank()) {
                 val spoken = spokenLocalAnswer(answer, text)
@@ -2216,7 +2279,7 @@ class AssistantService : Service() {
         Regex("^(can you |could you )?(have a look|take a look|look|check|check that)[?.!]*$")
             .matches(lower.trim())
 
-    private suspend fun localPrompt(): String {
+    private suspend fun localPrompts(): LocalBrain.Prompts {
         // Keep the 0.6B context tight: facts only. Old turns were making it
         // answer a previous weather question instead of the current one.
         val facts = runCatching { AssistantMemory.facts(this).map { it.text } }
@@ -2235,7 +2298,7 @@ class AssistantService : Service() {
             ?.replace(Regex("\\s+"), " ")
             ?.take(700)
             .orEmpty()
-        return """
+        val full = """
             You are ${VoiceLines.OWNER_NAME}'s personal secretary for a UK gardening business, speaking
             on the phone. Be calm, warm and efficient, like a good British secretary.
             Use contractions and everyday British phrasing. Answer only the question
@@ -2254,6 +2317,111 @@ class AssistantService : Service() {
             ${runCatching { AssistantMemory.lastCall(this) }.getOrNull()?.let { "Last call: $it" } ?: ""}
             ${personalityInstruction()}
         """.trimIndent()
+        val lean = LocalBrain.leanPrompt(
+            owner = VoiceLines.OWNER_NAME,
+            clock = clock,
+            facts = facts,
+            profile = profile.orEmpty(),
+            style = personalityInstruction(),
+        )
+        return LocalBrain.Prompts(full, lean)
+    }
+
+    private fun toolRouterReady(): Boolean =
+        toolRouterOn && !lowBattery && LocalLlm.isInstalled(this, LlmModel.Router)
+
+    /** The model's choice of app action, checked against what was actually said. */
+    private suspend fun routeWithTools(text: String): RoutedCommand? {
+        val names = runCatching { ServiceLocator.crmRepository.observeClients().first() }
+            .getOrDefault(emptyList())
+            .map { it.name }
+        val calls = withTimeoutOrNull(8_000) {
+            LocalLlm.callTools(this@AssistantService, ToolRoute.SYSTEM, text, RouterTools())
+        } ?: return null
+        CrashLog.note(this, TAG, "router chose: ${calls.firstOrNull()?.let { "${it.name} ${it.arguments}" }}".take(200))
+        return calls.firstNotNullOfOrNull { ToolRoute.toCommand(it, text, names) }
+    }
+
+    private fun localBrainReady(): Boolean =
+        localThinking && !lowBattery && LocalLlm.isInstalled(this)
+
+    /** What the on-device model makes of a sentence the rules missed, or null. */
+    private suspend fun localIntent(text: String): IntentResult? {
+        val names = runCatching { ServiceLocator.crmRepository.observeClients().first() }
+            .getOrDefault(emptyList())
+            .map { it.name }
+        val reply = withTimeoutOrNull(12_000) {
+            LocalLlm.generate(
+                this@AssistantService,
+                { model -> LocalBrain.intentPrompt(names, lean = model.leanPrompts) },
+                text,
+                maxTokens = 20,
+                temperature = 0.1,
+            )
+        }
+        CrashLog.note(this, TAG, "local label: ${reply?.take(60)}")
+        return reply?.let { LocalBrain.parseIntent(it, text, names) }
+    }
+
+    /**
+     * Answer from the on-device model, speaking whatever sentences are ready
+     * while it keeps writing. Returns false when nothing was said, so the
+     * caller can fall through to the next option.
+     */
+    private suspend fun answerLocally(question: String): Boolean {
+        val prompts = localPrompts()
+        val cap = if (personaLength == PersonaLength.Short) 1 else 2
+        val sentences = Channel<String>(Channel.UNLIMITED)
+        val said = StringBuilder()
+        coroutineScope {
+            val talker = launch {
+                while (true) {
+                    val first = sentences.receiveCatching().getOrNull() ?: break
+                    val batch = StringBuilder(first)
+                    while (true) {
+                        val more = sentences.tryReceive().getOrNull() ?: break
+                        batch.append(' ').append(more)
+                    }
+                    if (said.isNotEmpty()) said.append(' ')
+                    said.append(batch)
+                    say(batch.toString())
+                }
+            }
+            val stream = SpeechStream()
+            var sent = 0
+            fun offer(sentence: String) {
+                if (sent >= cap || sentence.isBlank() || echoesQuestion(sentence, question)) return
+                sent++
+                sentences.trySend(sentence)
+            }
+            withTimeoutOrNull(25_000) {
+                try {
+                    LocalLlm.stream(this@AssistantService, { prompts.forModel(it) }, question)
+                        .takeWhile { chunk ->
+                            stream.push(chunk).forEach(::offer)
+                            sent < cap
+                        }
+                        .collect { }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    CrashLog.note(this@AssistantService, TAG, "local stream failed: ${error.message}")
+                }
+            }
+            stream.finish()?.let(::offer)
+            sentences.close()
+            talker.join()
+        }
+        if (said.isNotEmpty()) AssistantMemory.lastSpokenReply = said.toString()
+        return said.isNotEmpty()
+    }
+
+    /** The small model sometimes opens by asking the question back. */
+    private fun echoesQuestion(sentence: String, question: String): Boolean {
+        if (!sentence.trimEnd().endsWith("?")) return false
+        val words = cleanWords(sentence)
+        if (words.isEmpty()) return false
+        return words.count { it in cleanWords(question) }.toDouble() / words.size >= 0.6
     }
 
     private fun spokenLocalAnswer(text: String, question: String): String {

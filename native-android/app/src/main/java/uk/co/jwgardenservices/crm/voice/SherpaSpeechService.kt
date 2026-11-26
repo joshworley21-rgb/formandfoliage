@@ -311,6 +311,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @Volatile
     private var preferPhoneMic = false
 
+    /** The noise-suppression switch, read once when listening starts. */
+    private var denoiseWanted = false
+
     /** True when this session explicitly pinned the built-in microphone. */
     @Volatile
     private var forcedBuiltInMic = false
@@ -713,6 +716,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             ?.any { it.type in BLUETOOTH_OUTPUT_TYPES } == true
         preferPhoneMic = preferSetting && bluetoothConnected
         bluetoothRouteAvailable = bluetoothConnected
+        denoiseWanted = AssistantPreferences.denoiseFlow(context).first()
         // Prefer-phone-mic captures on the built-in VOICE_RECOGNITION source
         // at 16 kHz while Bluetooth carries the reply as normal media audio.
         val micSource = silentFallbackSource
@@ -928,6 +932,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         val headsetRoute = !forcedBuiltInMic &&
             (record.routedDevice?.type in HEADSET_ROUTE_TYPES || bluetoothRouteAvailable)
         val fallbackGain = if (gainController == null) SOFTWARE_MIC_GAIN else 1f
+        val denoise = openDenoiser()
         val vad = createVad(
             if (headsetRoute) VAD_THRESHOLD_HEADSET else VAD_THRESHOLD_SPEAKER,
         )
@@ -1050,6 +1055,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 pausedClean = false
                 frames += 1
                 val raw = FloatArray(read) { buffer[it] / 32768.0f }
+                val heard = denoise?.process(raw) ?: raw
                 var framePeak = 0f
                 var frameEnergy = 0.0
                 for (sample in raw) {
@@ -1072,24 +1078,21 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     silentFrames = 0
                     silentPeak = 0f
                 }
-                val frameRms = sqrt(frameEnergy / raw.size).toFloat()
+                val frameRms = if (denoise != null) rmsOf(heard) else sqrt(frameEnergy / raw.size).toFloat()
                 beatRms = maxOf(beatRms, frameRms)
-                // Track the noise floor: fast down, very slow up, so the car's
-                // steady rumble does not count as a person talking.
-                noiseFloor = if (frameRms < noiseFloor) {
-                    noiseFloor * 0.8f + frameRms * 0.2f
-                } else {
-                    noiseFloor * 0.999f + frameRms * 0.001f
-                }
                 // AGC, not a step ladder: it follows the voice instead of the
                 // quietest recent frame, and never attenuates loud speech.
                 val samples = if (headsetRoute) {
-                    headsetAudio.process(raw)
+                    headsetAudio.process(heard)
                 } else {
-                    agc.process(boosted(raw, fallbackGain))
+                    agc.process(boosted(heard, fallbackGain))
                 }
                 vad?.acceptWaveform(samples)
                 val vadVoiced = vad?.isSpeechDetected() == true
+                // Track the noise floor: fast down, and quick up only while the
+                // VAD hears no voice outside a turn, so a steady engine or road
+                // rumble settles into the floor instead of reading as speech.
+                noiseFloor = NoiseFloorTracker.next(noiseFloor, frameRms, vadVoiced, hasSpeech)
                 // Silero misses quiet speech; raw RMS does not. Either is
                 // enough to open a turn, so a quiet sentence still endpoints.
                 val speechFloor = maxOf(RMS_SPEECH_THRESHOLD, noiseFloor * 2.2f)
@@ -1139,7 +1142,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 // crisp question gets a quick turn, a trailing "and…" gets
                 // room to finish while driving.
                 val quietFor = SystemClock.elapsedRealtime() - lastVoiceAt
-                val waitMs = SmartEndpointing.waitMs(text, onBluetooth)
+                val waitMs = SmartEndpointing.waitMs(text, onBluetooth, noiseFloor)
                 val endpoint = hasSpeech && !voiced && quietFor >= waitMs
                 val overflow = utterance.size >= MAX_UTTERANCE_SAMPLES
                 if (endpoint) {
@@ -1253,6 +1256,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             Log.e(TAG, "Recognition loop failed", error)
             if (!released) fail(error.message ?: "Speech recognition failed.")
         } finally {
+            denoise?.release()
             runCatching { vad?.release() }
             releaseMicEffects()
             runCatching { record.release() }
@@ -1277,6 +1281,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         val headsetRoute = !forcedBuiltInMic &&
             (record.routedDevice?.type in HEADSET_ROUTE_TYPES || bluetoothRouteAvailable)
         val fallbackGain = if (gainController == null) SOFTWARE_MIC_GAIN else 1f
+        val denoise = openDenoiser()
         val vad = createVad(
             if (headsetRoute) VAD_THRESHOLD_HEADSET else VAD_THRESHOLD_SPEAKER,
         )
@@ -1363,9 +1368,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 }
                 pausedClean = false
                 val raw = FloatArray(read) { buffer[it] / 32768.0f }
+                val heard = denoise?.process(raw) ?: raw
                 var energy = 0.0
                 for (sample in raw) energy += sample * sample
-                val frameRms = sqrt(energy / raw.size).toFloat()
+                val frameRms = if (denoise != null) rmsOf(heard) else sqrt(energy / raw.size).toFloat()
                 val framePeak = kotlin.math.abs(raw.maxOrNull() ?: 0f)
                 if (framePeak > 0.0025f) sawSignal = true
                 if (checkSilentInput && !sawSignal && !hasSpeech) {
@@ -1379,21 +1385,18 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     silentFrames = 0
                     silentPeak = 0f
                 }
-                noiseFloor = if (frameRms < noiseFloor) {
-                    noiseFloor * 0.8f + frameRms * 0.2f
-                } else {
-                    noiseFloor * 0.999f + frameRms * 0.001f
-                }
                 val samples = if (headsetRoute) {
-                    headsetAudio.process(raw)
+                    headsetAudio.process(heard)
                 } else {
-                    agc.process(boosted(raw, fallbackGain))
+                    agc.process(boosted(heard, fallbackGain))
                 }
                 vad?.acceptWaveform(samples)
+                val vadVoiced = vad?.isSpeechDetected() == true
+                noiseFloor = NoiseFloorTracker.next(noiseFloor, frameRms, vadVoiced, hasSpeech)
                 // Energy fallback: Silero misses quiet phone speech, but the
                 // floor keeps a car's road noise from opening a turn.
                 val speechFloor = maxOf(RMS_SPEECH_THRESHOLD, noiseFloor * 2.2f)
-                val voiced = vad?.isSpeechDetected() == true || frameRms >= speechFloor
+                val voiced = vadVoiced || frameRms >= speechFloor
                 val now = SystemClock.elapsedRealtime()
                 if (voiced) {
                     if (speechStartedAt == 0L) speechStartedAt = now
@@ -1425,7 +1428,12 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     // VAD hears silence instead of buffering seconds of dead
                     // air and decoding an empty window.
                     val waitMs = OFFLINE_ENDPOINT_MS +
-                        if (onBluetooth) SmartEndpointing.BLUETOOTH_EXTRA_MS else 0L
+                        (if (onBluetooth) SmartEndpointing.BLUETOOTH_EXTRA_MS else 0L) +
+                        (if (noiseFloor >= SmartEndpointing.NOISY_FLOOR) {
+                            SmartEndpointing.NOISY_EXTRA_MS
+                        } else {
+                            0L
+                        })
                     val endpoint = !voiced && now - lastVoiceAt >= waitMs
                     if (endpoint || utterance.size >= MAX_UTTERANCE_SAMPLES) {
                         var utterEnergy = 0.0
@@ -1484,6 +1492,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             Log.e(TAG, "Moonshine loop failed", error)
             if (!released) fail(error.message ?: "Speech recognition failed.")
         } finally {
+            denoise?.release()
             runCatching { vad?.release() }
             releaseMicEffects()
             runCatching { record.release() }
@@ -1664,6 +1673,21 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
      * on the recognizer's trailing-silence heuristic. Loaded from assets; if
      * it cannot be created, the recognizer's endpoint still ends the turn.
      */
+    /** A denoiser for this listening session when the switch is on and the model is installed. */
+    private fun openDenoiser(): SpeechDenoiser.Session? {
+        if (!denoiseWanted) return null
+        val session = SpeechDenoiser.open(context)
+        CrashLog.note(context, TAG, "noise suppression ${if (session != null) "on" else "unavailable"}")
+        return session
+    }
+
+    private fun rmsOf(samples: FloatArray): Float {
+        if (samples.isEmpty()) return 0f
+        var energy = 0.0
+        for (sample in samples) energy += sample * sample
+        return sqrt(energy / samples.size).toFloat()
+    }
+
     private fun createVad(threshold: Float = VAD_THRESHOLD_SPEAKER): Vad? {
         // Real file path, like the ASR model: the AssetManager buffer path is
         // unreliable and a wrong native path can abort the process.
