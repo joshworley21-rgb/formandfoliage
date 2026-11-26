@@ -39,7 +39,6 @@ import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -51,7 +50,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -84,6 +82,7 @@ import java.time.LocalTime
 import java.time.YearMonth
 import java.time.temporal.TemporalAdjusters
 import kotlinx.coroutines.launch
+import uk.co.jwgardenservices.crm.ui.common.JwAlertDialog
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.JobDraft
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
@@ -115,10 +114,16 @@ import uk.co.jwgardenservices.crm.ui.CrmViewModel
 import uk.co.jwgardenservices.crm.ui.common.DateField
 import uk.co.jwgardenservices.crm.ui.common.EmptyState
 import uk.co.jwgardenservices.crm.ui.common.ErrorState
+import uk.co.jwgardenservices.crm.ui.common.GoldFab
+import uk.co.jwgardenservices.crm.ui.common.HeaderGhostAction
+import uk.co.jwgardenservices.crm.ui.common.HeaderOutlineButton
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
-import uk.co.jwgardenservices.crm.ui.common.PageHeader
+import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
+import uk.co.jwgardenservices.crm.ui.common.SegmentedPills
 import uk.co.jwgardenservices.crm.ui.common.ShareText
 import uk.co.jwgardenservices.crm.ui.common.StatusChip
+import uk.co.jwgardenservices.crm.ui.theme.JwTheme
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 import uk.co.jwgardenservices.crm.voice.VoiceLines
 
 
@@ -297,62 +302,60 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
     }
 
     if (state.loading) {
-        Column(Modifier.padding(20.dp)) {
-            PageHeader("Schedule", "Plan the round and tick jobs off as you go.")
-            LoadingState()
+        Column(Modifier.fillMaxSize()) {
+            ScreenHeader(title = "Rota", subtitle = "Plan the round and tick jobs off as you go.")
+            LoadingState(modifier = Modifier.padding(horizontal = JwTokens.screenPadding))
         }
         return
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item {
-            PageHeader(
-                title = "Rota",
-                description = rangeLabel,
-                action = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = {
-                            when (rotaView) {
-                                RotaView.Week -> weekCursor = weekCursor.minusWeeks(1)
-                                RotaView.Month -> monthCursor = monthCursor.minusMonths(1)
-                                RotaView.List -> selectedDay = selectedDay.minusWeeks(1)
-                            }
-                        }) {
-                            Icon(Icons.Outlined.ChevronLeft, contentDescription = "Previous")
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                selectedDay = today
-                                weekCursor = today
-                                monthCursor = YearMonth.now()
-                                focusedDay = if (rotaView == RotaView.Month) today else null
-                            },
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                            modifier = Modifier.height(34.dp),
-                        ) {
-                            Text("Today", style = MaterialTheme.typography.labelLarge)
-                        }
-                        IconButton(onClick = {
-                            when (rotaView) {
-                                RotaView.Week -> weekCursor = weekCursor.plusWeeks(1)
-                                RotaView.Month -> monthCursor = monthCursor.plusMonths(1)
-                                RotaView.List -> selectedDay = selectedDay.plusWeeks(1)
-                            }
-                        }) {
-                            Icon(Icons.Outlined.ChevronRight, contentDescription = "Next")
-                        }
+    Column(modifier = Modifier.fillMaxSize()) {
+    ScreenHeader(
+        title = "Rota",
+        subtitle = rangeLabel,
+        topActions = {
+            HeaderGhostAction(
+                icon = Icons.Outlined.ChevronLeft,
+                contentDescription = "Previous",
+                onClick = {
+                    when (rotaView) {
+                        RotaView.Week -> weekCursor = weekCursor.minusWeeks(1)
+                        RotaView.Month -> monthCursor = monthCursor.minusMonths(1)
+                        RotaView.List -> selectedDay = selectedDay.minusWeeks(1)
                     }
                 },
             )
-        }
-
+            HeaderOutlineButton(
+                label = "Today",
+                onClick = {
+                    selectedDay = today
+                    weekCursor = today
+                    monthCursor = YearMonth.now()
+                    focusedDay = if (rotaView == RotaView.Month) today else null
+                },
+            )
+            HeaderGhostAction(
+                icon = Icons.Outlined.ChevronRight,
+                contentDescription = "Next",
+                onClick = {
+                    when (rotaView) {
+                        RotaView.Week -> weekCursor = weekCursor.plusWeeks(1)
+                        RotaView.Month -> monthCursor = monthCursor.plusMonths(1)
+                        RotaView.List -> selectedDay = selectedDay.plusWeeks(1)
+                    }
+                },
+            )
+        },
+    )
+    LazyColumn(
+        state = listState,
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxWidth(),
+        contentPadding = PaddingValues(JwTokens.screenPadding),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
         item {
             RotaUtilities(
                 recurringOnly = recurringOnly,
@@ -568,27 +571,21 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
             }
         }
     }
+    }
 
     if (!isStaff) {
-        Surface(
+        GoldFab(
             onClick = {
                 saveError = null
                 bookingDate = today
                 booking = true
             },
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.tertiary,
-            contentColor = MaterialTheme.colorScheme.onTertiary,
-            shadowElevation = 8.dp,
+            contentDescription = "Add a job",
+            icon = Icons.Outlined.Add,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(20.dp)
-                .size(56.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Outlined.Add, contentDescription = "Add a job")
-            }
-        }
+                .padding(JwTokens.fabMargin),
+        )
     }
     }
 
@@ -793,7 +790,7 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
 
     pendingSeriesMove?.let { (job, day) ->
         val currentDay = parseTimestamp(job.startsAt)?.localDate()?.formatDayMonth() ?: "this visit"
-        AlertDialog(
+        JwAlertDialog(
             onDismissRequest = { pendingSeriesMove = null },
             title = { Text("Move the whole run?") },
             text = {
@@ -907,7 +904,7 @@ private fun UtilityLink(
 ) {
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(JwTokens.tinyRadius))
             .clickable(onClick = onClick)
             .padding(vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -937,91 +934,12 @@ private fun UtilityLink(
 
 @Composable
 private fun RotaViewTabs(view: RotaView, onView: (RotaView) -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.secondary,
-    ) {
-        Row(modifier = Modifier.padding(3.dp)) {
-            RotaView.entries.forEach { option ->
-                val active = option == view
-                Surface(
-                    onClick = { onView(option) },
-                    shape = RoundedCornerShape(50),
-                    color = if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
-                    contentColor = if (active) {
-                        MaterialTheme.colorScheme.onPrimary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(
-                        text = option.label,
-                        style = MaterialTheme.typography.labelLarge,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(vertical = 8.dp),
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RotaControls(
-    view: RotaView,
-    onView: (RotaView) -> Unit,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
-    onToday: () -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconButton(onClick = onPrevious) {
-            Icon(Icons.Outlined.ChevronLeft, contentDescription = "Previous")
-        }
-        OutlinedButton(
-            onClick = onToday,
-            shape = RoundedCornerShape(10.dp),
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-            modifier = Modifier.height(34.dp),
-        ) {
-            Text("Today", style = MaterialTheme.typography.labelLarge)
-        }
-        IconButton(onClick = onNext) {
-            Icon(Icons.Outlined.ChevronRight, contentDescription = "Next")
-        }
-        Spacer(Modifier.weight(1f))
-        Row(
-            modifier = Modifier
-                .background(MaterialTheme.colorScheme.secondary, RoundedCornerShape(50))
-                .padding(3.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            RotaView.entries.forEach { option ->
-                val active = option == view
-                Surface(
-                    onClick = { onView(option) },
-                    shape = RoundedCornerShape(50),
-                    color = if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
-                    contentColor = if (active) {
-                        MaterialTheme.colorScheme.onPrimary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                ) {
-                    Text(
-                        text = option.label,
-                        style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
-                }
-            }
-        }
-    }
+    SegmentedPills(
+        options = RotaView.entries,
+        selected = view,
+        onSelect = onView,
+        label = { it.label },
+    )
 }
 
 @Composable
@@ -1036,15 +954,15 @@ private fun WeekTotals(
     fun value(amount: Double): String = if (hideMoney) "•••" else moneyCompact(amount)
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
+        shape = RoundedCornerShape(JwTokens.bandRadius),
+        color = JwTheme.colors.forest,
+        contentColor = JwTheme.colors.onForestMuted,
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = "WEEK TOTALS",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.55f),
+                color = JwTheme.colors.onForestMuted.copy(alpha = 0.55f),
             )
             Spacer(Modifier.height(8.dp))
             Row(modifier = Modifier.fillMaxWidth()) {
@@ -1058,7 +976,7 @@ private fun WeekTotals(
                 Text(
                     text = "Overheads include ${if (hideMoney) "materials" else moneyCompact(materials)} logged this week.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.5f),
+                    color = JwTheme.colors.onForestMuted.copy(alpha = 0.5f),
                 )
             }
         }
@@ -1077,12 +995,12 @@ private fun WeekFigure(
             text = value,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
-            color = if (brass) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onPrimary,
+            color = if (brass) JwTheme.colors.brass else JwTheme.colors.onForestMuted,
         )
         Text(
             text = label,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.55f),
+            color = JwTheme.colors.onForestMuted.copy(alpha = 0.55f),
         )
     }
 }
@@ -1112,7 +1030,7 @@ private fun WeekBoard(
             Column(modifier = Modifier.width(150.dp)) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(JwTokens.smallRadius),
                     color = MaterialTheme.colorScheme.secondary,
                     contentColor = MaterialTheme.colorScheme.onSurface,
                     border = if (day == today) {
@@ -1169,14 +1087,15 @@ private fun WeekBoard(
 
 @Composable
 private fun DashedAddSlot(onClick: () -> Unit) {
+    val dashedColour = JwTheme.colors.dashed
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(JwTokens.smallRadius))
             .clickable(onClick = onClick)
             .drawBehind {
                 drawRoundRect(
-                    color = Color(0xFF9CA88F),
+                    color = dashedColour,
                     style = Stroke(
                         width = 1.dp.toPx(),
                         pathEffect = PathEffect.dashPathEffect(floatArrayOf(9f, 7f)),
@@ -1206,7 +1125,7 @@ private fun WeekJobCard(
     val end = starts?.plusSeconds((job.durationMinutes * 60).toLong())
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(JwTokens.smallRadius),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         modifier = Modifier.fillMaxWidth(),
@@ -1266,7 +1185,7 @@ private fun StaffSummary(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(JwTokens.bandRadius),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
     ) {
@@ -1342,78 +1261,13 @@ private fun StaffRow(name: String, days: Int?, hours: Double?) {
 }
 
 @Composable
-private fun WeekClientSummary(summary: List<Triple<String, Int, Double>>) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-    ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.primary)
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-            ) {
-                Text(
-                    text = "Clients — this week",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                )
-            }
-            if (summary.isEmpty()) {
-                Text(
-                    text = "Nothing on the rota this week yet.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(16.dp),
-                )
-            } else {
-                summary.take(10).forEachIndexed { index, (name, days, hours) ->
-                    if (index > 0) {
-                        HorizontalDivider(
-                            color = MaterialTheme.colorScheme.outlineVariant,
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                        )
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = name,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            text = "$days ${if (days == 1) "day" else "days"}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            text = "${hours.toInt()} hrs",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun DayHeading(day: LocalDate, isToday: Boolean) {
     if (isToday) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            color = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
+            shape = RoundedCornerShape(JwTokens.cardRadius),
+            color = JwTheme.colors.forest,
+            contentColor = JwTheme.colors.onForestMuted,
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
@@ -1442,7 +1296,7 @@ private fun DayHeading(day: LocalDate, isToday: Boolean) {
 private fun CalendarEventRow(event: CalendarEvent) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(JwTokens.cardRadius),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
     ) {
@@ -1491,7 +1345,7 @@ private fun JobRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(enabled = !isStaff, onClick = onEdit),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(JwTokens.cardRadius),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
     ) {

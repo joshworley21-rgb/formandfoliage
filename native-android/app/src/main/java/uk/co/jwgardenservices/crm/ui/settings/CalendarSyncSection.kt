@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -31,8 +33,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import uk.co.jwgardenservices.crm.ui.common.OptionPicker
 import uk.co.jwgardenservices.crm.ui.common.SectionCard
+import uk.co.jwgardenservices.crm.ui.common.SegmentedPills
 import uk.co.jwgardenservices.crm.voice.CalendarSync
 import uk.co.jwgardenservices.crm.voice.CalendarTag
 import uk.co.jwgardenservices.crm.voice.DeviceCalendar
@@ -68,7 +70,11 @@ fun CalendarSyncSection() {
         loading = false
     }
 
-    SectionCard(title = "Google Calendar") {
+    SectionCard(
+        title = "Google Calendar",
+        subtitle = "Read-only context beside the round.",
+        leadingIcon = Icons.Outlined.CalendarMonth,
+    ) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -125,13 +131,13 @@ fun CalendarSyncSection() {
                     }
                 }
                 val selected = tags[calendar.id] ?: CalendarTag.Ignore
-                OptionPicker(
+                SegmentedPills(
                     options = CalendarTag.entries,
                     selected = selected,
-                    label = { it?.label ?: CalendarTag.Ignore.label },
                     onSelect = { tag ->
                         scope.launch { CalendarSync.setTag(context, calendar.id, tag) }
                     },
+                    label = { it.label },
                 )
             }
 

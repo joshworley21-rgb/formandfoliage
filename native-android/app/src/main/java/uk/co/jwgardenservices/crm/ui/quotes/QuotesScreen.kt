@@ -5,7 +5,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,7 +38,6 @@ import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.RequestQuote
 import androidx.compose.material.icons.outlined.Send
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -74,6 +72,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.LocalDate
 import kotlin.math.abs
 import kotlinx.coroutines.launch
+import uk.co.jwgardenservices.crm.ui.common.JwAlertDialog
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.Quote
 import uk.co.jwgardenservices.crm.data.model.QuoteDraft
@@ -91,15 +90,23 @@ import uk.co.jwgardenservices.crm.domain.quoteLink
 import uk.co.jwgardenservices.crm.domain.quoteTotals
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
 import uk.co.jwgardenservices.crm.ui.common.DateField
+import uk.co.jwgardenservices.crm.ui.common.DialogTitle
 import uk.co.jwgardenservices.crm.ui.common.EmptyState
 import uk.co.jwgardenservices.crm.ui.common.ErrorState
+import uk.co.jwgardenservices.crm.ui.common.FilterPillRow
+import uk.co.jwgardenservices.crm.ui.common.GoldFab
+import uk.co.jwgardenservices.crm.ui.common.JwDialog
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
 import uk.co.jwgardenservices.crm.ui.common.OptionPicker
-import uk.co.jwgardenservices.crm.ui.common.PageHeader
+import uk.co.jwgardenservices.crm.ui.common.PillOption
+import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
 import uk.co.jwgardenservices.crm.ui.common.ShareText
 import uk.co.jwgardenservices.crm.ui.common.StatusChip
-import uk.co.jwgardenservices.crm.ui.theme.DarkWarning
-import uk.co.jwgardenservices.crm.ui.theme.LightWarning
+import uk.co.jwgardenservices.crm.ui.common.StatusStripe
+import uk.co.jwgardenservices.crm.ui.common.StatusTile
+import uk.co.jwgardenservices.crm.ui.common.SummaryStrip
+import uk.co.jwgardenservices.crm.ui.theme.JwTheme
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 
 private const val SITE_URL_MISSING =
     "Add your website address in Settings first — the customer needs a link to accept the quote."
@@ -160,7 +167,7 @@ fun QuotesScreen(viewModel: CrmViewModel) {
     val awaiting = shown.count { it.second == "sent" }
 
     val origin = state.settings?.publicSiteUrl?.trim()?.trimEnd('/')
-    val warning = if (isSystemInDarkTheme()) DarkWarning else LightWarning
+    val warning = JwTheme.colors.attention
     val pendingQuote by viewModel.pendingQuoteDraft.collectAsStateWithLifecycle()
 
     LaunchedEffect(pendingQuote) {
@@ -250,32 +257,91 @@ fun QuotesScreen(viewModel: CrmViewModel) {
     }
 
     if (state.loading) {
-        Column(Modifier.padding(20.dp)) {
-            PageHeader("Quotes", "Price up work and let the customer accept it online.")
-            LoadingState()
+        Column(Modifier.fillMaxSize()) {
+            ScreenHeader(
+                title = "Quotes",
+                subtitle = "Price up work and let the customer accept it online.",
+            )
+            LoadingState(modifier = Modifier.padding(JwTokens.screenPadding))
         }
         return
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            item {
-                QuotesHeader(
-                    counts = counts,
-                    filter = filter,
-                    onFilter = { filter = it },
+        Column(modifier = Modifier.fillMaxSize()) {
+                ScreenHeader(
+                    title = "Quotes",
+                    subtitle = "Proposals & price agreements",
+                    footer = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            StatusTile(
+                                label = "Drafts",
+                                count = counts["draft"] ?: 0,
+                                icon = Icons.Outlined.Description,
+                                tint = JwTheme.colors.brass,
+                                active = filter == "draft",
+                                onClick = { filter = if (filter == "draft") "all" else "draft" },
+                                modifier = Modifier.weight(1f),
+                            )
+                            StatusTile(
+                                label = "Sent",
+                                count = counts["sent"] ?: 0,
+                                icon = Icons.Outlined.Send,
+                                tint = JwTheme.colors.info,
+                                active = filter == "sent",
+                                onClick = { filter = if (filter == "sent") "all" else "sent" },
+                                modifier = Modifier.weight(1f),
+                            )
+                            StatusTile(
+                                label = "Approved",
+                                count = counts["approved"] ?: 0,
+                                icon = Icons.Outlined.CheckCircle,
+                                tint = JwTheme.colors.positive,
+                                active = filter == "approved",
+                                onClick = { filter = if (filter == "approved") "all" else "approved" },
+                                modifier = Modifier.weight(1f),
+                            )
+                            StatusTile(
+                                label = "Converted",
+                                count = counts["converted"] ?: 0,
+                                icon = Icons.Outlined.HowToReg,
+                                tint = JwTheme.colors.onForestMuted.copy(alpha = 0.7f),
+                                active = filter == "converted",
+                                onClick = { filter = if (filter == "converted") "all" else "converted" },
+                                modifier = Modifier.weight(1f),
+                            )
+                            StatusTile(
+                                label = "Declined",
+                                count = counts["declined"] ?: 0,
+                                icon = Icons.Outlined.Cancel,
+                                tint = JwTheme.colors.attention,
+                                active = filter == "declined",
+                                onClick = { filter = if (filter == "declined") "all" else "declined" },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    },
                 )
-            }
+
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentPadding = PaddingValues(
+                    start = JwTokens.screenPadding,
+                    end = JwTokens.screenPadding,
+                    top = 14.dp,
+                    bottom = 24.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
 
             if (state.error != null) {
                 item {
-                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                        ErrorState(state.error!!, viewModel::refresh)
-                    }
+                    ErrorState(state.error!!, viewModel::refresh)
                 }
             }
 
@@ -285,24 +351,30 @@ fun QuotesScreen(viewModel: CrmViewModel) {
                         icon = Icons.Outlined.RequestQuote,
                         title = "No quotes yet",
                         body = "Price up the first job and send the customer a link they can accept with one tap.",
-                        modifier = Modifier.padding(horizontal = 16.dp),
                     )
                 }
             } else {
                 item {
-                    FilterPills(
-                        counts = counts,
-                        filter = filter,
-                        onFilter = { filter = it },
-                        modifier = Modifier.padding(horizontal = 16.dp),
+                    FilterPillRow(
+                        options = listOf(
+                            PillOption("all", "All", counts["all"] ?: 0),
+                            PillOption("draft", "Draft", counts["draft"] ?: 0),
+                            PillOption("sent", "Sent", counts["sent"] ?: 0),
+                            PillOption("approved", "Approved", counts["approved"] ?: 0),
+                            PillOption("declined", "Declined", counts["declined"] ?: 0),
+                        ),
+                        selected = filter,
+                        onSelect = { filter = it },
                     )
                 }
                 item {
                     SummaryStrip(
-                        count = shown.size,
-                        total = shownTotal,
-                        awaiting = awaiting,
-                        modifier = Modifier.padding(horizontal = 16.dp),
+                        text = buildString {
+                            append("${shown.size} ${if (shown.size == 1) "quote" else "quotes"} · ")
+                            append("${moneyCompact(shownTotal)} total")
+                            if (awaiting > 0) append(" · $awaiting awaiting response")
+                        },
+                        trailing = "Newest ↓",
                     )
                 }
                 item {
@@ -311,9 +383,7 @@ fun QuotesScreen(viewModel: CrmViewModel) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
                 items(shown, key = { it.first.id }) { (quote, status) ->
@@ -328,30 +398,23 @@ fun QuotesScreen(viewModel: CrmViewModel) {
                         onStatus = { next -> setStatus(quote, next) },
                         onDuplicate = { duplicate(quote) },
                         onDelete = { deleting = quote },
-                        modifier = Modifier.padding(horizontal = 16.dp),
                     )
                 }
             }
         }
+        }
 
-        Surface(
+        GoldFab(
             onClick = {
                 editorError = null
                 editor = QuoteEditorState(quote = null, items = emptyList())
             },
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.tertiary,
-            contentColor = MaterialTheme.colorScheme.onTertiary,
-            shadowElevation = 8.dp,
+            contentDescription = "New quote",
+            icon = Icons.Outlined.Add,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(20.dp)
-                .size(56.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Outlined.Add, contentDescription = "New quote")
-            }
-        }
+                .padding(JwTokens.fabMargin),
+        )
     }
 
     editor?.let { quoteEditor ->
@@ -427,7 +490,7 @@ fun QuotesScreen(viewModel: CrmViewModel) {
     }
 
     deleting?.let { quote ->
-        AlertDialog(
+        JwAlertDialog(
             onDismissRequest = { deleting = null },
             title = { Text("Delete ${quote.number}?") },
             text = { Text("This removes the quote and its lines. A link already sent will stop working.") },
@@ -440,219 +503,6 @@ fun QuotesScreen(viewModel: CrmViewModel) {
                 TextButton(onClick = { deleting = null }) { Text("Cancel") }
             },
         )
-    }
-}
-
-@Composable
-private fun QuotesHeader(
-    counts: Map<String, Int>,
-    filter: String,
-    onFilter: (String) -> Unit,
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
-    ) {
-        Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 16.dp)) {
-            Text(
-                text = "Quotes",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "Proposals & price agreements",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f),
-            )
-            Spacer(Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                StatusTile(
-                    label = "Drafts",
-                    count = counts["draft"] ?: 0,
-                    icon = Icons.Outlined.Description,
-                    tint = MaterialTheme.colorScheme.tertiary,
-                    active = filter == "draft",
-                    onClick = { onFilter(if (filter == "draft") "all" else "draft") },
-                    modifier = Modifier.weight(1f),
-                )
-                StatusTile(
-                    label = "Sent",
-                    count = counts["sent"] ?: 0,
-                    icon = Icons.Outlined.Send,
-                    tint = Color(0xFF9FB6D8),
-                    active = filter == "sent",
-                    onClick = { onFilter(if (filter == "sent") "all" else "sent") },
-                    modifier = Modifier.weight(1f),
-                )
-                StatusTile(
-                    label = "Approved",
-                    count = counts["approved"] ?: 0,
-                    icon = Icons.Outlined.CheckCircle,
-                    tint = Color(0xFF8FCF9E),
-                    active = filter == "approved",
-                    onClick = { onFilter(if (filter == "approved") "all" else "approved") },
-                    modifier = Modifier.weight(1f),
-                )
-                StatusTile(
-                    label = "Converted",
-                    count = counts["converted"] ?: 0,
-                    icon = Icons.Outlined.HowToReg,
-                    tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.65f),
-                    active = filter == "converted",
-                    onClick = { onFilter(if (filter == "converted") "all" else "converted") },
-                    modifier = Modifier.weight(1f),
-                )
-                StatusTile(
-                    label = "Declined",
-                    count = counts["declined"] ?: 0,
-                    icon = Icons.Outlined.Cancel,
-                    tint = Color(0xFFFF9A84),
-                    active = filter == "declined",
-                    onClick = { onFilter(if (filter == "declined") "all" else "declined") },
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatusTile(
-    label: String,
-    count: Int,
-    icon: ImageVector,
-    tint: Color,
-    active: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = if (active) 0.18f else 0.08f),
-        contentColor = MaterialTheme.colorScheme.onPrimary,
-        border = if (active) {
-            BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.45f))
-        } else {
-            null
-        },
-    ) {
-        Column(
-            modifier = Modifier.padding(vertical = 7.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = tint,
-                modifier = Modifier.size(16.dp),
-            )
-            Spacer(Modifier.height(3.dp))
-            Text(
-                text = count.toString(),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp, letterSpacing = 0.sp),
-                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.65f),
-                maxLines = 1,
-            )
-        }
-    }
-}
-
-@Composable
-private fun FilterPills(
-    counts: Map<String, Int>,
-    filter: String,
-    onFilter: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val filters = listOf(
-        "all" to "All",
-        "draft" to "Draft",
-        "sent" to "Sent",
-        "approved" to "Approved",
-        "declined" to "Declined",
-    )
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        filters.forEach { (key, label) ->
-            val active = filter == key
-            Surface(
-                onClick = { onFilter(key) },
-                shape = RoundedCornerShape(50),
-                color = if (active) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.secondary,
-                contentColor = if (active) {
-                    MaterialTheme.colorScheme.onSurface
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                border = if (active) {
-                    BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                } else {
-                    null
-                },
-            ) {
-                Text(
-                    text = "$label (${counts[key] ?: 0})",
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SummaryStrip(
-    count: Int,
-    total: Double,
-    awaiting: Int,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = buildString {
-                    append("$count ${if (count == 1) "quote" else "quotes"} · ")
-                    append("${moneyCompact(total)} total")
-                    if (awaiting > 0) append(" · $awaiting awaiting response")
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.secondary,
-            ) {
-                Text(
-                    text = "Newest ↓",
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
-        }
     }
 }
 
@@ -679,8 +529,8 @@ private fun QuoteCard(
         else -> "Draft"
     }
     val chipColor = when (display) {
-        "draft" -> MaterialTheme.colorScheme.tertiary
-        "sent" -> Color(0xFF4C6A92)
+        "draft" -> JwTheme.colors.brassDeep
+        "sent" -> JwTheme.colors.info
         "accepted" -> MaterialTheme.colorScheme.primary
         "declined" -> MaterialTheme.colorScheme.error
         else -> warning
@@ -704,18 +554,13 @@ private fun QuoteCard(
                     onHorizontalDrag = { _, amount -> drag += amount },
                 )
             },
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(JwTokens.cardRadius),
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        border = BorderStroke(JwTokens.hairline, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Row(modifier = Modifier.height(IntrinsicSize.Min)) {
-            Box(
-                modifier = Modifier
-                    .width(4.dp)
-                    .fillMaxHeight()
-                    .background(chipColor),
-            )
-            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp)) {
+            StatusStripe(chipColor)
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                 Row(verticalAlignment = Alignment.Top) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
@@ -956,25 +801,8 @@ private fun QuoteEditorDialog(
     val validUntilValid = validUntil.isBlank() || parseDate(validUntil) != null
     val canSave = contactName.isNotBlank() && drafts.isNotEmpty() && validUntilValid && !saving
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 16.dp)
-                .heightIn(max = 800.dp),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    text = if (existing == null) "New quote" else "Edit quote",
-                    style = MaterialTheme.typography.headlineSmall,
-                )
+    JwDialog(onDismissRequest = onDismiss, maxHeight = 800.dp) {
+                DialogTitle(if (existing == null) "New quote" else "Edit quote")
 
                 OptionPicker(
                     options = clients,
@@ -1103,7 +931,7 @@ private fun QuoteEditorDialog(
 
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(JwTokens.smallRadius),
                     color = MaterialTheme.colorScheme.secondary,
                 ) {
                     Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
@@ -1165,8 +993,6 @@ private fun QuoteEditorDialog(
                         Text(if (existing == null) "Create quote" else "Save changes")
                     }
                 }
-            }
-        }
     }
 }
 
@@ -1180,22 +1006,8 @@ private fun SendQuoteDialog(
 ) {
     var message by remember(quote.id) { mutableStateOf("") }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 16.dp)
-                .heightIn(max = 640.dp),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text("Email ${quote.number}", style = MaterialTheme.typography.headlineSmall)
+    JwDialog(onDismissRequest = onDismiss, maxHeight = 640.dp) {
+                DialogTitle("Email ${quote.number}")
                 Text(
                     text = "Leave the message blank to use the standard wording. Anything here appears above the quote table.",
                     style = MaterialTheme.typography.bodySmall,
@@ -1234,8 +1046,6 @@ private fun SendQuoteDialog(
                         Text(if (saving) "Sending…" else "Send quote")
                     }
                 }
-            }
-        }
     }
 }
 

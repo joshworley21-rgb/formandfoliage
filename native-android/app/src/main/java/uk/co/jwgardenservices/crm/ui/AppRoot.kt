@@ -20,10 +20,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material3.Icon
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import uk.co.jwgardenservices.crm.ui.common.JwAlertDialog
 import uk.co.jwgardenservices.crm.core.CrashLog
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -41,6 +41,7 @@ import androidx.fragment.app.FragmentActivity
 import uk.co.jwgardenservices.crm.core.AppLock
 import uk.co.jwgardenservices.crm.data.repository.AuthState
 import uk.co.jwgardenservices.crm.ui.auth.AuthScreen
+import uk.co.jwgardenservices.crm.ui.common.ErrorState
 import uk.co.jwgardenservices.crm.ui.components.BrandMark
 import uk.co.jwgardenservices.crm.ui.main.MainScaffold
 
@@ -53,7 +54,7 @@ fun AppRoot(
     LaunchedEffect(Unit) { crashText = CrashLog.read(context) }
 
     crashText?.let { report ->
-        AlertDialog(
+        JwAlertDialog(
             onDismissRequest = { },
             title = { Text("Last crash report") },
             text = {
@@ -132,17 +133,7 @@ private fun WorkspaceErrorScreen(message: String, onRetry: () -> Unit) {
             .padding(24.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-            Button(onClick = onRetry) { Text("Try again") }
-        }
+        ErrorState(message = message, onRetry = onRetry)
     }
 }
 

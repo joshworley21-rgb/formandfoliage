@@ -78,6 +78,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.widget.Toast
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
+import uk.co.jwgardenservices.crm.ui.theme.JwTheme
 import uk.co.jwgardenservices.crm.voice.AssistantService
 import uk.co.jwgardenservices.crm.voice.AssistantTurn
 import uk.co.jwgardenservices.crm.voice.CallLedger
@@ -281,7 +283,7 @@ fun AssistantScreen() {
         Spacer(Modifier.height(10.dp))
 
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(JwTokens.cardRadius),
             color = MaterialTheme.colorScheme.surfaceVariant,
         ) {
             Text(
@@ -322,8 +324,8 @@ fun AssistantScreen() {
 
         CallButton(
             label = if (granted) "Call" else "Allow microphone",
-            container = CallGreen,
-            content = Color.White,
+            container = JwTheme.colors.callGreen,
+            content = JwTheme.colors.onCall,
             onClick = {
                 if (granted) startCall(context) else permission.launch(Manifest.permission.RECORD_AUDIO)
             },
@@ -356,12 +358,6 @@ fun AssistantScreen() {
     }
 }
 
-/** Phone-call colours, independent of the app theme. */
-private val BarGreen = Color(0xFFB6E388)
-
-/** The familiar phone-call green, independent of the app's theme. */
-private val CallGreen = Color(0xFF1B8F3A)
-
 /** Glowing orb at the centre of the call sheet. */
 @Composable
 private fun CallOrb(
@@ -393,7 +389,7 @@ private fun CallOrb(
             modifier = Modifier
                 .size(size)
                 .clip(CircleShape)
-                .background(if (active) BarGreen else MaterialTheme.colorScheme.surfaceVariant)
+                .background(if (active) JwTheme.colors.callBar else MaterialTheme.colorScheme.surfaceVariant)
                 .alpha(if (active) glow * 0.35f else 0.06f),
         )
         Box(
@@ -404,7 +400,7 @@ private fun CallOrb(
                     when {
                         !active -> MaterialTheme.colorScheme.surface
                         speaking -> MaterialTheme.colorScheme.primaryContainer
-                        else -> Color(0xFF1B8F3A)
+                        else -> JwTheme.colors.callGreen
                     },
                 ),
             contentAlignment = Alignment.Center,
@@ -419,7 +415,7 @@ private fun CallOrb(
                 Icon(
                     imageVector = Icons.Filled.Mic,
                     contentDescription = null,
-                    tint = if (active) Color(0xFFE9F7DC) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = if (active) JwTheme.colors.onCall else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(size * 0.28f),
                 )
             }
@@ -473,7 +469,7 @@ private fun SpeakingBars(active: Boolean, speaking: Boolean, level: Float) {
                     .width(6.dp)
                     .height(height)
                     .clip(CircleShape)
-                    .background(if (active) BarGreen else MaterialTheme.colorScheme.surfaceVariant),
+                    .background(if (active) JwTheme.colors.callBar else MaterialTheme.colorScheme.surfaceVariant),
             )
         }
     }
@@ -488,7 +484,7 @@ private fun Transcript(
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(JwTokens.bandRadius),
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
         val listState = rememberLazyListState()
@@ -543,7 +539,7 @@ private fun PostCallSummary(
     onDismiss: () -> Unit,
 ) {
     Surface(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(JwTokens.controlRadius),
         color = MaterialTheme.colorScheme.surfaceVariant,
         contentColor = MaterialTheme.colorScheme.onSurface,
         modifier = Modifier.fillMaxWidth(),
@@ -607,7 +603,7 @@ private fun Bubble(text: String, fromUser: Boolean, pending: Boolean = false) {
         horizontalArrangement = if (fromUser) Arrangement.End else Arrangement.Start,
     ) {
         Surface(
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(JwTokens.cardRadius),
             color = container,
             contentColor = content,
             modifier = Modifier.widthIn(max = 300.dp),

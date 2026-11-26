@@ -1,5 +1,6 @@
 package uk.co.jwgardenservices.crm.ui.voice
 
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -51,6 +52,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import uk.co.jwgardenservices.crm.ui.theme.JwTheme
 
 /**
  * The in-call screen, designed to be read at a glance in a van: status at
@@ -144,10 +146,10 @@ fun CallScreen(
         Spacer(Modifier.height(if (compact) 12.dp else 20.dp))
         Button(
             onClick = onEnd,
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(JwTokens.cardRadius),
             colors = ButtonDefaults.buttonColors(
-                containerColor = EndRed,
-                contentColor = Color.White,
+                containerColor = JwTheme.colors.callEnd,
+                contentColor = JwTheme.colors.onCall,
             ),
             modifier = Modifier
                 .fillMaxWidth()
@@ -212,6 +214,8 @@ private fun CallVisualizer(speaking: Boolean, level: Float, size: Dp) {
         label = "glow",
     )
 
+    val callColour = JwTheme.colors.callGreen
+    val overlayColour = JwTheme.colors.onCall
     Canvas(modifier = Modifier.size(size)) {
         val centre = Offset(size.toPx() / 2f, size.toPx() / 2f)
         val base = size.toPx() * 0.32f
@@ -220,23 +224,23 @@ private fun CallVisualizer(speaking: Boolean, level: Float, size: Dp) {
 
         // Outer halo: loudest when the assistant has the floor.
         drawCircle(
-            color = Green.copy(alpha = glow * (if (speaking) 0.5f else 0.3f) + live * 0.2f),
+            color = callColour.copy(alpha = glow * (if (speaking) 0.5f else 0.3f) + live * 0.2f),
             radius = base * scale * 1.35f,
             center = centre,
         )
         // Reactive ring: swells with the owner's own voice.
         if (live > 0.02f) {
             drawCircle(
-                color = Green.copy(alpha = 0.25f + live * 0.5f),
+                color = callColour.copy(alpha = 0.25f + live * 0.5f),
                 radius = base * (1.15f + live * 0.5f),
                 center = centre,
                 style = Stroke(width = 6f, cap = StrokeCap.Round),
             )
         }
         // The core disc.
-        drawCircle(color = Green.copy(alpha = 0.92f), radius = base * scale, center = centre)
+        drawCircle(color = callColour.copy(alpha = 0.92f), radius = base * scale, center = centre)
         drawCircle(
-            color = Color.White.copy(alpha = 0.12f),
+            color = overlayColour.copy(alpha = 0.12f),
             radius = base * scale * 0.72f,
             center = centre,
         )
@@ -253,8 +257,8 @@ private fun RoundCallToggle(
     Surface(
         onClick = onClick,
         shape = CircleShape,
-        color = if (active) ToggleActive else MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = if (active) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+        color = if (active) JwTheme.colors.callToggle else MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = if (active) JwTheme.colors.onCall else MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.size(58.dp),
     ) {
         Box(contentAlignment = Alignment.Center) {
@@ -262,7 +266,3 @@ private fun RoundCallToggle(
         }
     }
 }
-
-private val Green = Color(0xFF63C176)
-private val EndRed = Color(0xFFC33B3B)
-private val ToggleActive = Color(0xFF2C4A2E)

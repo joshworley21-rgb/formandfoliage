@@ -16,7 +16,7 @@ import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
 object AsrHotwords {
     private const val TAG = "AsrHotwords"
     private const val MAX_NAMES = 40
-    private const val MAX_TOTAL = 64
+    private const val MAX_TOTAL = 90
 
     /** Client names for this call, sanitised for the tokenizer. */
     suspend fun names(): List<String> = runCatching {
@@ -33,7 +33,18 @@ object AsrHotwords {
      * and trade terms from the bundled website profile.
      */
     suspend fun correctionTerms(context: android.content.Context): List<String> {
-        val clients = names()
+        val clientRows = runCatching {
+            ServiceLocator.crmRepository.observeClients().first()
+        }.getOrDefault(emptyList())
+        val rawClients = clientRows.map { it.name.trim() }
+            .filter { it.length in 3..30 }
+            .take(MAX_NAMES)
+        val rawVillages = clientRows
+            .flatMap { villagesFromAddress(it.address) }
+            .filter { it.length in 3..30 }
+            .distinct()
+        val clients = rawClients.map { sanitize(it) }
+        val villages = rawVillages.map { sanitize(it) }
         val profile = BusinessBrain.load(context)
         val aliases = runCatching {
             ServiceLocator.crmRepository.allVoiceAliases().map { sanitize(it.second) }
@@ -41,7 +52,28 @@ object AsrHotwords {
         val patch = (BusinessBrain.vocabulary(profile) + BusinessBrain.tradeTerms(profile))
             .map { sanitize(it) }
             .filter { it.length in 3..30 }
-        return (clients + aliases + patch).distinct().take(MAX_TOTAL)
+        val dictionary = PronunciationDictionary.canonicalTerms()
+            .map { sanitize(it) }
+            .filter { it.length in 2..30 }
+        // Keep the shared dictionary and the live clients available on both
+        // the ASR and TTS sides of the same call.
+        PronunciationDictionary.setDynamicTerms(rawClients + rawVillages)
+        return (clients + villages + dictionary + aliases + patch).distinct().take(MAX_TOTAL)
+    }
+
+    /** Last meaningful address line, with the postcode removed. */
+    private fun villagesFromAddress(address: String?): List<String> {
+        if (address.isNullOrBlank()) return emptyList()
+        val withoutPostcode = address.replace(
+            Regex("\\b[A-Z]{1,2}\\d{1,2}[A-Z]?\\s?\\d[A-Z]{2}\\b", RegexOption.IGNORE_CASE),
+            " ",
+        )
+        return withoutPostcode
+            .split(',', '\n')
+            .map { it.replace(Regex("\\s+"), " ").trim() }
+            .filter { it.length in 3..30 }
+            .filter { it.split(Regex("\\s+")).size <= 3 }
+            .takeLast(2)
     }
 
     fun correct(text: String, names: List<String>): String {

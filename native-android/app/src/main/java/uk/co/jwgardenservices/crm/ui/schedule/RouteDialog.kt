@@ -39,6 +39,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import uk.co.jwgardenservices.crm.domain.formatTime
+import uk.co.jwgardenservices.crm.ui.common.DialogTitle
+import uk.co.jwgardenservices.crm.ui.common.JwDialog
 import uk.co.jwgardenservices.crm.ui.common.MessageDialog
 import java.time.Instant
 
@@ -66,17 +68,8 @@ fun RouteDialog(
     val routable = stops.filter { !it.address.isNullOrBlank() }
     val used = routable.take(MAX_STOPS)
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = RoundedCornerShape(24.dp)) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
+    JwDialog(onDismissRequest = onDismiss, maxHeight = 640.dp) {
+                DialogTitle(title)
                 Text(
                     text = when {
                         routable.isEmpty() -> "No client on this day has an address."
@@ -153,8 +146,6 @@ fun RouteDialog(
                         Text("Open route")
                     }
                 }
-            }
-        }
     }
 
     messaging?.let { stop ->

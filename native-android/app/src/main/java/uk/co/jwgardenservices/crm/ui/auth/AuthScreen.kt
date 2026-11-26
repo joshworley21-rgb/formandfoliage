@@ -44,6 +44,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import uk.co.jwgardenservices.crm.ui.components.BrandMark
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 
 @Composable
 fun AuthScreen(
@@ -88,7 +89,7 @@ fun AuthScreen(
 
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(28.dp),
+                shape = RoundedCornerShape(JwTokens.bandRadius),
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 2.dp,
                 shadowElevation = 1.dp,
@@ -169,7 +170,7 @@ fun AuthScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(52.dp),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(JwTokens.controlRadius),
                     ) {
                         if (state.busy) {
                             CircularProgressIndicator(
@@ -220,7 +221,7 @@ private fun MessagePanel(text: String, isError: Boolean) {
     }
     Surface(
         color = container,
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(JwTokens.smallRadius),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Text(

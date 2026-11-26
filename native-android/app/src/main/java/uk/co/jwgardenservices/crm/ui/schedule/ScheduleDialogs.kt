@@ -26,7 +26,6 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.automirrored.outlined.Assignment
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.EventAvailable
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -40,7 +39,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -64,6 +62,10 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.YearMonth
 import kotlinx.coroutines.launch
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
+import uk.co.jwgardenservices.crm.ui.common.JwAlertDialog
+import uk.co.jwgardenservices.crm.ui.common.JwDialog
+import uk.co.jwgardenservices.crm.ui.common.SettingSwitchRow
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.JobDraft
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
@@ -87,10 +89,10 @@ import uk.co.jwgardenservices.crm.domain.priceVisit
 import uk.co.jwgardenservices.crm.domain.todayIso
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
 import uk.co.jwgardenservices.crm.ui.common.DateField
+import uk.co.jwgardenservices.crm.ui.common.DialogTitle
 import uk.co.jwgardenservices.crm.ui.common.EmptyState
 import uk.co.jwgardenservices.crm.ui.common.ErrorState
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
-import uk.co.jwgardenservices.crm.ui.common.PageHeader
 import uk.co.jwgardenservices.crm.ui.common.StatusChip
 import uk.co.jwgardenservices.crm.ui.common.OptionPicker
 
@@ -143,25 +145,8 @@ internal fun JobEditorDialog(
     val canSave = clientId.isNotBlank() && dateValid && timeValid && durationValue > 0 && !saving
     val creating = existing == null
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 16.dp)
-                .heightIn(max = 760.dp),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    text = if (creating) "Book a job" else "Edit job",
-                    style = MaterialTheme.typography.headlineSmall,
-                )
+    JwDialog(onDismissRequest = onDismiss, maxHeight = 760.dp) {
+                DialogTitle(if (creating) "Book a job" else "Edit job")
 
                 OptionPicker(
                     options = clients,
@@ -203,22 +188,12 @@ internal fun JobEditorDialog(
                 )
 
                 if (creating) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Switch(checked = repeats, onCheckedChange = { repeats = it })
-                        Spacer(Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Repeats",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium,
-                            )
-                            Text(
-                                text = "Books the whole run on the calendar at once.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
+                    SettingSwitchRow(
+                        title = "Repeats",
+                        description = "Books the whole run on the calendar at once.",
+                        checked = repeats,
+                        onCheckedChange = { repeats = it },
+                    )
 
                     if (repeats) {
                         OptionPicker(
@@ -244,7 +219,7 @@ internal fun JobEditorDialog(
                 if (existing?.seriesId != null && onEditSeries != null) {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(JwTokens.smallRadius),
                         color = MaterialTheme.colorScheme.secondary,
                     ) {
                         Column(
@@ -335,12 +310,10 @@ internal fun JobEditorDialog(
                         Text(if (creating) "Book" else "Save")
                     }
                 }
-            }
-        }
     }
 
     confirmDelete?.let { mode ->
-        AlertDialog(
+        JwAlertDialog(
             onDismissRequest = { confirmDelete = null },
             title = {
                 Text(if (mode == DeleteMode.SERIES) "Delete the whole run?" else "Delete this job?")
@@ -414,25 +387,8 @@ internal fun CompleteJobDialog(
         } ?: 0.0
     }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 16.dp)
-                .heightIn(max = 720.dp),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    text = "Complete job — $clientName",
-                    style = MaterialTheme.typography.headlineSmall,
-                )
+    JwDialog(onDismissRequest = onDismiss, maxHeight = 720.dp) {
+                DialogTitle("Complete job — $clientName")
 
                 if (alreadyLogged != null && !enteringAnyway) {
                     Text(
@@ -442,7 +398,7 @@ internal fun CompleteJobDialog(
                     )
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(JwTokens.smallRadius),
                         color = MaterialTheme.colorScheme.secondary,
                     ) {
                         Column(Modifier.padding(12.dp)) {
@@ -475,26 +431,13 @@ internal fun CompleteJobDialog(
                     }
                 } else {
                     if (!isStaff) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Switch(
-                                checked = missed,
-                                onCheckedChange = { missed = it },
-                                enabled = !saving,
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Did not happen (missed)",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Medium,
-                                )
-                                Text(
-                                    text = "The job is closed as missed and nothing is charged.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
+                        SettingSwitchRow(
+                            title = "Did not happen (missed)",
+                            description = "Keeps the day as a record and charges nothing.",
+                            checked = missed,
+                            onCheckedChange = { missed = it },
+                            enabled = !saving,
+                        )
                     }
 
                     if (!missed) {
@@ -539,7 +482,7 @@ internal fun CompleteJobDialog(
                     if (!isStaff) {
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(JwTokens.smallRadius),
                             color = MaterialTheme.colorScheme.secondary,
                         ) {
                             Text(
@@ -594,8 +537,6 @@ internal fun CompleteJobDialog(
                         }
                     }
                 }
-            }
-        }
     }
 }
 
@@ -620,21 +561,8 @@ internal fun MoveJobDialog(
     )
     val dateValid = parseDate(date) != null
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 16.dp),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text("Move ${clientName}'s job", style = MaterialTheme.typography.headlineSmall)
+    JwDialog(onDismissRequest = onDismiss) {
+                DialogTitle("Move ${clientName}'s job")
                 Text(
                     text = "Currently ${startDay.formatDayMonthYear()} at $time. The time stays the same wherever it lands" +
                         (if (job.seriesId != null) ", and only this visit moves — the rest of the run stays put." else "."),
@@ -693,8 +621,6 @@ internal fun MoveJobDialog(
                         Text("Move")
                     }
                 }
-            }
-        }
     }
 }
 
@@ -740,22 +666,8 @@ internal fun SeriesDialog(
         durationValue > 0 &&
         !saving
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 16.dp)
-                .heightIn(max = 720.dp),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text("Edit the whole run", style = MaterialTheme.typography.headlineSmall)
+    JwDialog(onDismissRequest = onDismiss, maxHeight = 720.dp) {
+                DialogTitle("Edit the whole run")
                 Text(
                     text = "$editableCount remaining ${if (editableCount == 1) "visit" else "visits"} will move. Completed and past visits stay where they are.",
                     style = MaterialTheme.typography.bodySmall,
@@ -835,8 +747,6 @@ internal fun SeriesDialog(
                         Text("Save run")
                     }
                 }
-            }
-        }
     }
 }
 

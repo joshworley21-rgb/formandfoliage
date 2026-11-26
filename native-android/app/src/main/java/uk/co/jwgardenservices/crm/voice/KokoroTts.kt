@@ -42,9 +42,6 @@ import kotlin.math.abs
  * AudioTrack and returns once playback finishes, so callers can mute the mic
  * for the whole utterance.
  */
-/** Cached hello, used only when the call briefing cannot be built. */
-internal const val PICKUP_TEXT = "Hello Josh, how are you?"
-
 class KokoroTts(private val context: Context) : AutoCloseable {
 
     private val loadLock = Mutex()
@@ -55,11 +52,12 @@ class KokoroTts(private val context: Context) : AutoCloseable {
 
     /** Pre-synthesised "thinker" clips, rotated so a slow turn is not silent. */
     private val fillers = java.util.concurrent.ConcurrentHashMap<Int, GeneratedAudio>()
-    private var backchannel: GeneratedAudio? = null
+    private val backchannels = java.util.concurrent.ConcurrentHashMap<String, GeneratedAudio>()
     private var fillerIndex = 0
 
     /** Cached "Hello?" for the start of a call, so pickup is instant. */
     private var pickup: GeneratedAudio? = null
+    private var pickupText: String? = null
 
     /** Phonon 31m, when downloaded and selected; otherwise this class's own engines. */
     private var phonon: PhononSpeech? = null
@@ -68,6 +66,14 @@ class KokoroTts(private val context: Context) : AutoCloseable {
 
     @Volatile
     private var engineKind = EngineKind.Kokoro
+
+    /** False when the installed voice bank cannot be blended safely. */
+    @Volatile
+    private var blendAvailable = false
+
+    /** True when a custom single-speaker .bin is loaded into slot 52. */
+    @Volatile
+    private var customVoiceActive = false
 
     @Volatile
     private var closed = false
@@ -79,24 +85,32 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     /** Synthesise [text] with [speakerId] at [speed] and play it, suspending until the audio has finished. */
     suspend fun speak(
         text: String,
-        speakerId: Int = KokoroVoice.BmFable.speakerId,
+        speakerId: Int = KokoroVoice.DEFAULT.speakerId,
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
     ) {
         val (pace, stripped) = TtsProsody.extract(text)
         val clean = TtsProsody.smooth(stripped)
         if (closed || clean.isEmpty()) return
         if (phononActive()) {
-            val spoken = runCatching { phononSpeech().speak(clean) }.getOrDefault(false)
-            CrashLog.note(context, TAG, "Phonon reply spoken=$spoken text=${clean.take(50)}")
+            val spoken = runCatching { phononSpeech().speak(text, speed) }.getOrDefault(false)
             if (spoken) return
-            CrashLog.note(context, TAG, "Phonon failed; falling back to the local voice")
+            CrashLog.note(context, TAG, "Phonon whole-engine reply failed; using Kokoro")
         }
         CrashLog.note(context, TAG, "speak: ${clean.take(80)} (sid=$speakerId, speed=$speed)")
         speakLock.withLock {
             if (closed) return@withLock
             stopRequested = false
-            val engine = ensureEngine() ?: return@withLock
-            // Piper voices are single-speaker; Kokoro has 53. Sending Kokoro's
+            val engine = ensureEngine()
+            if (engine == null) {
+                // Phonon is an optional fallback, never the conversational
+                // voice while Kokoro is available.
+                if (phononActive()) {
+                    runCatching { phononSpeech().speak(clean) }
+                        .onSuccess { CrashLog.note(context, TAG, "Phonon fallback spoken=$it") }
+                }
+                return@withLock
+            }
+            // Piper voices are single-speaker; Kokoro has 54 slots. Sending Kokoro's
             // speaker id to a VITS model can index past its table.
             val sid = speakerFor(engine, speakerId)
             val audio = withContext(Dispatchers.Default) {
@@ -128,7 +142,8 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                 pocketReference = null
                 fillers.clear()
                 pickup = null
-                backchannel = null
+                pickupText = null
+                backchannels.clear()
             }
         }
     }
@@ -162,13 +177,15 @@ class KokoroTts(private val context: Context) : AutoCloseable {
      * between a call that feels alive and a dead line.
      */
     suspend fun speakFiller(
-        speakerId: Int = KokoroVoice.BmFable.speakerId,
+        speakerId: Int = KokoroVoice.DEFAULT.speakerId,
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
     ) {
         if (closed) return
         if (phononActive()) {
+            val filler = FILLER_TEXTS[fillerIndex % FILLER_TEXTS.size]
+            fillerIndex++
             val spoken = try {
-                phononSpeech().speak(FILLER_TEXTS[0])
+                phononSpeech().speak(filler)
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 // The answer became ready before the filler started; that is
                 // normal, not an error.
@@ -204,21 +221,22 @@ class KokoroTts(private val context: Context) : AutoCloseable {
      * kits would feed it straight back.
      */
     suspend fun speakBackchannel(
-        speakerId: Int = KokoroVoice.BmFable.speakerId,
+        speakerId: Int = KokoroVoice.DEFAULT.speakerId,
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
+        text: String = VoiceLines.backchannel(),
     ) {
         if (closed) return
         if (phononActive()) {
-            runCatching { phononSpeech().speak(BACKCHANNEL_TEXT) }
+            runCatching { phononSpeech().speak(text) }
             return
         }
         speakLock.withLock {
             if (closed) return@withLock
             val engine = ensureEngine() ?: return@withLock
             val sid = speakerFor(engine, speakerId)
-            val audio = backchannel ?: withContext(Dispatchers.Default) {
-                generate(engine, BACKCHANNEL_TEXT, sid, speed)
-            }.also { backchannel = it }
+            val audio = backchannels[text] ?: withContext(Dispatchers.Default) {
+                generate(engine, text, sid, speed)
+            }.also { backchannels[text] = it }
             stopRequested = false
             play(audio, volume = 0.35f)
         }
@@ -229,8 +247,9 @@ class KokoroTts(private val context: Context) : AutoCloseable {
      * call starts so the first slow cloud turn is covered too.
      */
     suspend fun prepareFiller(
-        speakerId: Int = KokoroVoice.BmFable.speakerId,
+        speakerId: Int = KokoroVoice.DEFAULT.speakerId,
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
+        pickupText: String = VoiceLines.pickup(),
     ) {
         if (closed) return
         if (phononActive()) {
@@ -241,49 +260,57 @@ class KokoroTts(private val context: Context) : AutoCloseable {
             if (closed) return@withLock
             val engine = ensureEngine() ?: return@withLock
             val sid = speakerFor(engine, speakerId)
-            // The first two clips are prepared eagerly; the rest are
-            // generated on demand so a fast first command never waits for all
-            // of them. Two gives the caller variety without much start-up cost.
-            for (index in 0..1) {
+            // The four phrases the turn loop reaches for first, plus both
+            // backchannels, are pre-synthesised with the exact active voice.
+            FILLER_TEXTS.take(4).forEachIndexed { index, text ->
                 if (fillers[index] == null) {
                     fillers[index] = withContext(Dispatchers.Default) {
-                        generate(engine, FILLER_TEXTS[index], sid, speed)
+                        generate(engine, text, sid, speed)
                     }
                 }
             }
-            // The pickup clip is generated in the same pass, so answering a
-            // call never waits for synthesis.
-            if (pickup == null) {
-                pickup = withContext(Dispatchers.Default) {
-                    generate(engine, PICKUP_TEXT, sid, speed)
+            VoiceLines.BACKCHANNELS.forEach { text ->
+                if (!backchannels.containsKey(text)) {
+                    backchannels[text] = withContext(Dispatchers.Default) {
+                        generate(engine, text, sid, speed)
+                    }
                 }
             }
-            if (backchannel == null) {
-                backchannel = withContext(Dispatchers.Default) {
-                    generate(engine, BACKCHANNEL_TEXT, sid, speed)
+            if (pickup == null || this@KokoroTts.pickupText != pickupText) {
+                pickup = withContext(Dispatchers.Default) {
+                    generate(engine, pickupText, sid, speed)
                 }
+                this@KokoroTts.pickupText = pickupText
             }
         }
     }
 
     /** Answer the call with the greeting, using the cached clip when warm. */
     suspend fun speakPickup(
-        speakerId: Int = KokoroVoice.BmFable.speakerId,
+        speakerId: Int = KokoroVoice.DEFAULT.speakerId,
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
+        text: String = VoiceLines.pickup(),
     ): Boolean {
         if (closed) return false
         if (phononActive()) {
-            val spoken = runCatching { phononSpeech().speak(PICKUP_TEXT) }.getOrDefault(false)
+            val spoken = runCatching { phononSpeech().speak(text, speed) }.getOrDefault(false)
             if (spoken) return true
-            CrashLog.note(context, TAG, "Phonon pickup failed; falling back to the local voice")
+            CrashLog.note(context, TAG, "Phonon whole-engine pickup failed; using Kokoro")
         }
         return speakLock.withLock {
             if (closed) return@withLock false
             val engine = ensureEngine() ?: return@withLock false
             val sid = speakerFor(engine, speakerId)
-            val audio = pickup ?: withContext(Dispatchers.Default) {
-                generate(engine, PICKUP_TEXT, sid, speed)
-            }.also { pickup = it }
+            val audio = if (pickup != null && pickupText == text) {
+                pickup!!
+            } else {
+                withContext(Dispatchers.Default) {
+                    generate(engine, text, sid, speed)
+                }.also {
+                    pickup = it
+                    pickupText = text
+                }
+            }
             stopRequested = false
             play(audio)
         }
@@ -294,16 +321,15 @@ class KokoroTts(private val context: Context) : AutoCloseable {
      * slow cloud turn always has a warm clip without delaying the greeting.
      */
     suspend fun prepareRemainingFillers(
-        speakerId: Int = KokoroVoice.BmFable.speakerId,
+        speakerId: Int = KokoroVoice.DEFAULT.speakerId,
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
     ) {
-        if (closed) return
-        if (phononActive()) return
+        if (closed || phononActive()) return
         speakLock.withLock {
             if (closed) return@withLock
             val engine = ensureEngine() ?: return@withLock
             val sid = speakerFor(engine, speakerId)
-            for (index in FILLER_TEXTS.indices) {
+            for (index in 4 until FILLER_TEXTS.size) {
                 if (fillers[index] != null) continue
                 fillers[index] = withContext(Dispatchers.Default) {
                     generate(engine, FILLER_TEXTS[index], sid, speed)
@@ -316,6 +342,8 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     fun clearFiller() {
         fillers.clear()
         pickup = null
+        pickupText = null
+        backchannels.clear()
     }
 
     /**
@@ -326,43 +354,76 @@ class KokoroTts(private val context: Context) : AutoCloseable {
      */
     suspend fun speakStreaming(
         text: String,
-        speakerId: Int = KokoroVoice.BmFable.speakerId,
+        speakerId: Int = KokoroVoice.DEFAULT.speakerId,
         speed: Float = AssistantPreferences.DEFAULT_SPEED,
     ) {
-        val (pace, stripped) = TtsProsody.extract(text)
+        val (_, stripped) = TtsProsody.extract(text)
         val clean = TtsProsody.smooth(stripped)
         if (closed || clean.isEmpty()) return
-        if (phononActive()) {
-            speak(clean, speakerId, speed)
-            return
-        }
         val chunks = speechChunks(clean)
+        val base = speed * ClauseProsody.BASE_SPEED
+        stopRequested = false
+        if (phononActive()) {
+            var spokenAny = false
+            chunks.forEachIndexed { index, chunk ->
+                if (closed || stopRequested) return
+                val clauseSpeed = (base * ClauseProsody.speedMultiplier(chunk))
+                    .coerceIn(0.5f, 1.6f)
+                val spoken = runCatching { phononSpeech().speak(chunk, clauseSpeed) }
+                    .getOrDefault(false)
+                spokenAny = spokenAny || spoken
+                if (!spoken) return@forEachIndexed
+                if (index < chunks.lastIndex) delay(ClauseProsody.BREATH_MS.toLong())
+            }
+            if (spokenAny) return
+            CrashLog.note(context, TAG, "Phonon whole-engine clauses failed; using Kokoro")
+        }
         if (chunks.size <= 1) {
-            speak(clean, speakerId, speed)
+            val chunk = chunks.firstOrNull() ?: clean
+            speak(
+                chunk,
+                speakerId,
+                (base * ClauseProsody.speedMultiplier(chunk))
+                    .coerceIn(0.5f, 1.6f),
+            )
             return
         }
-        CrashLog.note(context, TAG, "speakStreaming: ${chunks.size} sentences")
+        CrashLog.note(context, TAG, "speakStreaming: ${chunks.size} clauses")
         speakLock.withLock {
             if (closed) return@withLock
             stopRequested = false
-            val engine = ensureEngine() ?: return@withLock
+            val engine = ensureEngine()
+            if (engine == null) {
+                if (phononActive()) {
+                    runCatching { phononSpeech().speak(clean) }
+                }
+                return@withLock
+            }
             val sid = speakerFor(engine, speakerId)
             coroutineScope {
-                val audio = Channel<GeneratedAudio>(2)
+                val audio = Channel<Pair<GeneratedAudio, Int>>(2)
                 val producer = launch(Dispatchers.Default) {
                     try {
-                        for (chunk in chunks) {
+                        for ((index, chunk) in chunks.withIndex()) {
                             if (stopRequested || closed) break
-                            audio.send(generate(engine, chunk, sid, speed * pace))
+                            val clauseSpeed = (base *
+                                ClauseProsody.speedMultiplier(chunk))
+                                .coerceIn(0.5f, 1.6f)
+                            val breath = if (index < chunks.lastIndex) {
+                                ClauseProsody.BREATH_MS
+                            } else {
+                                0
+                            }
+                            audio.send(generate(engine, chunk, sid, clauseSpeed) to breath)
                         }
                     } finally {
                         audio.close()
                     }
                 }
                 try {
-                    for (generated in audio) {
+                    for ((generated, breath) in audio) {
                         if (stopRequested || closed) break
-                        play(generated)
+                        play(generated, trailingSilenceMs = breath)
                     }
                 } finally {
                     producer.cancel()
@@ -375,8 +436,25 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     /** Cut playback short, e.g. when a phone call takes the audio focus. */
     fun stopPlayback() {
         stopRequested = true
-        runCatching { track?.pause() }
+        runCatching {
+            track?.pause()
+            track?.flush()
+            track?.stop()
+            track?.setVolume(1f)
+        }
         phonon?.stop()
+    }
+
+    /** Called on a possible interruption, before the barging turn is confirmed. */
+    fun duckPlayback(volume: Float = 0.32f) {
+        runCatching { track?.setVolume(volume) }
+        phonon?.duck(volume)
+    }
+
+    /** The sound was speaker bleed, not a person: bring the reply back up. */
+    fun restorePlayback() {
+        runCatching { track?.setVolume(1f) }
+        phonon?.restore()
     }
 
     /**
@@ -392,6 +470,9 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                 runCatching { tts?.release() }
                 tts = null
                 fillers.clear()
+                backchannels.clear()
+                pickup = null
+                pickupText = null
             }
         }
         CrashLog.note(context, TAG, "engine reloaded after a voice change")
@@ -410,11 +491,15 @@ class KokoroTts(private val context: Context) : AutoCloseable {
                 // entirely: it loads faster and is lighter on the phone.
                 val piper = AssistantPreferences.piperVoiceFlow(context).first()
                     ?.takeIf { PiperVoiceDownloader.isInstalled(context, it) }
+                val customName = runCatching {
+                    AssistantPreferences.customKokoroVoiceFlow(context).first()
+                }.getOrDefault("")
+                val customVoice = KokoroCustomVoices.resolve(context, customName)
                 val created = if (piper != null) {
                     buildLocalVoice(PiperVoiceDownloader.dir(context, piper), piper)
-                        ?: buildKokoroVoice(dir)
+                        ?: buildKokoroVoice(dir, customVoice)
                 } else {
-                    buildKokoroVoice(dir)
+                    buildKokoroVoice(dir, customVoice)
                 }
                 if (created == null) return@withContext null
                 tts = created
@@ -424,17 +509,17 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     }
 
     /** Kokoro at the selected quality, falling back to int8 on failure. */
-    private suspend fun buildKokoroVoice(dir: File): OfflineTts? {
+    private suspend fun buildKokoroVoice(dir: File, customVoice: File?): OfflineTts? {
         val highQuality = AssistantPreferences.highQualityFlow(context).first() &&
             KokoroHqDownloader.isInstalled(context)
         val created = if (highQuality) {
-            buildEngine(dir, KokoroHqDownloader.modelFile(context), "fp32")
+            buildEngine(dir, KokoroHqDownloader.modelFile(context), "fp32", customVoice)
                 ?: run {
                     CrashLog.note(context, TAG, "fp32 model failed to load; using int8")
-                    buildEngine(dir, File(dir, "model.int8.onnx"), "int8")
+                    buildEngine(dir, File(dir, "model.int8.onnx"), "int8", customVoice)
                 }
         } else {
-            buildEngine(dir, File(dir, "model.int8.onnx"), "int8")
+            buildEngine(dir, File(dir, "model.int8.onnx"), "int8", customVoice)
         }
         if (created != null) engineKind = EngineKind.Kokoro
         return created
@@ -553,9 +638,15 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         }
     }
 
-    /** Kokoro has 53 speakers; the local voices use speaker 0. */
-    private fun speakerFor(engine: OfflineTts, speakerId: Int): Int =
-        if (engineKind == EngineKind.Kokoro) speakerId else 0
+    /** Kokoro has 54 slots; other engines take speaker 0. */
+    private fun speakerFor(engine: OfflineTts, speakerId: Int): Int {
+        if (engineKind != EngineKind.Kokoro) return 0
+        if (customVoiceActive) return KokoroCustomVoices.SLOT
+        if (speakerId == KokoroVoice.CabBlend.speakerId && !blendAvailable) {
+            return KokoroVoice.BmFable.speakerId
+        }
+        return speakerId
+    }
 
     /** The clip Pocket TTS clones. Packaged in assets/voices/. */
     private var pocketReference: WaveData? = null
@@ -638,13 +729,28 @@ class KokoroTts(private val context: Context) : AutoCloseable {
      * Null rather than an exception lets the caller fall back to the bundled
      * int8 model instead of leaving the assistant silent.
      */
-    private fun buildEngine(dir: File, model: File, label: String): OfflineTts? {
+    private fun buildEngine(dir: File, model: File, label: String, customVoice: File?): OfflineTts? {
         CrashLog.note(context, TAG, "model=$label (${model.length() / 1048576} MB)")
+        val prepared = runCatching { KokoroVoiceBlend.prepare(dir, customVoice) }
+            .onFailure { CrashLog.note(context, TAG, "voice bank failed: ${it.message}") }
+            .getOrNull()
+        blendAvailable = prepared?.blend == true
+        customVoiceActive = prepared?.custom == true
+        val voicesFile = prepared?.file ?: File(dir, "voices.bin")
+        CrashLog.note(
+            context,
+            TAG,
+            "voices=" + when {
+                prepared == null -> "standard bank"
+                prepared.custom -> "cab blend + custom slot ${KokoroCustomVoices.SLOT}"
+                else -> "cab blend slot ${KokoroVoiceBlend.BLEND_SLOT}"
+            },
+        )
         val config = OfflineTtsConfig(
             model = OfflineTtsModelConfig(
                 kokoro = OfflineTtsKokoroModelConfig(
                     model = model.absolutePath,
-                    voices = File(dir, "voices.bin").absolutePath,
+                    voices = voicesFile.absolutePath,
                     tokens = File(dir, "tokens.txt").absolutePath,
                     dataDir = File(dir, "espeak-ng-data").absolutePath,
                     // The GB lexicon plus en-gb made this build produce empty
@@ -738,7 +844,7 @@ class KokoroTts(private val context: Context) : AutoCloseable {
     private fun speechChunks(text: String): List<String> {
         val parts = text.split(
             Regex(
-                "(?<=[.!?])\\s+|(?<=[,;:])\\s+|\\s+(?=(?:and|or|but|then)\\b)",
+                "(?<=[.!?])\\s+|(?<=[,;:—–])\\s+|\\s+(?=(?:and|or|but|then)\\b)",
                 RegexOption.IGNORE_CASE,
             ),
         ).map { it.trim() }.filter { it.isNotEmpty() }
@@ -780,7 +886,11 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         }
     }
 
-    private suspend fun play(audio: GeneratedAudio, volume: Float = 1f): Boolean {
+    private suspend fun play(
+        audio: GeneratedAudio,
+        volume: Float = 1f,
+        trailingSilenceMs: Int = 0,
+    ): Boolean {
         val samples = trimSilence(audio.samples, audio.sampleRate)
         if (samples.isEmpty()) {
             CrashLog.note(context, TAG, "empty audio returned by $engineKind")
@@ -788,8 +898,17 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         }
         // Environmental gain: louder over engine noise, normal when quiet.
         val gain = TtsGain.effective * volume
-        val pcm = ShortArray(samples.size) { index ->
-            ((samples[index] * gain).coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt().toShort()
+        val silenceSamples = if (trailingSilenceMs > 0) {
+            (audio.sampleRate * trailingSilenceMs / 1_000).coerceAtLeast(0)
+        } else {
+            0
+        }
+        val pcm = ShortArray(samples.size + silenceSamples) { index ->
+            if (index < samples.size) {
+                ((samples[index] * gain).coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt().toShort()
+            } else {
+                0
+            }
         }
         val player = AudioTrack.Builder()
             .setAudioAttributes(
@@ -859,18 +978,16 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         /** Bump whenever the set of copied files changes. */
         const val COPY_VERSION = "2"
 
-        /** Rotated while a slower answer is on its way. */
-        const val BACKCHANNEL_TEXT = "Mm-hmm."
-
         val FILLER_TEXTS = listOf(
-            "Let me check.",
+            "One sec...",
+            "Let me check...",
+            "Got it.",
+            "Right,",
             "One moment.",
             "Right, let me see.",
-            "One second.",
             "Just pulling that up.",
             "Bear with me.",
             "Let me think about that.",
-            "Right, getting my thoughts together.",
             "Having a look now.",
         )
     }

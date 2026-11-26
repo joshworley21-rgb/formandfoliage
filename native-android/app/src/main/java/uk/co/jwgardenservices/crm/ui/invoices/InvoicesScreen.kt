@@ -3,7 +3,6 @@ package uk.co.jwgardenservices.crm.ui.invoices
 import android.util.Base64
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -21,10 +20,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
+import uk.co.jwgardenservices.crm.ui.common.JwAlertDialog
 import uk.co.jwgardenservices.crm.ui.common.SectionCard
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -70,14 +69,18 @@ import uk.co.jwgardenservices.crm.domain.parseDate
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
 import uk.co.jwgardenservices.crm.ui.common.DateField
+import uk.co.jwgardenservices.crm.ui.common.DialogTitle
 import uk.co.jwgardenservices.crm.ui.common.EmptyState
 import uk.co.jwgardenservices.crm.ui.common.ErrorState
+import uk.co.jwgardenservices.crm.ui.common.HeaderPillButton
+import uk.co.jwgardenservices.crm.ui.common.DialogTitle
+import uk.co.jwgardenservices.crm.ui.common.JwDialog
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
 import uk.co.jwgardenservices.crm.ui.common.OptionPicker
-import uk.co.jwgardenservices.crm.ui.common.PageHeader
+import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
 import uk.co.jwgardenservices.crm.ui.common.StatusChip
-import uk.co.jwgardenservices.crm.ui.theme.DarkWarning
-import uk.co.jwgardenservices.crm.ui.theme.LightWarning
+import uk.co.jwgardenservices.crm.ui.theme.JwTheme
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 
 @Composable
 fun InvoicesScreen(viewModel: CrmViewModel) {
@@ -89,7 +92,7 @@ fun InvoicesScreen(viewModel: CrmViewModel) {
     val unpaid = invoices.filter { it.status != "paid" }
     val owed = unpaid.sumOf { it.total }
     val clientNames = remember(state.clients) { state.clients.associate { it.id to it.name } }
-    val warning = if (isSystemInDarkTheme()) DarkWarning else LightWarning
+    val warning = JwTheme.colors.attention
     val taxRate by TaxReservePrefs.ratePercent.collectAsStateWithLifecycle()
 
     var creating by remember { mutableStateOf(false) }
@@ -199,36 +202,35 @@ fun InvoicesScreen(viewModel: CrmViewModel) {
     }
 
     if (state.loading) {
-        Column(Modifier.padding(20.dp)) {
-            PageHeader("Invoices", "What is owed, and what has been sent.")
-            LoadingState()
+        Column(Modifier.fillMaxSize()) {
+            ScreenHeader(title = "Invoices", subtitle = "What is owed, and what has been sent.")
+            LoadingState(modifier = Modifier.padding(horizontal = JwTokens.screenPadding))
         }
         return
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item {
-            PageHeader(
-                title = "Invoices",
-                description = "What is owed, and what has been sent.",
-                action = {
-                    Button(
-                        enabled = state.clients.isNotEmpty(),
-                        onClick = {
-                            createError = null
-                            creating = true
-                        },
-                    ) {
-                        Text("New invoice")
-                    }
-                },
-            )
-        }
-
+    Column(Modifier.fillMaxSize()) {
+        ScreenHeader(
+            title = "Invoices",
+            subtitle = "What is owed, and what has been sent.",
+            topActions = {
+                HeaderPillButton(
+                    label = "New invoice",
+                    enabled = state.clients.isNotEmpty(),
+                    onClick = {
+                        createError = null
+                        creating = true
+                    },
+                )
+            },
+        )
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(JwTokens.screenPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
         if (state.error != null) {
             item { ErrorState(state.error!!, viewModel::refresh) }
         }
@@ -290,6 +292,7 @@ fun InvoicesScreen(viewModel: CrmViewModel) {
                 },
                 onDelete = { deleting = invoice },
             )
+        }
         }
     }
 
@@ -364,7 +367,7 @@ fun InvoicesScreen(viewModel: CrmViewModel) {
     }
 
     deleting?.let { invoice ->
-        AlertDialog(
+        JwAlertDialog(
             onDismissRequest = { deleting = null },
             title = { Text("Delete ${invoice.number}?") },
             text = {
@@ -388,9 +391,9 @@ fun InvoicesScreen(viewModel: CrmViewModel) {
 private fun OwedBand(owed: Double, count: Int) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
+        shape = RoundedCornerShape(JwTokens.bandRadius),
+        color = JwTheme.colors.forest,
+        contentColor = JwTheme.colors.onForestMuted,
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Row(
@@ -398,12 +401,17 @@ private fun OwedBand(owed: Double, count: Int) {
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text("OWED TO YOU", style = MaterialTheme.typography.labelSmall)
-                Text("$count unpaid", style = MaterialTheme.typography.labelSmall)
+                Text(
+                    "$count unpaid",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = JwTheme.colors.onForestMuted.copy(alpha = 0.65f),
+                )
             }
             Text(
                 text = money(owed),
                 style = MaterialTheme.typography.displaySmall,
                 fontWeight = FontWeight.Bold,
+                color = JwTheme.colors.brass,
                 modifier = Modifier.padding(top = 6.dp),
             )
         }
@@ -431,7 +439,7 @@ private fun InvoiceCard(
     val over = daysOverdue(invoice)
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(JwTokens.cardRadius),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(
             1.dp,
@@ -702,22 +710,8 @@ private fun NewInvoiceDialog(
         dueDateValid &&
         !saving
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 16.dp)
-                .heightIn(max = 780.dp),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text("New invoice", style = MaterialTheme.typography.headlineSmall)
+    JwDialog(onDismissRequest = onDismiss, maxHeight = 780.dp) {
+                DialogTitle("New invoice")
 
                 OptionPicker(
                     options = clients,
@@ -812,7 +806,7 @@ private fun NewInvoiceDialog(
 
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(JwTokens.smallRadius),
                     color = MaterialTheme.colorScheme.secondary,
                 ) {
                     Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
@@ -865,8 +859,6 @@ private fun NewInvoiceDialog(
                         Text("Create invoice")
                     }
                 }
-            }
-        }
     }
 }
 
@@ -886,22 +878,8 @@ private fun DraftInvoiceDialog(
     var dueDate by remember(invoice.id) { mutableStateOf(invoice.dueDate.orEmpty()) }
     var notes by remember(invoice.id) { mutableStateOf(invoice.notes.orEmpty()) }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 16.dp)
-                .heightIn(max = 720.dp),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text("Edit ${invoice.number}", style = MaterialTheme.typography.headlineSmall)
+    JwDialog(onDismissRequest = onDismiss, maxHeight = 720.dp) {
+                DialogTitle("Edit ${invoice.number}")
                 Text(
                     text = "This invoice has not been sent, so it can still be changed. Once it goes out it is fixed at whatever the customer received.",
                     style = MaterialTheme.typography.bodySmall,
@@ -956,8 +934,6 @@ private fun DraftInvoiceDialog(
                 ) {
                     Text("Rebuild from visits")
                 }
-            }
-        }
     }
 }
 

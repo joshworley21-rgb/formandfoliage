@@ -51,6 +51,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import uk.co.jwgardenservices.crm.MainActivity
 import uk.co.jwgardenservices.crm.R
 import uk.co.jwgardenservices.crm.core.CrashLog
+import uk.co.jwgardenservices.crm.data.remote.SupabaseProvider
 import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
 import uk.co.jwgardenservices.crm.data.repository.invoiceItems
 import uk.co.jwgardenservices.crm.data.repository.sendInvoice
@@ -59,6 +60,7 @@ import uk.co.jwgardenservices.crm.domain.money
 import uk.co.jwgardenservices.crm.ui.common.Messaging
 import uk.co.jwgardenservices.crm.ui.invoices.InvoicePdf
 import uk.co.jwgardenservices.crm.ui.invoices.PdfSharing
+import io.github.jan.supabase.auth.auth
 
 /**
  * Keeps the Assistant microphone alive as a foreground service.
@@ -73,6 +75,9 @@ import uk.co.jwgardenservices.crm.ui.invoices.PdfSharing
  * buffer but the samples are dropped, so bm_fable's own voice can never be
  * recognised as the next command.
  */
+/** Whether the reply should invite the next command or simply end. */
+private enum class ReplyEnding { None, TaskComplete }
+
 class AssistantService : Service() {
 
     private val binder = LocalBinder()
@@ -158,6 +163,10 @@ class AssistantService : Service() {
     @Volatile
     private var lowBattery = false
 
+    /** Suppress the automatic mic reopening while a sign-off ends the call. */
+    @Volatile
+    private var suppressReopen = false
+
     /** Dead-air watcher: nudges once or twice, never nags. */
     private var silenceJob: kotlinx.coroutines.Job? = null
     @Volatile
@@ -176,7 +185,7 @@ class AssistantService : Service() {
     private val assistantContext by lazy {
         AssistantContext(businessProfile = BusinessBrain.load(this))
     }
-    private var voice = KokoroVoice.BmFable
+    private var voice = KokoroVoice.DEFAULT
     private var speed = AssistantPreferences.DEFAULT_SPEED
 
     /** Whether a fresh call answers with a short "Hello?". */
@@ -199,6 +208,7 @@ class AssistantService : Service() {
 
     /** Re-routes the call when earphones or the van's head unit connect mid-call. */
     private var deviceCallback: AudioDeviceCallback? = null
+    private var routeRestartJob: Job? = null
 
     /** Owns the head-unit call button while a call is up; idle starts use the receiver. */
     private var mediaSession: MediaSessionCompat? = null
@@ -232,6 +242,14 @@ class AssistantService : Service() {
                 }
             }
         }
+        speech.onBargeCandidate = {
+            // A human dips the volume when they realise they are being
+            // interrupted, then stops if it really was a person.
+            speaker.duckPlayback()
+        }
+        speech.onBargeAbort = {
+            speaker.restorePlayback()
+        }
         speech.onBargeIn = {
             CrashLog.note(this, TAG, "barge-in; stopping playback")
             // Only a real interruption of the voice counts — a barge while
@@ -247,6 +265,15 @@ class AssistantService : Service() {
             scope.launch { handleInterjection(text) }
         }
         speaker = KokoroEngine.get(this)
+        val sessionEmail = SupabaseProvider.client.auth.currentSessionOrNull()?.user?.email
+        VoiceLines.setOwnerName(firstNameFromEmail(sessionEmail))
+        scope.launch {
+            AssistantPreferences.ownerNameFlow(this@AssistantService).collect { configured ->
+                VoiceLines.setOwnerName(
+                    configured.ifBlank { firstNameFromEmail(sessionEmail) },
+                )
+            }
+        }
         // A call is "media" to the platform's button router. Activated only
         // while a call is up, so it never steals play/pause from music; the
         // idle start is handled by CallButtonReceiver instead.
@@ -310,7 +337,7 @@ class AssistantService : Service() {
         }
         scope.launch {
             AssistantPreferences.pronunciationsFlow(this@AssistantService)
-                .collect { Pronunciation.userEntries = it }
+                .collect { PronunciationDictionary.userEntries = it }
         }
         scope.launch {
             AssistantPreferences.personaToneFlow(this@AssistantService)
@@ -399,12 +426,13 @@ class AssistantService : Service() {
                 // never peak together.
                 applyMemoryGuard()
                 speaker.warmUp()
-                runCatching { speaker.prepareFiller(callVoice.speakerId, callSpeed) }
+                val pickupLine = VoiceLines.pickup()
+                runCatching { speaker.prepareFiller(callVoice.speakerId, callSpeed, pickupLine) }
                 CrashLog.note(this@AssistantService, TAG, "init: voice ready")
                 runCatching { speech.prepare(forCall = true) }
                 CrashLog.note(this@AssistantService, TAG, "init: recogniser step done")
                 if (fresh) {
-                    connectCall(callVoice.speakerId, callSpeed)
+                    connectCall(callVoice.speakerId, callSpeed, pickupLine)
                     // Now the line is connected, finish warming the filler pool
                     // in the background; nothing waits on it.
                     if (cloudConversation && _callActive.value) {
@@ -477,7 +505,11 @@ class AssistantService : Service() {
      * phones, which is why a greeting that reported as spoken could be
      * inaudible. Greeting first also means the assistant cannot hear itself.
      */
-    private suspend fun connectCall(speakerId: Int, speed: Float) {
+    private suspend fun connectCall(
+        speakerId: Int,
+        speed: Float,
+        preferredGreeting: String = VoiceLines.pickup(),
+    ) {
         if (!_callActive.value) {
             ringback.stop()
             _dialling.value = false
@@ -495,7 +527,7 @@ class AssistantService : Service() {
         if (wantsGreeting && _callActive.value) {
             // A person answers the phone with a hello, not a diary read-out.
             // The schedule is still one question away ("what's on today?").
-            val greeting = PICKUP_TEXT
+            val greeting = preferredGreeting
             runCatching { AssistantMemory.noteCall(this@AssistantService) }
             AssistantMemory.lastSpokenReply = greeting
             CrashLog.note(this, TAG, "pickup greeting: $greeting")
@@ -517,7 +549,7 @@ class AssistantService : Service() {
                 // Long enough for a Phonon hiccup and the local fallback to
                 // load; the drain in PhononSpeech caps its own wait.
                 withTimeoutOrNull(8_000) {
-                    speaker.speakPickup(speakerId, speed)
+                    speaker.speakPickup(speakerId, speed, greeting)
                 } ?: false
             } catch (error: Exception) {
                 CrashLog.note(this, TAG, "pickup failed: ${error.message}")
@@ -794,9 +826,11 @@ class AssistantService : Service() {
         // not share Kokoro's audio lock, so it could otherwise talk over it.
         thinkingMask?.cancelAndJoin()
         thinkingMask = null
-        // Samsung can mute assistant output while AudioRecord is open. Close
-        // the mic before speech; the caller/finally reopens listening.
-        if (speech.isListening()) speech.stopListening()
+        // Keep the mic draining during speech where AEC/headset echo control
+        // exists, so a real interruption can cut the reply. On a bare
+        // loudspeaker Samsung mutes output while AudioRecord is open, so that
+        // route still closes the mic and relies on the next turn instead.
+        holdMicForSpeech()
         // The pace marker is runner-internal: keep it for the TTS layer,
         // strip it before anything user-visible.
         val stripped = TtsProsody.extract(text).second.trim()
@@ -822,30 +856,55 @@ class AssistantService : Service() {
                 runCatching { onlineSpeaker().speak(stripped) }.getOrDefault(false)
             CrashLog.note(this, TAG, "reply speech starting: ${stripped.take(80)}")
             if (!spokenOnline) {
-                // Short confirmations brisk; anything with a figure or money
-                // a shade slower so it is heard once.
-                val naturalPace = when {
-                    stripped.length < 50 -> 1.04f
-                    Regex("\\d").containsMatchIn(stripped) -> 0.96f
-                    else -> 1f
-                }
                 val drivingPace = if (drivingMode) 0.94f else 1f
                 val personaPace = when (personaTone) {
                     PersonaTone.Brisk -> 1.04f
                     PersonaTone.Warm -> 0.98f
                 }
+                // Kokoro applies the 1.04x conversational base and the
+                // per-clause multipliers; this passes the user's pace and
+                // the current mode only.
                 speaker.speakStreaming(
                     text.trim(),
                     voice.speakerId,
-                    speed * naturalPace * drivingPace * personaPace,
+                    speed * drivingPace * personaPace,
                 )
             }
         } finally {
             if (focused) abandonAudioFocus()
             CrashLog.note(this, TAG, "reply speech finished")
-            if (_callActive.value && !_muted.value && !speech.isListening()) {
-                speech.startListening()
-            }
+            releaseMicAfterSpeech()
+        }
+    }
+
+    /** Speak a sign-off and close the line without briefly reopening the mic. */
+    private suspend fun sayAndEnd(text: String) {
+        suppressReopen = true
+        try {
+            say(text)
+        } finally {
+            suppressReopen = false
+            endCall()
+        }
+    }
+
+    /** Hold the mic open for barge-in when the route can cancel echo. */
+    private fun holdMicForSpeech() {
+        if (!speech.isListening()) return
+        if (speech.bargeAvailable) {
+            speech.pauseForSpeech()
+        } else {
+            speech.stopListening()
+        }
+    }
+
+    /** Let the recogniser resume, or reopen it where the route forced a stop. */
+    private suspend fun releaseMicAfterSpeech() {
+        if (speech.bargeAvailable) {
+            speech.resumeAfterSpeech()
+        }
+        if (_callActive.value && !_muted.value && !speech.isListening() && !suppressReopen) {
+            speech.startListening()
         }
     }
 
@@ -864,9 +923,10 @@ class AssistantService : Service() {
             while (_thinking.value && _callActive.value) {
                 CrashLog.note(this@AssistantService, TAG, "thinking filler ${rounds + 1}")
                 val fillerStarted = System.currentTimeMillis()
-                // Samsung can mute assistant output while AudioRecord is open.
-                // Close the microphone for the clip; the answer/finally reopens.
-                if (speech.isListening()) speech.stopListening()
+                // Keep the mic draining where echo control exists, so the
+                // filler itself can be interrupted. Otherwise close it for
+                // the clip and reopen on the other side.
+                holdMicForSpeech()
                 // Fillers used to play without audio focus, unlike greetings
                 // and replies. If another app or the car held focus the clip
                 // could render to nothing while Phonon still reported samples.
@@ -875,6 +935,7 @@ class AssistantService : Service() {
                     runCatching { speaker.speakFiller(voice.speakerId, speed) }
                 } finally {
                     if (fillerFocus) abandonAudioFocus()
+                    releaseMicAfterSpeech()
                 }
                 CrashLog.note(
                     this@AssistantService,
@@ -897,27 +958,21 @@ class AssistantService : Service() {
      * A reply that already ends in a question needs no prompt, and help or
      * small talk is left alone so it does not feel like a script.
      */
-    private suspend fun sayAnswer(text: String) {
+    private suspend fun sayAnswer(text: String, ending: ReplyEnding = ReplyEnding.None) {
         // A short beat reads as listening rather than parsing.
         if (!speech.fastPath) delay(180)
         val lead = correctionLead
         correctionLead = null
         val clean = text.trim().let { if (lead != null) "$lead$it" else it }
         val human = humanise(clean)
-        if (clean.isNotEmpty() && askFollowUp && !drivingMode &&
-            personaLength == PersonaLength.Normal && !clean.endsWith("?")
-        ) {
-            val nudge = VoiceLines.pick(
-                "Right — what next?",
-                "Go on.",
-                "What else can I do?",
-                "Anything else while I'm here?",
-                "What's next?",
-                "Where to now?",
-                "Anything else?",
-                "Right, what else?",
-            )
-            say("$human $nudge")
+        val wantsCheckIn = ending == ReplyEnding.TaskComplete &&
+            askFollowUp &&
+            !drivingMode &&
+            personaLength == PersonaLength.Normal &&
+            clean.isNotEmpty() &&
+            !clean.endsWith("?")
+        if (wantsCheckIn) {
+            say("$human ${VoiceLines.taskCheckIn()}")
         } else {
             say(human)
         }
@@ -1103,6 +1158,8 @@ class AssistantService : Service() {
         CrashLog.note(this, TAG, "call ended")
         silenceJob?.cancel()
         silenceJob = null
+        routeRestartJob?.cancel()
+        routeRestartJob = null
         // The next call decides its engine afresh from the owner's setting.
         speech.engineOverride = null
         _callActive.value = false
@@ -1258,15 +1315,36 @@ class AssistantService : Service() {
         val callback = object : AudioDeviceCallback() {
             override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
                 routeCallAudio()
+                refreshInputRoute()
             }
 
             override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
                 routeCallAudio()
+                refreshInputRoute()
             }
         }
         runCatching {
             manager.registerAudioDeviceCallback(callback, null)
             deviceCallback = callback
+        }
+    }
+
+    /**
+     * A headset arriving or leaving changes which microphone is active. If
+     * the line is idle between turns, reopen the recogniser once so the new
+     * route's AEC/echo path is used instead of the old source.
+     */
+    private fun refreshInputRoute() {
+        if (!_callActive.value || _muted.value || _speaking.value || !speech.isListening()) return
+        routeRestartJob?.cancel()
+        routeRestartJob = scope.launch {
+            delay(350)
+            if (!_callActive.value || _muted.value || _speaking.value) return@launch
+            speech.stopListening()
+            delay(250)
+            if (_callActive.value && !_muted.value && !_speaking.value) {
+                speech.startListening()
+            }
         }
     }
 
@@ -1397,6 +1475,9 @@ class AssistantService : Service() {
                     "Ah, my mistake — ",
                     "Right, my mistake — ",
                     "Sorry — ",
+                    "Ah, got it — ",
+                    "Right, correcting that — ",
+                    "No problem — ",
                 )
             } else {
                 null
@@ -1459,6 +1540,10 @@ class AssistantService : Service() {
             val pendingAnswer = actions.wrapUpActive() || actions.sendPending() ||
                 actions.chasePending() || actions.clarificationPending() ||
                 actions.readAllPending() || actions.hasPending()
+            if (!pendingAnswer && endConversationRequested(heard)) {
+                sayAndEnd(VoiceLines.signOff())
+                return@collect
+            }
             if (!pendingAnswer && SpeechNormalizer.isNoise(heard)) {
                 CrashLog.note(this, TAG, "noise rejected: ${text.take(30)}")
                 return@collect
@@ -1482,7 +1567,7 @@ class AssistantService : Service() {
                     .onFailure { CrashLog.note(this, TAG, "send reply failed: ${it.message}") }
                     .getOrNull()
                 if (sent != null) {
-                    sayAnswer(sent)
+                    sayAnswer(sent, ReplyEnding.TaskComplete)
                     return@collect
                 }
                 // "Want me to flag that?" — a chase note on the client.
@@ -1490,7 +1575,7 @@ class AssistantService : Service() {
                     .onFailure { CrashLog.note(this, TAG, "chase reply failed: ${it.message}") }
                     .getOrNull()
                 if (chased != null) {
-                    sayAnswer(chased)
+                    sayAnswer(chased, ReplyEnding.TaskComplete)
                     return@collect
                 }
                 // "Which one — the rectory or Smiths farm?" — the next
@@ -1499,7 +1584,7 @@ class AssistantService : Service() {
                     .onFailure { CrashLog.note(this, TAG, "clarification failed: ${it.message}") }
                     .getOrNull()
                 if (clarified != null) {
-                    sayAnswer(clarified)
+                    sayAnswer(clarified, ReplyEnding.TaskComplete)
                     return@collect
                 }
                 // "Want me to read them all?"
@@ -1511,14 +1596,14 @@ class AssistantService : Service() {
                     return@collect
                 }
                 if (undoRequested(heard)) {
-                    sayAnswer(actions.undoLast())
+                    sayAnswer(actions.undoLast(), ReplyEnding.TaskComplete)
                     return@collect
                 }
                 val remembered = runCatching { memoryCommand(heard) }
                     .onFailure { CrashLog.note(this, TAG, "memory command failed: ${it.message}") }
                     .getOrNull()
                 if (remembered != null) {
-                    sayAnswer(remembered)
+                    sayAnswer(remembered, ReplyEnding.TaskComplete)
                     return@collect
                 }
                 // "Say again": replay the last spoken sentence verbatim, with
@@ -1536,7 +1621,7 @@ class AssistantService : Service() {
                 if (wrapped != null) {
                     CrashLog.note(this, TAG, "wrap-up reply: ${wrapped.take(120)}")
                     if (!actions.wrapUpActive()) raiseDraftInvoices()
-                    sayAnswer(wrapped)
+                    sayAnswer(wrapped, ReplyEnding.TaskComplete)
                     return@collect
                 }
                 // A previous turn may have asked "How many hours?" — finish
@@ -1546,7 +1631,7 @@ class AssistantService : Service() {
                     .getOrNull()
                 if (followUp != null) {
                     CrashLog.note(this, TAG, "pending reply: ${followUp.take(120)}")
-                    sayAnswer(followUp)
+                    sayAnswer(followUp, ReplyEnding.TaskComplete)
                 } else {
                     answerTurn(heard)
                 }
@@ -1602,7 +1687,11 @@ class AssistantService : Service() {
             }
             if (replies.isNotEmpty()) {
                 CrashLog.note(this, TAG, "multi-step: ${replies.size} in ${System.currentTimeMillis() - started}ms")
-                sayAnswer(replies.joinToString(" "))
+                val task = parts.any { closingFor(IntentRules.classify(it).intent) == ReplyEnding.TaskComplete }
+                sayAnswer(
+                    replies.joinToString(" "),
+                    if (task) ReplyEnding.TaskComplete else ReplyEnding.None,
+                )
                 return
             }
         }
@@ -1852,7 +1941,7 @@ class AssistantService : Service() {
             .onFailure { CrashLog.note(this, TAG, "action failed: ${it.message}") }
             .getOrNull()
         CrashLog.note(this, TAG, "action reply: ${executed ?: "none"}")
-        sayAnswer(executed ?: confirmationFor(intent))
+        sayAnswer(executed ?: confirmationFor(intent), closingFor(intent.intent))
     }
 
     /**
@@ -1899,6 +1988,48 @@ class AssistantService : Service() {
         )
     }
 
+    /** Completed work earns a check-in; a read-back or lookup does not. */
+    private fun closingFor(intent: SpokenIntent): ReplyEnding = when (intent) {
+        SpokenIntent.LogHours,
+        SpokenIntent.MarkJobDone,
+        SpokenIntent.AddNote,
+        SpokenIntent.InvoiceEdit,
+        SpokenIntent.AdjustCharge,
+        SpokenIntent.RaiseInvoice,
+        SpokenIntent.AddExpense,
+        SpokenIntent.NextVisitNote,
+        SpokenIntent.DayWrapUp,
+        SpokenIntent.Quote,
+        -> ReplyEnding.TaskComplete
+        else -> ReplyEnding.None
+    }
+
+    /** "That's all", "cheers", "no thanks": close the line rather than nudge. */
+    private fun endConversationRequested(text: String): Boolean {
+        val lower = text.lowercase().trim().trimEnd('.', '!', '?', ',')
+        return lower in setOf(
+            "that's all", "that is all", "that's everything", "that is everything",
+            "that's it", "that is it", "nothing else", "no thanks", "no thank you",
+            "we're done", "we are done", "i'm done", "i am done", "end call",
+            "hang up", "bye", "goodbye", "good bye", "see you", "see ya",
+            "speak later", "speak in a bit", "talk later", "good night", "goodnight",
+            "cheers", "thanks", "thank you", "nice one",
+        )
+    }
+
+    /** josh@… -> Josh; info@… is a business mailbox, not a person. */
+    private fun firstNameFromEmail(email: String?): String? {
+        val local = email?.substringBefore('@')?.lowercase()?.trim().orEmpty()
+        if (local.isEmpty()) return null
+        val generic = setOf(
+            "info", "admin", "hello", "enquiries", "enquiry", "contact", "office",
+            "sales", "accounts", "support", "mail", "team",
+        )
+        if (local in generic) return null
+        val letters = Regex("[a-z]{2,}").find(local)?.value ?: return null
+        return letters.replaceFirstChar { it.uppercase() }
+    }
+
     private fun quickIsVagueLook(lower: String): Boolean =
         Regex("^(can you |could you )?(have a look|take a look|look|check|check that)[?.!]*$")
             .matches(lower.trim())
@@ -1923,7 +2054,7 @@ class AssistantService : Service() {
             ?.take(700)
             .orEmpty()
         return """
-            You are Josh's personal secretary for a UK gardening business, speaking
+            You are ${VoiceLines.OWNER_NAME}'s personal secretary for a UK gardening business, speaking
             on the phone. Be calm, warm and efficient, like a good British secretary.
             Use contractions and everyday British phrasing. Answer only the question
             in one or two short spoken sentences, then offer a useful next step if it
@@ -1934,7 +2065,7 @@ class AssistantService : Service() {
             profit, business health, and the services and areas the business covers.
             Never call yourself an AI, voice assistant, chatbot, model or assistant
             programme. If asked how you are, answer like a person and ask how his day
-            is going. Address him as Josh occasionally, not in every sentence.
+            is going. Address him as ${VoiceLines.OWNER_NAME} occasionally, not in every sentence.
             If you do not know, say so briefly and suggest what would help.
             It is $clock. Business facts: ${facts.joinToString("; ").ifBlank { "a UK gardening business" }}
             Business profile: $profileLine
@@ -2410,7 +2541,16 @@ private fun confirmationFor(intent: IntentResult): String {
     val topic = intent.clientOrTopic.trim()
     return when (intent.intent) {
         SpokenIntent.LogHours ->
-            if (topic.isEmpty()) "Hours logged." else "Logged your hours for $topic."
+            if (topic.isEmpty()) {
+                VoiceLines.pick("Hours logged.", "Logged.", "That's in.", "Right, hours logged.")
+            } else {
+                VoiceLines.pick(
+                    "Logged your hours for $topic.",
+                    "Logged $topic.",
+                    "That's in for $topic.",
+                    "Hours put down for $topic.",
+                )
+            }
         SpokenIntent.CheckSchedule -> "Checking your schedule."
         SpokenIntent.NextJob -> "Checking your next job."
         SpokenIntent.NextJobAddress -> "Checking where your next job is."
@@ -2420,11 +2560,20 @@ private fun confirmationFor(intent: IntentResult): String {
         SpokenIntent.LastVisit -> "Checking that client's last visit."
         SpokenIntent.BestClient -> "Checking your best client."
         SpokenIntent.AddNote ->
-            if (topic.isEmpty()) "Adding that note." else "Adding a note for $topic."
+            if (topic.isEmpty()) {
+                VoiceLines.pick("Adding that note.", "Noted.", "Right, adding that.")
+            } else {
+                VoiceLines.pick(
+                    "Adding a note for $topic.",
+                    "Noted for $topic.",
+                    "Right, a note for $topic.",
+                )
+            }
         SpokenIntent.Unbilled -> "Checking what is waiting to be invoiced."
         SpokenIntent.ClientList -> "Reading out your clients."
         SpokenIntent.InvoiceStatus -> "Checking that invoice."
-        SpokenIntent.InvoiceEdit -> "Updating that invoice."
+        SpokenIntent.InvoiceEdit ->
+            VoiceLines.pick("Updating that invoice.", "Right, changing that invoice.")
         SpokenIntent.NextJobForClient ->
             if (topic.isEmpty()) "Checking that booking." else "Checking when $topic is next in."
         SpokenIntent.TodayEarnings -> "Checking today's takings."
@@ -2437,17 +2586,36 @@ private fun confirmationFor(intent: IntentResult): String {
         SpokenIntent.Health -> "Checking the business health."
         SpokenIntent.Help -> "Here is what I can do."
         SpokenIntent.DayWrapUp -> "Running through today's jobs."
-        SpokenIntent.RaiseInvoice -> "Drafting that invoice."
-        SpokenIntent.AdjustCharge -> "Adjusting that visit."
-        SpokenIntent.AddExpense -> "Adding that to the account."
-        SpokenIntent.NextVisitNote -> "Making a note of that."
+        SpokenIntent.RaiseInvoice ->
+            VoiceLines.pick("Drafting that invoice.", "Right, raising a draft.", "Putting that invoice together.")
+        SpokenIntent.AdjustCharge ->
+            VoiceLines.pick("Adjusting that visit.", "Right, changing that charge.")
+        SpokenIntent.AddExpense ->
+            VoiceLines.pick("Adding that to the account.", "Right, putting that cost in.")
+        SpokenIntent.NextVisitNote ->
+            VoiceLines.pick("Making a note of that.", "Right, noted for next time.")
         SpokenIntent.SayAgain -> "Repeating that."
         SpokenIntent.MarkJobDone ->
-            if (topic.isEmpty()) "Marking that job done." else "Marking the job for $topic done."
+            if (topic.isEmpty()) {
+                VoiceLines.pick("Marking that job done.", "Right, done.", "Closing that job off.")
+            } else {
+                VoiceLines.pick(
+                    "Marking the job for $topic done.",
+                    "Done for $topic.",
+                    "Right, $topic is marked done.",
+                )
+            }
         SpokenIntent.CheckDebtors -> "Checking who owes you."
         SpokenIntent.WeeklyEarnings -> "Checking this week's earnings."
         SpokenIntent.Quote ->
-            if (topic.isEmpty()) "Preparing your quote." else "Preparing a quote for $topic."
+            if (topic.isEmpty()) {
+                VoiceLines.pick("Preparing your quote.", "Right, putting a quote together.")
+            } else {
+                VoiceLines.pick(
+                    "Preparing a quote for $topic.",
+                    "Right, a quote for $topic.",
+                )
+            }
         SpokenIntent.Continue -> "Go on."
         SpokenIntent.Weather -> "Checking the forecast."
         SpokenIntent.Lookup -> "Looking that up."

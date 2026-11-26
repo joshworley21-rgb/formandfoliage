@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
+import uk.co.jwgardenservices.crm.ui.common.JwAlertDialog
 import uk.co.jwgardenservices.crm.data.reminders.ReminderWorker
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,7 +28,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -70,6 +70,7 @@ import uk.co.jwgardenservices.crm.ui.CrmViewModel
 import uk.co.jwgardenservices.crm.ui.business.BusinessRunningScreen
 import uk.co.jwgardenservices.crm.ui.clients.ClientsScreen
 import uk.co.jwgardenservices.crm.ui.components.BrandMark
+import uk.co.jwgardenservices.crm.ui.common.ActionRow
 import uk.co.jwgardenservices.crm.ui.dashboard.DashboardScreen
 import uk.co.jwgardenservices.crm.ui.enquiries.EnquiriesScreen
 import uk.co.jwgardenservices.crm.ui.invoices.InvoicesScreen
@@ -77,6 +78,8 @@ import uk.co.jwgardenservices.crm.ui.navigation.AppDestination
 import uk.co.jwgardenservices.crm.ui.quotes.QuotesScreen
 import uk.co.jwgardenservices.crm.ui.schedule.ScheduleScreen
 import uk.co.jwgardenservices.crm.ui.settings.SettingsScreen
+import uk.co.jwgardenservices.crm.ui.theme.JwTheme
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 import uk.co.jwgardenservices.crm.ui.visits.VisitsScreen
 import uk.co.jwgardenservices.crm.ui.voice.AssistantScreen
 import uk.co.jwgardenservices.crm.ui.voice.AssistantSettingsScreen
@@ -144,7 +147,8 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(64.dp),
+                        .height(68.dp)
+                        .padding(horizontal = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     barItems.forEach { destination ->
@@ -258,63 +262,50 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
         ModalBottomSheet(
             onDismissRequest = { moreOpen = false },
             sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(JwTokens.bandRadius),
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
-                    .padding(horizontal = 20.dp)
+                    .padding(horizontal = JwTokens.screenPadding)
                     .padding(bottom = 24.dp),
             ) {
+                Text(
+                    text = "MORE",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
                 Text("Everything else", style = MaterialTheme.typography.titleLarge)
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(12.dp))
                 moreItems.forEach { destination ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .clickable {
-                                moreOpen = false
-                                navigate(destination)
-                            }
-                            .padding(horizontal = 10.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector = destination.icon,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.width(16.dp))
-                        Text(destination.label, style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable {
+                    ActionRow(
+                        title = destination.label,
+                        icon = destination.icon,
+                        active = destination.route == currentRoute,
+                        onClick = {
                             moreOpen = false
-                            requestSignOut()
-                        }
-                        .padding(horizontal = 10.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Outlined.Logout,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            navigate(destination)
+                        },
                     )
-                    Spacer(Modifier.width(16.dp))
-                    Text("Sign out", style = MaterialTheme.typography.bodyLarge)
                 }
+                HorizontalDivider(Modifier.padding(vertical = 10.dp))
+                ActionRow(
+                    title = "Sign out",
+                    icon = Icons.AutoMirrored.Outlined.Logout,
+                    onClick = {
+                        moreOpen = false
+                        requestSignOut()
+                    },
+                )
             }
         }
     }
 
     if (signOutWarning) {
-        AlertDialog(
+        JwAlertDialog(
             onDismissRequest = { signOutWarning = false },
             title = { Text("Sign out with unsynced changes?") },
             text = {
@@ -339,7 +330,7 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
 
     if (failedOpen) {
         if (failedWrites.isEmpty()) failedOpen = false
-        AlertDialog(
+        JwAlertDialog(
             onDismissRequest = { failedOpen = false },
             title = { Text("Changes that could not sync") },
             text = {
@@ -385,6 +376,7 @@ private fun BottomBarItem(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
+    val palette = JwTheme.colors
     val colour = if (selected) {
         MaterialTheme.colorScheme.primary
     } else {
@@ -397,42 +389,35 @@ private fun BottomBarItem(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Box(
-            modifier = Modifier
-                .width(38.dp)
-                .height(24.dp)
-                .clip(RoundedCornerShape(50))
-                .background(
-                    if (selected) {
-                        MaterialTheme.colorScheme.secondary
-                    } else {
-                        Color.Transparent
-                    },
-                ),
-            contentAlignment = Alignment.Center,
+        Surface(
+            shape = RoundedCornerShape(JwTokens.controlRadius),
+            color = if (selected) palette.forest else Color.Transparent,
+            contentColor = if (selected) palette.onForestMuted else colour,
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = colour,
-                modifier = Modifier.size(21.dp),
-            )
+            Column(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = if (selected) palette.brass else colour,
+                    modifier = Modifier.size(19.dp),
+                )
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 9.sp,
+                        letterSpacing = 0.sp,
+                    ),
+                    color = if (selected) palette.onForestMuted else colour,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                    maxLines = 1,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, letterSpacing = 0.sp),
-            color = colour,
-            maxLines = 1,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(3.dp))
-        Box(
-            modifier = Modifier
-                .size(3.dp)
-                .clip(CircleShape)
-                .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent),
-        )
     }
 }
 

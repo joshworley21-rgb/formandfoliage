@@ -4,7 +4,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,7 +48,6 @@ import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.TrendingDown
 import androidx.compose.material.icons.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.WarningAmber
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
@@ -87,6 +85,7 @@ import java.util.Locale
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlinx.coroutines.launch
+import uk.co.jwgardenservices.crm.ui.common.JwAlertDialog
 import uk.co.jwgardenservices.crm.data.model.RunningCost
 import uk.co.jwgardenservices.crm.data.model.RunningCostDraft
 import uk.co.jwgardenservices.crm.domain.BusinessSnapshot
@@ -111,10 +110,17 @@ import uk.co.jwgardenservices.crm.domain.monthlyRunningCosts
 import uk.co.jwgardenservices.crm.domain.scoreLabel
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
 import uk.co.jwgardenservices.crm.ui.common.EmptyState
+import uk.co.jwgardenservices.crm.ui.common.HeaderGhostAction
+import uk.co.jwgardenservices.crm.ui.common.HeaderPillButton
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
-import uk.co.jwgardenservices.crm.ui.common.PageHeader
+import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
 import uk.co.jwgardenservices.crm.ui.common.SectionCard
+import uk.co.jwgardenservices.crm.ui.common.SegmentedPills
 import uk.co.jwgardenservices.crm.ui.common.StatCard
+import uk.co.jwgardenservices.crm.ui.common.StatTile
+import uk.co.jwgardenservices.crm.ui.theme.JwPalette
+import uk.co.jwgardenservices.crm.ui.theme.JwTheme
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 import uk.co.jwgardenservices.crm.ui.voice.AssistantScreen
 
 private enum class BusinessTab(val label: String) {
@@ -125,18 +131,21 @@ private enum class BusinessTab(val label: String) {
 }
 
 @Composable
-private fun brass(): Color =
-    if (isSystemInDarkTheme()) Color(0xFFE2C588) else Color(0xFF9C7A35)
+private fun brass(): Color = JwTheme.colors.brass
 
 /** Forest, slate and sage: the three tones in the reference donut. */
-private fun categoryColor(category: CostCategory): Color = when (category) {
-    CostCategory.Vehicle -> Color(0xFF2E4A34)
-    CostCategory.Insurance -> Color(0xFF394553)
-    CostCategory.Fuel -> Color(0xFF6E8B6E)
-    CostCategory.Tools -> Color(0xFF8CA07E)
-    CostCategory.Software -> Color(0xFF586A5A)
-    CostCategory.Premises -> Color(0xFFA9B79A)
-    CostCategory.Other -> Color(0xFF7E9A79)
+@Composable
+private fun categoryColor(category: CostCategory): Color {
+    val palette = JwTheme.colors
+    return when (category) {
+        CostCategory.Vehicle -> palette.costVehicle
+        CostCategory.Insurance -> palette.costInsurance
+        CostCategory.Fuel -> palette.costFuel
+        CostCategory.Tools -> palette.costTools
+        CostCategory.Software -> palette.costSoftware
+        CostCategory.Premises -> palette.costPremises
+        CostCategory.Other -> palette.costOther
+    }
 }
 
 private fun costCategoryIcon(category: CostCategory): ImageVector = when (category) {
@@ -225,31 +234,17 @@ fun BusinessRunningScreen(
     }
 
     if (state.loading) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            PageHeader("Business running", "What the business costs, and what needs attention.")
-            LoadingState("Adding up this month…")
+        Column(modifier = Modifier.fillMaxSize()) {
+            ScreenHeader(title = "Business", subtitle = "Costs, profit and the next useful move.")
+            LoadingState(
+                "Adding up this month…",
+                modifier = Modifier.padding(horizontal = JwTokens.screenPadding),
+            )
         }
         return
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        if (tab != BusinessTab.Costs && tab != BusinessTab.Coach) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .padding(top = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                PageHeader(
-                    title = "Business running",
-                    description = "Costs, profit and the next useful move.",
-                    onRefresh = viewModel::refresh,
-                )
-                BusinessTabs(selected = tab, onSelect = { tab = it })
-            }
-        }
-
         if (tab == BusinessTab.Costs) {
             Box(
                 modifier = Modifier
@@ -294,54 +289,73 @@ fun BusinessRunningScreen(
             // The call sheet owns the rest of the screen. It binds the voice
             // service only while this tab is on screen, and releases the mic
             // when the owner switches back to the figures.
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-            ) {
-                AssistantScreen()
+            Column(modifier = Modifier.fillMaxSize()) {
+                ScreenHeader(
+                    title = "Secretary",
+                    subtitle = "The voice assistant for the business.",
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                ) {
+                    AssistantScreen()
+                }
             }
         } else {
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentPadding = PaddingValues(20.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                when (tab) {
-            BusinessTab.Overview -> {
-                item { NetBand(snapshot) }
-                item {
-                    HealthCard(
-                        score = score,
-                        snapshot = snapshot,
-                        onClick = { tab = BusinessTab.Coach },
-                    )
-                }
-                item {
-                    CostBreakdownCard(
-                        breakdown = breakdown,
-                        monthly = monthly,
-                        onAdd = {
-                            editing = null
-                            editorOpen = true
-                        },
-                        onOpenCosts = { tab = BusinessTab.Costs },
-                    )
-                }
-                item {
-                    InsightPreview(
-                        insights = insights,
-                        onAction = ::handleAction,
-                        onOpenCoach = { tab = BusinessTab.Coach },
-                    )
-                }
-            }
-
-                    BusinessTab.Coach,
-                    BusinessTab.Costs,
-                    BusinessTab.Secretary -> Unit
+            Column(modifier = Modifier.fillMaxSize()) {
+                ScreenHeader(
+                    title = "Business",
+                    subtitle = "Costs, profit and the next useful move.",
+                    topActions = {
+                        HeaderGhostAction(
+                            icon = Icons.Outlined.Refresh,
+                            contentDescription = "Refresh",
+                            onClick = viewModel::refresh,
+                        )
+                    },
+                )
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(
+                        start = JwTokens.screenPadding,
+                        end = JwTokens.screenPadding,
+                        top = 14.dp,
+                        bottom = 24.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(JwTokens.sectionGap),
+                ) {
+                    item {
+                        BusinessTabs(selected = tab, onSelect = { tab = it })
+                    }
+                    item { NetBand(snapshot) }
+                    item {
+                        HealthCard(
+                            score = score,
+                            snapshot = snapshot,
+                            onClick = { tab = BusinessTab.Coach },
+                        )
+                    }
+                    item {
+                        CostBreakdownCard(
+                            breakdown = breakdown,
+                            monthly = monthly,
+                            onAdd = {
+                                editing = null
+                                editorOpen = true
+                            },
+                            onOpenCosts = { tab = BusinessTab.Costs },
+                        )
+                    }
+                    item {
+                        InsightPreview(
+                            insights = insights,
+                            onAction = ::handleAction,
+                            onOpenCoach = { tab = BusinessTab.Coach },
+                        )
+                    }
                 }
             }
         }
@@ -362,7 +376,7 @@ fun BusinessRunningScreen(
     }
 
     pendingDelete?.let { cost ->
-        AlertDialog(
+        JwAlertDialog(
             onDismissRequest = { pendingDelete = null },
             title = { Text("Delete ${cost.name}?") },
             text = {
@@ -389,9 +403,6 @@ fun BusinessRunningScreen(
     }
 }
 
-private val CoachGreen = Color(0xFF7FD78E)
-private val CoachAttention = Color(0xFFFF9A84)
-
 @Composable
 private fun BusinessCoachTab(
     score: Int,
@@ -403,12 +414,15 @@ private fun BusinessCoachTab(
     onAction: (CoachAction?) -> Unit,
 ) {
     var breakdownOpen by remember { mutableStateOf(false) }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item { CoachHeader(onBack = onBack, onRefresh = onRefresh) }
+    Column(modifier = Modifier.fillMaxSize()) {
+        CoachHeader(onBack = onBack, onRefresh = onRefresh)
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(top = 14.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
         item {
             CoachScoreCard(
                 score = score,
@@ -416,7 +430,7 @@ private fun BusinessCoachTab(
                 hasData = hasData,
                 breakdownOpen = breakdownOpen,
                 onToggleBreakdown = { breakdownOpen = !breakdownOpen },
-                modifier = Modifier.padding(horizontal = 16.dp),
+                modifier = Modifier.padding(horizontal = JwTokens.screenPadding),
             )
         }
         item {
@@ -425,7 +439,7 @@ private fun BusinessCoachTab(
                     "· based on your latest records",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp),
+                modifier = Modifier.padding(horizontal = JwTokens.screenPadding),
             )
         }
         if (insights.isEmpty()) {
@@ -433,10 +447,10 @@ private fun BusinessCoachTab(
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                        .padding(horizontal = JwTokens.screenPadding),
+                    shape = RoundedCornerShape(JwTokens.cardRadius),
+                    color = JwTheme.colors.forest,
+                    contentColor = JwTheme.colors.onForestMuted,
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("Nothing needs attention", style = MaterialTheme.typography.titleMedium)
@@ -444,7 +458,7 @@ private fun BusinessCoachTab(
                             "Log a few visits and running costs and the coach will start " +
                                 "pointing at the next useful move.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.65f),
+                            color = JwTheme.colors.onForestMuted.copy(alpha = 0.65f),
                         )
                     }
                 }
@@ -461,7 +475,7 @@ private fun BusinessCoachTab(
                             CoachInsightCard(
                                 insight = insight,
                                 onAction = onAction,
-                                modifier = Modifier.padding(horizontal = 16.dp),
+                                modifier = Modifier.padding(horizontal = JwTokens.screenPadding),
                             )
                         }
                     }
@@ -474,54 +488,28 @@ private fun BusinessCoachTab(
                     "and how full the week is. It is calculated on this phone from your own records.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp),
+                modifier = Modifier.padding(horizontal = JwTokens.screenPadding),
             )
+        }
         }
     }
 }
 
 @Composable
 private fun CoachHeader(onBack: () -> Unit, onRefresh: () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.12f),
-                modifier = Modifier.size(34.dp),
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                        contentDescription = "Back to Analytics",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = "Business Coach",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
+    ScreenHeader(
+        title = "Business Coach",
+        subtitle = "What needs attention, what is an opportunity.",
+        onBack = onBack,
+        backLabel = "Business",
+        topActions = {
+            HeaderGhostAction(
+                icon = Icons.Outlined.Refresh,
+                contentDescription = "Refresh",
+                onClick = onRefresh,
             )
-            Spacer(Modifier.weight(1f))
-            IconButton(onClick = onRefresh) {
-                Icon(
-                    imageVector = Icons.Outlined.Refresh,
-                    contentDescription = "Refresh",
-                    tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.75f),
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-        }
-    }
+        },
+    )
 }
 
 @Composable
@@ -535,10 +523,10 @@ private fun CoachScoreCard(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.08f)),
+        shape = RoundedCornerShape(JwTokens.cardRadius),
+        color = JwTheme.colors.forest,
+        contentColor = JwTheme.colors.onForestMuted,
+        border = BorderStroke(1.dp, JwTheme.colors.onForestMuted.copy(alpha = 0.08f)),
     ) {
         Column(
             modifier = Modifier.padding(vertical = 18.dp, horizontal = 16.dp),
@@ -547,7 +535,7 @@ private fun CoachScoreCard(
             Text(
                 text = "MONTHLY HEALTH SCORE",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.55f),
+                color = JwTheme.colors.onForestMuted.copy(alpha = 0.55f),
             )
             Spacer(Modifier.height(12.dp))
             CoachScoreRing(score = score)
@@ -567,14 +555,14 @@ private fun CoachScoreCard(
                     else -> "Several things need a look. Start with money already earned."
                 },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.65f),
+                color = JwTheme.colors.onForestMuted.copy(alpha = 0.65f),
                 textAlign = TextAlign.Center,
             )
             TextButton(onClick = onToggleBreakdown, contentPadding = PaddingValues(vertical = 2.dp)) {
                 Text(
                     text = if (breakdownOpen) "Hide breakdown ▴" else "View breakdown ▾",
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f),
+                    color = JwTheme.colors.onForestMuted.copy(alpha = 0.8f),
                 )
             }
             if (breakdownOpen && scoreParts.isNotEmpty()) {
@@ -590,7 +578,7 @@ private fun CoachScoreCard(
                             Text(
                                 text = part.label,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f),
+                                color = JwTheme.colors.onForestMuted.copy(alpha = 0.7f),
                                 modifier = Modifier.weight(1f),
                             )
                             Text(
@@ -608,13 +596,15 @@ private fun CoachScoreCard(
 
 @Composable
 private fun CoachScoreRing(score: Int) {
+    val trackColour = JwTheme.colors.onForestMuted.copy(alpha = 0.12f)
+    val ringColour = JwTheme.colors.positive
     Box(modifier = Modifier.size(142.dp), contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.size(142.dp)) {
             val stroke = 12.dp.toPx()
             val inset = stroke / 2f
             val arcSize = Size(this.size.width - stroke, this.size.height - stroke)
             drawArc(
-                color = Color.White.copy(alpha = 0.12f),
+                color = trackColour,
                 startAngle = -90f,
                 sweepAngle = 360f,
                 useCenter = false,
@@ -623,7 +613,7 @@ private fun CoachScoreRing(score: Int) {
                 style = Stroke(width = stroke, cap = StrokeCap.Round),
             )
             drawArc(
-                color = CoachGreen,
+                color = ringColour,
                 startAngle = -90f,
                 sweepAngle = (score.coerceIn(0, 100) / 100f) * 360f,
                 useCenter = false,
@@ -641,7 +631,7 @@ private fun CoachScoreRing(score: Int) {
             Text(
                 text = "/100",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.55f),
+                color = JwTheme.colors.onForestMuted.copy(alpha = 0.55f),
             )
         }
     }
@@ -650,9 +640,9 @@ private fun CoachScoreRing(score: Int) {
 @Composable
 private fun CoachSectionHeader(tone: CoachTone, count: Int) {
     val tint = when (tone) {
-        CoachTone.Attention -> CoachAttention
+        CoachTone.Attention -> JwTheme.colors.attention
         CoachTone.Opportunity -> MaterialTheme.colorScheme.tertiary
-        CoachTone.Good -> CoachGreen
+        CoachTone.Good -> JwTheme.colors.positive
     }
     Row(
         modifier = Modifier
@@ -697,9 +687,9 @@ private fun CoachInsightCard(
     modifier: Modifier = Modifier,
 ) {
     val tint = when (insight.tone) {
-        CoachTone.Attention -> CoachAttention
+        CoachTone.Attention -> JwTheme.colors.attention
         CoachTone.Opportunity -> MaterialTheme.colorScheme.tertiary
-        CoachTone.Good -> CoachGreen
+        CoachTone.Good -> JwTheme.colors.positive
     }
     val severity = when (insight.tone) {
         CoachTone.Attention -> "HIGH"
@@ -708,10 +698,10 @@ private fun CoachInsightCard(
     }
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.08f)),
+        shape = RoundedCornerShape(JwTokens.cardRadius),
+        color = JwTheme.colors.forest,
+        contentColor = JwTheme.colors.onForestMuted,
+        border = BorderStroke(1.dp, JwTheme.colors.onForestMuted.copy(alpha = 0.08f)),
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -752,7 +742,7 @@ private fun CoachInsightCard(
             Text(
                 text = insight.body,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.65f),
+                color = JwTheme.colors.onForestMuted.copy(alpha = 0.65f),
             )
             if (insight.action != null) {
                 Spacer(Modifier.height(10.dp))
@@ -761,7 +751,7 @@ private fun CoachInsightCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(38.dp),
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(JwTokens.smallRadius),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.tertiary,
                         contentColor = MaterialTheme.colorScheme.onTertiary,
@@ -786,22 +776,25 @@ private fun RunningCostsTab(
     onEdit: (RunningCost) -> Unit,
     onDelete: (RunningCost) -> Unit,
 ) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item { RunningCostsHeader(onBack = onBack, onAdd = onAdd) }
+    Column(modifier = Modifier.fillMaxSize()) {
+        RunningCostsHeader(onBack = onBack, onAdd = onAdd)
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(top = 14.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
         item {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = JwTokens.screenPadding),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                CostStat("Monthly", moneyCompact(monthly), Modifier.weight(1f))
-                CostStat("Daily", moneyCompact(daily), Modifier.weight(1f))
-                CostStat("Annual", moneyCompact(annual), Modifier.weight(1f))
+                StatTile("Monthly", moneyCompact(monthly), Modifier.weight(1f))
+                StatTile("Daily", moneyCompact(daily), Modifier.weight(1f))
+                StatTile("Annual", moneyCompact(annual), Modifier.weight(1f))
             }
         }
         item {
@@ -809,7 +802,7 @@ private fun RunningCostsTab(
                 breakdown = breakdown,
                 monthly = monthly,
                 onAdd = onAdd,
-                modifier = Modifier.padding(horizontal = 16.dp),
+                modifier = Modifier.padding(horizontal = JwTokens.screenPadding),
             )
         }
         item {
@@ -818,7 +811,7 @@ private fun RunningCostsTab(
                 onEdit = onEdit,
                 onDelete = onDelete,
                 onAdd = onAdd,
-                modifier = Modifier.padding(horizontal = 16.dp),
+                modifier = Modifier.padding(horizontal = JwTokens.screenPadding),
             )
         }
         item {
@@ -830,58 +823,21 @@ private fun RunningCostsTab(
                 modifier = Modifier.padding(horizontal = 20.dp),
             )
         }
+        }
     }
 }
 
 @Composable
 private fun RunningCostsHeader(onBack: () -> Unit, onAdd: () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
-    ) {
-        Column(
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 18.dp),
-        ) {
-            TextButton(
-                onClick = onBack,
-                contentPadding = PaddingValues(0.dp),
-                modifier = Modifier.height(28.dp),
-            ) {
-                Text(
-                    text = "‹ Analytics",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.65f),
-                )
-            }
-            Row(verticalAlignment = Alignment.Bottom) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Running Costs",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                    Text(
-                        text = "Vehicles, fuel, insurance, tools",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f),
-                    )
-                }
-                Button(
-                    onClick = onAdd,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.tertiary,
-                        contentColor = MaterialTheme.colorScheme.onTertiary,
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-                    modifier = Modifier.height(38.dp),
-                ) {
-                    Text("+ Add", fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-    }
+    ScreenHeader(
+        title = "Running Costs",
+        subtitle = "Vehicles, fuel, insurance, tools",
+        onBack = onBack,
+        backLabel = "Business",
+        titleAction = {
+            HeaderPillButton(label = "+ Add", onClick = onAdd)
+        },
+    )
 }
 
 @Composable
@@ -893,7 +849,7 @@ private fun RunningCostBreakdownCard(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(JwTokens.bandRadius),
         color = MaterialTheme.colorScheme.surface,
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
@@ -957,7 +913,7 @@ private fun RunningCostBreakdownCard(
 private fun BreakdownRow(slice: CostBreakdown) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(50),
+        shape = RoundedCornerShape(JwTokens.chipRadius),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
     ) {
         Row(
@@ -976,7 +932,7 @@ private fun BreakdownRow(slice: CostBreakdown) {
                 modifier = Modifier.weight(1f),
             )
             Surface(
-                shape = RoundedCornerShape(5.dp),
+                shape = RoundedCornerShape(JwTokens.microRadius),
                 color = categoryColor(slice.category).copy(alpha = 0.12f),
                 contentColor = categoryColor(slice.category),
             ) {
@@ -1007,7 +963,7 @@ private fun GroupedCostCards(
     if (costs.isEmpty()) {
         Surface(
             modifier = modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(JwTokens.cardRadius),
             color = MaterialTheme.colorScheme.surface,
             border = androidx.compose.foundation.BorderStroke(
                 1.dp,
@@ -1038,7 +994,7 @@ private fun GroupedCostCards(
             val (rows, total) = pair
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
+                shape = RoundedCornerShape(JwTokens.cardRadius),
                 color = MaterialTheme.colorScheme.surface,
                 border = androidx.compose.foundation.BorderStroke(
                     1.dp,
@@ -1122,7 +1078,7 @@ private fun CostItemRow(cost: RunningCost, onEdit: () -> Unit, onDelete: () -> U
                 fontWeight = FontWeight.Bold,
             )
             Surface(
-                shape = RoundedCornerShape(4.dp),
+                shape = RoundedCornerShape(JwTokens.microRadius),
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) {
@@ -1149,50 +1105,27 @@ private fun CostItemRow(cost: RunningCost, onEdit: () -> Unit, onDelete: () -> U
 
 @Composable
 private fun BusinessTabs(selected: BusinessTab, onSelect: (BusinessTab) -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(modifier = Modifier.padding(4.dp)) {
-            BusinessTab.entries.forEach { tab ->
-                val active = tab == selected
-                Surface(
-                    onClick = { onSelect(tab) },
-                    shape = RoundedCornerShape(50),
-                    color = if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
-                    contentColor = if (active) {
-                        MaterialTheme.colorScheme.onPrimary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(
-                        text = tab.label,
-                        style = MaterialTheme.typography.labelLarge,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(vertical = 9.dp),
-                    )
-                }
-            }
-        }
-    }
+    SegmentedPills(
+        options = BusinessTab.entries,
+        selected = selected,
+        onSelect = onSelect,
+        label = { it.label },
+    )
 }
 
 @Composable
 private fun NetBand(snapshot: BusinessSnapshot) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
+        shape = RoundedCornerShape(JwTokens.bandRadius),
+        color = JwTheme.colors.forest,
+        contentColor = JwTheme.colors.onForestMuted,
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Text(
                 text = "THIS MONTH · NET POSITION",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f),
+                color = JwTheme.colors.onForestMuted.copy(alpha = 0.6f),
             )
             Spacer(Modifier.height(8.dp))
             Text(
@@ -1233,7 +1166,7 @@ private fun NetBand(snapshot: BusinessSnapshot) {
                     text = "${money(snapshot.monthInvoiced)} invoiced · " +
                         "${money(snapshot.monthPaid)} collected",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f),
+                    color = JwTheme.colors.onForestMuted.copy(alpha = 0.7f),
                 )
             }
         }
@@ -1251,7 +1184,7 @@ private fun BandFigure(label: String, value: String, modifier: Modifier = Modifi
         Text(
             text = label,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f),
+            color = JwTheme.colors.onForestMuted.copy(alpha = 0.6f),
         )
     }
 }
@@ -1267,7 +1200,7 @@ private fun HealthCard(
         modifier = Modifier
             .fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(JwTokens.bandRadius),
         color = MaterialTheme.colorScheme.surface,
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
@@ -1355,33 +1288,6 @@ private fun ScoreRing(score: Int) {
                 text = "/100",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun CostStat(label: String, value: String, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outline,
-        ),
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 14.dp)) {
-            Text(
-                text = label.uppercase(Locale.UK),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
             )
         }
     }
@@ -1493,6 +1399,7 @@ private fun DonutChart(
     size: Dp = 132.dp,
 ) {
     val colours = breakdown.map { categoryColor(it.category) }
+    val trackColour = JwTheme.colors.hairline.copy(alpha = 0.6f)
     val stroke = (size.value * 0.18f).dp
     Box(modifier = Modifier.size(size), contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.size(size)) {
@@ -1500,7 +1407,7 @@ private fun DonutChart(
             val inset = strokePx / 2f
             val arcSize = Size(this.size.width - strokePx, this.size.height - strokePx)
             drawArc(
-                color = Color.Gray.copy(alpha = 0.14f),
+                color = trackColour,
                 startAngle = 0f,
                 sweepAngle = 360f,
                 useCenter = false,
@@ -1535,9 +1442,9 @@ private fun DonutChart(
                     text = "${(slice.share * 100).toInt()}%",
                     style = MaterialTheme.typography.labelSmall,
                     color = if (colours[index].luminance() > 0.55f) {
-                        Color(0xFF1B2A1C)
+                        JwTheme.colors.forestDeep
                     } else {
-                        Color.White
+                        JwTheme.colors.onForestMuted
                     },
                     modifier = Modifier.offset(x = x, y = y),
                 )
@@ -1554,71 +1461,6 @@ private fun DonutChart(
                 text = centreBottom,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun CostRow(cost: RunningCost, onEdit: () -> Unit, onDelete: () -> Unit) {
-    val category = CostCategory.from(cost.category)
-    val frequency = CostFrequency.from(cost.frequency)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onEdit)
-            .padding(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Surface(
-            shape = CircleShape,
-            color = categoryColor(category).copy(alpha = 0.14f),
-            contentColor = categoryColor(category),
-            modifier = Modifier.size(38.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = costCategoryIcon(category),
-                    contentDescription = null,
-                    modifier = Modifier.size(19.dp),
-                )
-            }
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(cost.name, style = MaterialTheme.typography.titleMedium)
-            Text(
-                text = "${category.label} · ${frequency.label.lowercase(Locale.UK)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(
-                text = "${money(cost.amount)}${frequency.suffix()}",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = "${money(cost.monthlyAmount())}/mo",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        IconButton(onClick = onEdit, modifier = Modifier.size(42.dp)) {
-            Icon(
-                Icons.Outlined.Edit,
-                contentDescription = "Edit ${cost.name}",
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        IconButton(onClick = onDelete, modifier = Modifier.size(42.dp)) {
-            Icon(
-                Icons.Outlined.Delete,
-                contentDescription = "Delete ${cost.name}",
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -1664,21 +1506,6 @@ private fun InsightPreview(
 }
 
 @Composable
-private fun InsightCard(insight: CoachInsight, onAction: (CoachAction?) -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outline,
-        ),
-    ) {
-        InsightBody(insight = insight, onAction = onAction, compact = false)
-    }
-}
-
-@Composable
 private fun InsightBody(
     insight: CoachInsight,
     onAction: (CoachAction?) -> Unit,
@@ -1686,7 +1513,7 @@ private fun InsightBody(
 ) {
     val (icon, tint) = when (insight.tone) {
         CoachTone.Attention -> Icons.Outlined.WarningAmber to MaterialTheme.colorScheme.error
-        CoachTone.Opportunity -> Icons.Outlined.Lightbulb to brass()
+        CoachTone.Opportunity -> Icons.Outlined.Lightbulb to JwTheme.colors.brass
         CoachTone.Good -> Icons.Outlined.CheckCircle to MaterialTheme.colorScheme.primary
     }
     Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp)) {
@@ -1756,7 +1583,7 @@ private fun RunningCostDialog(
     val parsed = amount.replace(",", "").toDoubleOrNull() ?: 0.0
     val valid = name.isNotBlank() && parsed > 0.0
 
-    AlertDialog(
+    JwAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (existing == null) "Add a running cost" else "Edit running cost") },
         text = {

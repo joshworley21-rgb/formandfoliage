@@ -21,7 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -46,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import uk.co.jwgardenservices.crm.ui.common.JwAlertDialog
 import uk.co.jwgardenservices.crm.data.model.Enquiry
 import uk.co.jwgardenservices.crm.domain.formatDayMonthYear
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
@@ -53,8 +53,9 @@ import uk.co.jwgardenservices.crm.ui.CrmViewModel
 import uk.co.jwgardenservices.crm.ui.common.EmptyState
 import uk.co.jwgardenservices.crm.ui.common.ErrorState
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
-import uk.co.jwgardenservices.crm.ui.common.PageHeader
+import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
 import uk.co.jwgardenservices.crm.ui.common.StatusChip
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 
 private val STATUS_LABELS = mapOf(
     "new" to "New",
@@ -142,25 +143,25 @@ fun EnquiriesScreen(viewModel: CrmViewModel, onStartQuote: (Enquiry) -> Unit) {
     }
 
     if (state.loading) {
-        Column(Modifier.padding(20.dp)) {
-            PageHeader("Enquiries", "Website enquiries, ready to become clients.")
-            LoadingState()
+        Column(Modifier.fillMaxSize()) {
+            ScreenHeader(title = "Enquiries", subtitle = "Website enquiries, ready to become clients.")
+            LoadingState(modifier = Modifier.padding(horizontal = JwTokens.screenPadding))
         }
         return
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item {
-            PageHeader(
-                title = "Enquiries",
-                description = "Website enquiries, ready to become clients.",
-            )
-        }
-
+    Column(Modifier.fillMaxSize()) {
+        ScreenHeader(
+            title = "Enquiries",
+            subtitle = "Website enquiries, ready to become clients.",
+        )
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(JwTokens.screenPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
         if (state.error != null) {
             item { ErrorState(state.error!!, viewModel::refresh) }
         }
@@ -189,9 +190,10 @@ fun EnquiriesScreen(viewModel: CrmViewModel, onStartQuote: (Enquiry) -> Unit) {
             )
         }
     }
+    }
 
     deleting?.let { enquiry ->
-        AlertDialog(
+        JwAlertDialog(
             onDismissRequest = { deleting = null },
             title = { Text("Delete the enquiry from ${enquiry.name}?") },
             text = { Text("It will be removed from the inbox. Any client created from it stays.") },
@@ -228,9 +230,9 @@ private fun EnquiryCard(
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(JwTokens.cardRadius),
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        border = BorderStroke(JwTokens.hairline, MaterialTheme.colorScheme.outline),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

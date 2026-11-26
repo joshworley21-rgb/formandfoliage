@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Mic
@@ -30,51 +31,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.BorderStroke
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 
 @Composable
-fun PageHeader(
-    title: String,
-    description: String? = null,
-    onRefresh: (() -> Unit)? = null,
-    onSecretary: (() -> Unit)? = null,
-    action: (@Composable () -> Unit)? = null,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.Bottom,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, style = MaterialTheme.typography.displaySmall)
-            if (description != null) {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        if (action != null) {
-            action()
-        } else {
-            if (onSecretary != null) {
-                IconButton(onClick = onSecretary) {
-                    Icon(Icons.Outlined.Mic, contentDescription = "Call Secretary")
-                }
-            }
-            if (onRefresh != null) {
-                IconButton(onClick = onRefresh) {
-                    Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun LoadingState(message: String = "Loading…") {
+fun LoadingState(message: String = "Loading…", modifier: Modifier = Modifier) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(vertical = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -89,7 +51,7 @@ fun LoadingState(message: String = "Loading…") {
 fun ErrorState(message: String, onRetry: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(JwTokens.cardRadius),
         color = MaterialTheme.colorScheme.error.copy(alpha = 0.08f),
     ) {
         Column(
@@ -141,26 +103,52 @@ fun SectionCard(
     title: String,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    subtitle: String? = null,
+    leadingIcon: ImageVector? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(JwTokens.cardRadius),
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        border = BorderStroke(JwTokens.hairline, MaterialTheme.colorScheme.outline),
     ) {
         Column {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 8.dp, top = 10.dp),
+                    .padding(start = 16.dp, end = 6.dp, top = 10.dp, bottom = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
+                if (leadingIcon != null) {
+                    Surface(
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(JwTokens.smallRadius),
+                        color = MaterialTheme.colorScheme.secondary,
+                        contentColor = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(30.dp),
+                    ) {
+                        androidx.compose.foundation.layout.Box(
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(leadingIcon, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                    Spacer(Modifier.width(10.dp))
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    if (subtitle != null) {
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 if (actionLabel != null && onAction != null) {
                     TextButton(onClick = onAction) { Text(actionLabel) }
                 }
@@ -179,7 +167,7 @@ fun StatusChip(
     Surface(
         color = container,
         contentColor = color,
-        shape = RoundedCornerShape(50),
+        shape = RoundedCornerShape(JwTokens.chipRadius),
     ) {
         Text(
             text = label.uppercase(),
@@ -199,9 +187,9 @@ fun StatCard(
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(JwTokens.cardRadius),
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        border = BorderStroke(JwTokens.hairline, MaterialTheme.colorScheme.outline),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Icon(

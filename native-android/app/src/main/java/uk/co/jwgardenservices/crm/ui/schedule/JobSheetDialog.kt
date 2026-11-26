@@ -24,7 +24,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -59,10 +58,14 @@ import coil3.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
+import uk.co.jwgardenservices.crm.ui.common.JwAlertDialog
+import uk.co.jwgardenservices.crm.ui.common.JwDialog
 import uk.co.jwgardenservices.crm.data.model.JobPhotoWithUrl
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
 import uk.co.jwgardenservices.crm.ui.common.ContactButtons
+import uk.co.jwgardenservices.crm.ui.common.DialogTitle
 
 @Composable
 fun JobSheetDialog(
@@ -132,22 +135,8 @@ fun JobSheetDialog(
 
     val done = tasks.count { it.done }
 
-    Dialog(onDismissRequest = onClose) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 16.dp)
-                .heightIn(max = 800.dp),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text("Job sheet — $clientName", style = MaterialTheme.typography.headlineSmall)
+    JwDialog(onDismissRequest = onClose, maxHeight = 800.dp) {
+                DialogTitle("Job sheet — $clientName")
                 if (!clientAddress.isNullOrBlank()) {
                     Text(
                         text = clientAddress,
@@ -313,7 +302,7 @@ fun JobSheetDialog(
                                         modifier = Modifier
                                             .weight(1f)
                                             .aspectRatio(1f)
-                                            .clip(RoundedCornerShape(10.dp))
+                                            .clip(RoundedCornerShape(JwTokens.smallRadius))
                                             .background(MaterialTheme.colorScheme.secondary)
                                             .clickable {
                                                 editingPhoto = item
@@ -394,12 +383,10 @@ fun JobSheetDialog(
                 ) {
                     TextButton(onClick = onClose) { Text("Close") }
                 }
-            }
-        }
     }
 
     editingPhoto?.let { item ->
-        AlertDialog(
+        JwAlertDialog(
             onDismissRequest = { editingPhoto = null },
             title = { Text("Photo caption") },
             text = {

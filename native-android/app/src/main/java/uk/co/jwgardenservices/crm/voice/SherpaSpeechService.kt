@@ -191,6 +191,14 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @Volatile
     var onBargeIn: (() -> Unit)? = null
 
+    /** A possible interruption: dip the voice before confirming it. */
+    @Volatile
+    var onBargeCandidate: (() -> Unit)? = null
+
+    /** Speaker bleed rather than a person: bring the voice back up. */
+    @Volatile
+    var onBargeAbort: (() -> Unit)? = null
+
     /**
      * Armed while a spoken question is waiting for an answer (a wrap-up
      * prompt, a "send it?"). A barge-in then replays the frames heard before
@@ -237,9 +245,19 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @Volatile
     private var pausedAt = 0L
 
-    /** False with the accuracy-first microphone source: no echo canceller. */
+    /** Barge-in is allowed on every source; the guard changes with the route. */
     @Volatile
     private var bargeEnabled = true
+
+    /** True when AEC or a headset echo path protects the microphone. */
+    @Volatile
+    private var bargeHasEchoCancel = true
+
+    @Volatile
+    private var bargeRmsThreshold = BARGE_RMS
+
+    @Volatile
+    private var bargeFramesNeeded = BARGE_FRAMES
 
     @Volatile
     private var bargeFrames = 0
@@ -560,9 +578,14 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             return
         }
 
-        val micSource = AssistantPreferences.micSourceFlow(context).first()
-        bargeEnabled = micSource == MicSource.Communication
-        CrashLog.note(context, TAG, "mic=${micSource.name}")
+        val preferredSource = AssistantPreferences.micSourceFlow(context).first()
+        val micSource = resolveMicSource(preferredSource)
+        bargeEnabled = true
+        CrashLog.note(
+            context,
+            TAG,
+            "mic=${micSource.name}${if (micSource != preferredSource) " (auto from ${preferredSource.name})" else ""}",
+        )
         val record = try {
             withContext(Dispatchers.IO) { createAudioRecord(micSource.androidSource) }
         } catch (error: Exception) {
@@ -571,6 +594,22 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             return
         }
         audioRecord = record
+        val onHeadset = record.routedDevice?.type in setOf(
+            android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+            android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
+            android.media.AudioDeviceInfo.TYPE_USB_DEVICE,
+        )
+        bargeHasEchoCancel = echoCanceller != null || onHeadset
+        bargeRmsThreshold = if (bargeHasEchoCancel) BARGE_RMS else BARGE_RMS_NO_AEC
+        bargeFramesNeeded = if (bargeHasEchoCancel) BARGE_FRAMES else BARGE_FRAMES_NO_AEC
+        CrashLog.note(
+            context,
+            TAG,
+            "barge guard=${if (bargeHasEchoCancel) "aec/headset" else "energy"} " +
+                "threshold=${"%.3f".format(bargeRmsThreshold)} frames=$bargeFramesNeeded",
+        )
         // A car HFP mic is convenient but noisy; this option keeps output on
         // the car while capturing from the phone itself.
         if (micSource == MicSource.Phone) {
@@ -610,6 +649,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     }
 
     fun isListening(): Boolean = listening
+
+    /** True when the current route has AEC or a headset echo path. */
+    val bargeAvailable: Boolean
+        get() = bargeEnabled && bargeHasEchoCancel
 
     /**
      * Discard microphone frames while the confirmation is spoken, remembering
@@ -729,6 +772,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
                 android.media.AudioDeviceInfo.TYPE_USB_DEVICE,
             )
+            // AEC or a headset keeps the low backchannel out of the ASR.
+            val canBackchannel = wired || bargeHasEchoCancel
             val agc = InputAgc()
             // Amplified audio for the whole utterance: Nemotron streams the
             // partials, Moonshine re-decodes this buffer for the final text.
@@ -766,7 +811,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                         pausePreRoll.addLast(buffer[index])
                     }
                     while (pausePreRoll.size > PAUSE_PRE_ROLL_SAMPLES) pausePreRoll.removeFirst()
-                    if (maybeBargeIn(buffer, read)) {
+                    val pausedSamples = FloatArray(read) { buffer[it] / 32768.0f }
+                    vad?.acceptWaveform(pausedSamples)
+                    val bargeVoiced = vad?.isSpeechDetected() == true
+                    if (maybeBargeIn(buffer, read, bargeVoiced)) {
                         // The interjection began before the RMS trigger: feed
                         // what was buffered, then the live loop takes over.
                         val replay = pausePreRoll.toShortArray()
@@ -821,9 +869,13 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 if (voiced) {
                     val now = SystemClock.elapsedRealtime()
                     if (speechStartedAt == 0L) speechStartedAt = now
-                    // A quiet noise of agreement, never on a loudspeaker or a
-                    // car kit where it would be heard by the microphone.
-                    if (wired && now - speechStartedAt >= 3_000 &&
+                    // A quiet noise of agreement only on an echo-controlled
+                    // route, after a longer multi-clause turn has formed.
+                    val partialWords = _state.value.partial
+                        .split(Regex("\\s+"))
+                        .count { it.isNotBlank() }
+                    if (canBackchannel && partialWords >= 6 &&
+                        now - speechStartedAt >= 3_500 &&
                         now - lastBackchannelAt >= 4_500
                     ) {
                         lastBackchannelAt = now
@@ -854,10 +906,22 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 }
 
                 // No recogniser endpoint: NeMo's own rule resets mid-sentence
-                // on quiet audio. The VAD/energy silence is authoritative.
+                // on quiet audio. The VAD/energy silence is authoritative,
+                // but the wait adapts to the words in the live partial: a
+                // crisp question gets a quick turn, a trailing "and…" gets
+                // room to finish while driving.
                 val quietFor = SystemClock.elapsedRealtime() - lastVoiceAt
-                val endpoint = hasSpeech && !voiced && quietFor >= ENDPOINT_SILENCE_MS
+                val waitMs = SmartEndpointing.waitMs(text, onBluetooth)
+                val endpoint = hasSpeech && !voiced && quietFor >= waitMs
                 val overflow = utterance.size >= MAX_UTTERANCE_SAMPLES
+                if (endpoint) {
+                    CrashLog.note(
+                        context,
+                        TAG,
+                        "smart endpoint quiet=${quietFor}ms wait=${waitMs}ms " +
+                            "text=${text.take(80)}",
+                    )
+                }
                 if (endpoint || overflow) {
                     // Nemotron gives the live partials; Moonshine, decoding the
                     // same buffered audio, gives the final sentence. That is the
@@ -1033,7 +1097,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                         pausePreRoll.addLast(buffer[index])
                     }
                     while (pausePreRoll.size > PAUSE_PRE_ROLL_SAMPLES) pausePreRoll.removeFirst()
-                    if (maybeBargeIn(buffer, read)) {
+                    val pausedSamples = FloatArray(read) { buffer[it] / 32768.0f }
+                    vad?.acceptWaveform(pausedSamples)
+                    val bargeVoiced = vad?.isSpeechDetected() == true
+                    if (maybeBargeIn(buffer, read, bargeVoiced)) {
                         // The offline path buffers a whole utterance anyway:
                         // seed it with the pre-roll (oldest first) so "Yep"
                         // decodes whole.
@@ -1098,7 +1165,12 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 } else {
                     if (voiced) lastVoiceAt = now
                     for (sample in samples) utterance.add(sample)
-                    val endpoint = !voiced && now - lastVoiceAt >= ENDPOINT_SILENCE_MS
+                    // Moonshine has no live partials, so it cannot use the
+                    // word-aware endpointer: use the patient wait so a
+                    // thought is never cut off between utterances.
+                    val waitMs = SmartEndpointing.PATIENT_MS +
+                        if (onBluetooth) SmartEndpointing.BLUETOOTH_EXTRA_MS else 0L
+                    val endpoint = !voiced && now - lastVoiceAt >= waitMs
                     if (endpoint || utterance.size >= MAX_UTTERANCE_SAMPLES) {
                         val text = decodeOffline(utterance)
                         utterance.clear()
@@ -1185,7 +1257,11 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
      * the normal loop resumes. Echo cancellation comes from VOICE_COMMUNICATION
      * and AcousticEchoCanceler, so the assistant does not trigger itself.
      */
-    private fun maybeBargeIn(buffer: ShortArray, length: Int): Boolean {
+    private fun maybeBargeIn(
+        buffer: ShortArray,
+        length: Int,
+        vadVoiced: Boolean = false,
+    ): Boolean {
         if (!bargeEnabled || length <= 0) return false
         if (SystemClock.elapsedRealtime() - pausedAt < BARGE_GRACE_MS) return false
         var energy = 0.0
@@ -1194,17 +1270,32 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             energy += sample * sample
         }
         val rms = sqrt(energy / length)
-        if (rms >= BARGE_RMS) {
-            if (++bargeFrames >= BARGE_FRAMES) {
+        // With AEC/headset echo control, Silero can confirm a quieter
+        // interruption. Without it, only a clearly louder-than-speaker
+        // energy floor counts, so the phone cannot interrupt itself.
+        val candidate = if (bargeHasEchoCancel) {
+            vadVoiced && rms >= bargeRmsThreshold * 0.75f || rms >= bargeRmsThreshold
+        } else {
+            rms >= bargeRmsThreshold
+        }
+        if (candidate) {
+            if (bargeFrames == 0) onBargeCandidate?.invoke()
+            if (++bargeFrames >= bargeFramesNeeded) {
                 bargeFrames = 0
                 paused = false
                 resumeAfterPause = false
                 if (captureInterjections) interjectionArmed = true
-                CrashLog.note(context, TAG, "barge-in (rms=$rms)")
+                CrashLog.note(
+                    context,
+                    TAG,
+                    "barge-in (rms=${"%.3f".format(rms)} vad=$vadVoiced " +
+                        "threshold=${"%.3f".format(bargeRmsThreshold)} frames=$bargeFramesNeeded)",
+                )
                 onBargeIn?.invoke()
                 return true
             }
         } else {
+            if (bargeFrames > 0) onBargeAbort?.invoke()
             bargeFrames = 0
         }
         return false
@@ -1321,6 +1412,36 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     // --- setup ------------------------------------------------------------
 
+    /**
+     * Bluetooth and wired headsets work best on the communication source:
+     * that is the path with platform AEC and the car kit's own echo handling.
+     * The phone's built-in mic keeps the owner's explicit choice, including
+     * the accuracy-first Recognition setting.
+     */
+    private fun resolveMicSource(preferred: MicSource): MicSource {
+        if (preferred == MicSource.Phone) return preferred
+        val manager = context.getSystemService(AudioManager::class.java) ?: return preferred
+        val headset = manager.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull {
+            it.type in setOf(
+                AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+                AudioDeviceInfo.TYPE_USB_HEADSET,
+                AudioDeviceInfo.TYPE_USB_DEVICE,
+            )
+        } ?: return preferred
+        return if (headset.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+            headset.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
+            headset.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
+            headset.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+            headset.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES
+        ) {
+            MicSource.Communication
+        } else {
+            preferred
+        }
+    }
+
     @SuppressLint("MissingPermission") // checked by startListening before this point
     private fun createAudioRecord(source: Int): AudioRecord {
         releaseMicEffects()
@@ -1344,21 +1465,31 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             record.release()
             throw IOException("AudioRecord could not be initialised.")
         }
-        if (source == MediaRecorder.AudioSource.VOICE_COMMUNICATION &&
-            AcousticEchoCanceler.isAvailable()
-        ) {
+        if (AcousticEchoCanceler.isAvailable()) {
             echoCanceller = runCatching {
-                AcousticEchoCanceler.create(record.audioSessionId)?.apply { enabled = true }
+                val aec = AcousticEchoCanceler.create(record.audioSessionId) ?: return@runCatching null
+                aec.enabled = true
+                if (aec.enabled) {
+                    aec
+                } else {
+                    aec.release()
+                    null
+                }
             }.getOrNull()
-            CrashLog.note(context, TAG, "echo canceller=${echoCanceller != null}")
+            CrashLog.note(
+                context,
+                TAG,
+                "echo canceller=${echoCanceller != null} (source=$source)",
+            )
         }
         // AGC helps on the plain microphone (quiet gardens, phones on a desk)
         // and fights the platform suppressor on the communication source, so
-        // it follows the source rather than a single rule.
+        // it follows the source and stays off whenever AEC is active.
         gainController = runCatching {
             AutomaticGainControl.create(record.audioSessionId)
         }.getOrNull()
-        val gainWanted = source != MediaRecorder.AudioSource.VOICE_COMMUNICATION
+        val gainWanted = echoCanceller == null &&
+            source != MediaRecorder.AudioSource.VOICE_COMMUNICATION
         runCatching { gainController?.enabled = gainWanted }
         CrashLog.note(
             context,
@@ -1403,13 +1534,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         const val BARGE_RMS = 0.04
         const val BARGE_FRAMES = 3
 
-        /** Silence after the last voiced frame that ends the turn. */
-        /**
-         * A natural sentence has pauses of half a second or more. Cutting at
-         * 450 ms sliced "what have I got on today" into "…you today"; 800 ms
-         * lets the thought finish before the stream is closed.
-         */
-        const val ENDPOINT_SILENCE_MS = 800L
+        /** Without AEC/headset echo control, demand louder and longer speech. */
+        const val BARGE_RMS_NO_AEC = 0.06
+        const val BARGE_FRAMES_NO_AEC = 5
 
         /**
          * Raw RMS that counts as speech even when Silero says no. Quiet phone

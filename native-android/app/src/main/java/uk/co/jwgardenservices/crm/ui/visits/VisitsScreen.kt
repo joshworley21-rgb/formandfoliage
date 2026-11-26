@@ -25,7 +25,6 @@ import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Payments
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -36,7 +35,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -54,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import uk.co.jwgardenservices.crm.ui.common.JwAlertDialog
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.Invoice
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
@@ -73,12 +72,18 @@ import uk.co.jwgardenservices.crm.domain.todayIso
 import uk.co.jwgardenservices.crm.domain.visitAmount
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
 import uk.co.jwgardenservices.crm.ui.common.DateField
+import uk.co.jwgardenservices.crm.ui.common.DialogTitle
 import uk.co.jwgardenservices.crm.ui.common.EmptyState
 import uk.co.jwgardenservices.crm.ui.common.ErrorState
+import uk.co.jwgardenservices.crm.ui.common.HeaderOutlineButton
+import uk.co.jwgardenservices.crm.ui.common.HeaderPillButton
+import uk.co.jwgardenservices.crm.ui.common.JwDialog
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
-import uk.co.jwgardenservices.crm.ui.common.PageHeader
+import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
+import uk.co.jwgardenservices.crm.ui.common.SettingSwitchRow
 import uk.co.jwgardenservices.crm.ui.common.StatCard
 import uk.co.jwgardenservices.crm.ui.common.StatusChip
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 
 @Composable
 fun VisitsScreen(viewModel: CrmViewModel) {
@@ -99,49 +104,45 @@ fun VisitsScreen(viewModel: CrmViewModel) {
     }
 
     if (state.loading) {
-        Column(Modifier.padding(20.dp)) {
-            PageHeader("Visits", "Hours, materials and the days that did not happen.")
-            LoadingState()
+        Column(Modifier.fillMaxSize()) {
+            ScreenHeader(title = "Visits", subtitle = "Hours, materials and the days that did not happen.")
+            LoadingState(modifier = Modifier.padding(horizontal = JwTokens.screenPadding))
         }
         return
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item {
-            PageHeader(
-                title = "Visits",
-                description = "Hours, materials and the days that did not happen.",
-                action = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        TextButton(
-                            onClick = {
-                                saveError = null
-                                defaultMissed = true
-                                creating = true
-                            },
-                        ) {
-                            Text("Missed")
-                        }
-                        Button(
-                            onClick = {
-                                saveError = null
-                                defaultMissed = false
-                                creating = true
-                            },
-                        ) {
-                            Icon(Icons.Outlined.Add, contentDescription = null)
-                            Spacer(Modifier.width(6.dp))
-                            Text("Log visit")
-                        }
-                    }
-                },
-            )
-        }
-
+    Column(Modifier.fillMaxSize()) {
+        ScreenHeader(
+            title = "Visits",
+            subtitle = "Hours, materials and the days that did not happen.",
+            topActions = {
+                HeaderOutlineButton(
+                    label = "Missed",
+                    onClick = {
+                        saveError = null
+                        defaultMissed = true
+                        creating = true
+                    },
+                )
+                Spacer(Modifier.width(8.dp))
+                HeaderPillButton(
+                    label = "Log visit",
+                    icon = Icons.Outlined.Add,
+                    onClick = {
+                        saveError = null
+                        defaultMissed = false
+                        creating = true
+                    },
+                )
+            },
+        )
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(JwTokens.screenPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
         if (state.error != null) {
             item { ErrorState(state.error!!, viewModel::refresh) }
         }
@@ -187,6 +188,7 @@ fun VisitsScreen(viewModel: CrmViewModel) {
                 },
             )
         }
+    }
     }
 
     if (creating || editing != null) {
@@ -237,9 +239,9 @@ private fun VisitCard(visit: Visit, clientName: String, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(JwTokens.cardRadius),
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        border = BorderStroke(JwTokens.hairline, MaterialTheme.colorScheme.outline),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -384,25 +386,8 @@ private fun VisitEditorDialog(
     val dateValid = parseDate(date) != null
     val canSave = clientId.isNotBlank() && dateValid && !saving
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 16.dp)
-                .heightIn(max = 760.dp),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    text = if (existing == null) "Log a visit" else "Edit visit",
-                    style = MaterialTheme.typography.headlineSmall,
-                )
+    JwDialog(onDismissRequest = onDismiss, maxHeight = 760.dp) {
+                DialogTitle(if (existing == null) "Log a visit" else "Edit visit")
 
                 if (locked) {
                     Text(
@@ -437,26 +422,13 @@ private fun VisitEditorDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Switch(
-                        checked = missed,
-                        onCheckedChange = { missed = it },
-                        enabled = !locked,
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Missed visit",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                        )
-                        Text(
-                            text = "Kept as a record, charged at nothing, and left out of invoices.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+                SettingSwitchRow(
+                    title = "Missed visit",
+                    description = "Kept as a record, charged at nothing, and left out of invoices.",
+                    checked = missed,
+                    onCheckedChange = { missed = it },
+                    enabled = !locked,
+                )
 
                 if (!missed) {
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -554,7 +526,7 @@ private fun VisitEditorDialog(
 
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(JwTokens.smallRadius),
                     color = MaterialTheme.colorScheme.secondary,
                 ) {
                     Text(
@@ -623,12 +595,10 @@ private fun VisitEditorDialog(
                         Text(if (existing == null) "Save visit" else "Save changes")
                     }
                 }
-            }
-        }
     }
 
     if (confirmDelete && onDelete != null) {
-        AlertDialog(
+        JwAlertDialog(
             onDismissRequest = { confirmDelete = false },
             title = { Text("Delete this visit?") },
             text = { Text("It will be removed from the log and from any pending sync.") },

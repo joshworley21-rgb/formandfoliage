@@ -101,7 +101,7 @@ object TtsProsody {
 
     /** Lead-in shaping and local pronunciations, safe for every engine. */
     fun smooth(text: String): String {
-        val trimmed = Pronunciation.apply(text.trim())
+        val trimmed = PronunciationDictionary.apply(text.trim())
         if (trimmed.isEmpty()) return trimmed
         val match = leadIn.find(trimmed) ?: return trimmed
         val rest = trimmed.substring(match.range.last + 1).trimStart()

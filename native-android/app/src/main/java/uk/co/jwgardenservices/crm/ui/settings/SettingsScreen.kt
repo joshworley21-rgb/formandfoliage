@@ -21,12 +21,23 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Business
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.Group
+import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material.icons.outlined.RequestQuote
+import androidx.compose.material.icons.outlined.Savings
 import androidx.compose.material.icons.outlined.Share
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -35,9 +46,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import uk.co.jwgardenservices.crm.ui.common.JwAlertDialog
 import uk.co.jwgardenservices.crm.core.Branding
 import uk.co.jwgardenservices.crm.core.TaxReservePrefs
-import androidx.compose.material3.Switch
 import java.time.LocalDate
 import uk.co.jwgardenservices.crm.domain.formatDateTime
 import uk.co.jwgardenservices.crm.domain.invoicesCsv
@@ -72,11 +83,16 @@ import uk.co.jwgardenservices.crm.data.model.Settings
 import uk.co.jwgardenservices.crm.data.model.TeamMember
 import uk.co.jwgardenservices.crm.data.model.SettingsDraft
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
+import uk.co.jwgardenservices.crm.ui.common.HeaderPillButton
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
 import uk.co.jwgardenservices.crm.ui.common.OptionPicker
-import uk.co.jwgardenservices.crm.ui.common.PageHeader
+import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
 import uk.co.jwgardenservices.crm.ui.common.SectionCard
+import uk.co.jwgardenservices.crm.ui.common.SegmentedPills
+import uk.co.jwgardenservices.crm.ui.common.SettingSwitchRow
 import uk.co.jwgardenservices.crm.ui.common.ShareText
+import uk.co.jwgardenservices.crm.ui.theme.JwTheme
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 import uk.co.jwgardenservices.crm.ui.theme.LocalSetThemeMode
 import uk.co.jwgardenservices.crm.ui.theme.LocalThemeMode
 import uk.co.jwgardenservices.crm.ui.theme.ThemeMode
@@ -281,30 +297,32 @@ fun SettingsScreen(
     }
 
     if (state.loading) {
-        Column(Modifier.padding(20.dp)) {
-            PageHeader("Settings", "The details that appear on every invoice and quote.")
-            LoadingState()
+        Column(Modifier.fillMaxSize()) {
+            ScreenHeader(title = "Settings", subtitle = "The details that appear on every invoice and quote.")
+            LoadingState(modifier = Modifier.padding(horizontal = JwTokens.screenPadding))
         }
         return
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        item {
-            PageHeader(
-                title = "Settings",
-                description = "The details that appear on every invoice and quote.",
-                action = {
-                    Button(onClick = ::save, enabled = !state.saving) {
-                        Text(if (state.saving) "Saving…" else "Save")
-                    }
-                },
-            )
-        }
-
+    Column(modifier = Modifier.fillMaxSize()) {
+        ScreenHeader(
+            title = "Settings",
+            subtitle = "The details that appear on every invoice and quote.",
+            topActions = {
+                HeaderPillButton(
+                    label = if (state.saving) "Saving…" else "Save",
+                    enabled = !state.saving,
+                    onClick = ::save,
+                )
+            },
+        )
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(JwTokens.screenPadding),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
         if (error != null) {
             item {
                 Text(
@@ -316,18 +334,21 @@ fun SettingsScreen(
         }
 
         item {
-            SectionCard(title = "Appearance") {
+            SectionCard(
+                title = "Appearance",
+                subtitle = "How the app looks on this phone.",
+                leadingIcon = Icons.Outlined.Palette,
+            ) {
                 Column(
                     modifier = Modifier.padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text("Theme", style = MaterialTheme.typography.titleSmall)
-                    OptionPicker(
+                    SegmentedPills(
                         options = ThemeMode.entries,
                         selected = themeMode,
-                        label = { it?.label ?: "Follow system" },
-                        enabled = true,
                         onSelect = setThemeMode,
+                        label = { it.label },
                     )
                     Text(
                         text = "Follow system uses the phone's light or dark setting.",
@@ -339,7 +360,11 @@ fun SettingsScreen(
         }
 
         item {
-            SectionCard(title = "Secretary") {
+            SectionCard(
+                title = "Secretary",
+                subtitle = "Voice, personality and local models.",
+                leadingIcon = Icons.Outlined.Mic,
+            ) {
                 Column(
                     modifier = Modifier.padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -360,7 +385,11 @@ fun SettingsScreen(
         }
 
         item {
-            SectionCard(title = "Business details") {
+            SectionCard(
+                title = "Business details",
+                subtitle = "The identity carried on every document.",
+                leadingIcon = Icons.Outlined.Business,
+            ) {
                 Column(
                     modifier = Modifier.padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -387,7 +416,7 @@ fun SettingsScreen(
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(JwTokens.smallRadius),
                             color = MaterialTheme.colorScheme.surfaceVariant,
                             modifier = Modifier
                                 .width(96.dp)
@@ -494,7 +523,11 @@ fun SettingsScreen(
         }
 
         item {
-            SectionCard(title = "Website and enquiries") {
+            SectionCard(
+                title = "Website and enquiries",
+                subtitle = "Where quote links and the enquiry form live.",
+                leadingIcon = Icons.Outlined.Language,
+            ) {
                 Column(
                     modifier = Modifier.padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -537,7 +570,11 @@ fun SettingsScreen(
         }
 
         item {
-            SectionCard(title = "Business knowledge") {
+            SectionCard(
+                title = "Business knowledge",
+                subtitle = "What Secretary knows about what you do.",
+                leadingIcon = Icons.Outlined.AutoAwesome,
+            ) {
                 Column(
                     modifier = Modifier.padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -581,7 +618,7 @@ fun SettingsScreen(
                     if (knowledgeError != null || knowledgeNote != null) {
                         val failed = knowledgeError != null
                         Surface(
-                            shape = RoundedCornerShape(14.dp),
+                            shape = RoundedCornerShape(JwTokens.controlRadius),
                             color = if (failed) {
                                 MaterialTheme.colorScheme.errorContainer
                             } else {
@@ -693,7 +730,11 @@ fun SettingsScreen(
         }
 
         item {
-            SectionCard(title = "Team access") {
+            SectionCard(
+                title = "Team access",
+                subtitle = "The people who can see the round.",
+                leadingIcon = Icons.Outlined.Group,
+            ) {
                 Column(
                     modifier = Modifier.padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -771,7 +812,11 @@ fun SettingsScreen(
         }
 
         item {
-            SectionCard(title = "Invoicing") {
+            SectionCard(
+                title = "Invoicing",
+                subtitle = "Numbering, VAT and payment terms.",
+                leadingIcon = Icons.AutoMirrored.Outlined.ReceiptLong,
+            ) {
                 Column(
                     modifier = Modifier.padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -783,14 +828,11 @@ fun SettingsScreen(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Switch(
-                            checked = form.vatRegistered,
-                            onCheckedChange = { form = form.copy(vatRegistered = it) },
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Text("VAT registered", style = MaterialTheme.typography.bodyMedium)
-                    }
+                    SettingSwitchRow(
+                        title = "VAT registered",
+                        checked = form.vatRegistered,
+                        onCheckedChange = { form = form.copy(vatRegistered = it) },
+                    )
                     if (form.vatRegistered) {
                         OutlinedTextField(
                             value = form.vatNumber,
@@ -827,7 +869,11 @@ fun SettingsScreen(
         }
 
         item {
-            SectionCard(title = "Tax") {
+            SectionCard(
+                title = "Tax",
+                subtitle = "What to put aside from each invoice.",
+                leadingIcon = Icons.Outlined.Savings,
+            ) {
                 Column(
                     modifier = Modifier.padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -857,22 +903,15 @@ fun SettingsScreen(
         }
 
         item {
-            SectionCard(title = "Security") {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Require app lock", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            text = "Ask for your fingerprint or phone PIN when the app reopens.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(
+            SectionCard(
+                title = "Security",
+                subtitle = "Lock the workspace when the app reopens.",
+                leadingIcon = Icons.Outlined.Lock,
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    SettingSwitchRow(
+                        title = "Require app lock",
+                        description = "Ask for your fingerprint or phone PIN when the app reopens.",
                         checked = appLockOn,
                         onCheckedChange = { checked ->
                             AppLock.setEnabled(context, checked)
@@ -884,7 +923,11 @@ fun SettingsScreen(
         }
 
         item {
-            SectionCard(title = "Export for your accountant") {
+            SectionCard(
+                title = "Export for your accountant",
+                subtitle = "Spreadsheets for the books.",
+                leadingIcon = Icons.Outlined.FileDownload,
+            ) {
                 Column(
                     modifier = Modifier.padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -929,7 +972,11 @@ fun SettingsScreen(
         }
 
         item {
-            SectionCard(title = "Invoice email") {
+            SectionCard(
+                title = "Invoice email",
+                subtitle = "The subject and body customers receive.",
+                leadingIcon = Icons.Outlined.Email,
+            ) {
                 Column(
                     modifier = Modifier.padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -958,7 +1005,11 @@ fun SettingsScreen(
         }
 
         item {
-            SectionCard(title = "Quotes") {
+            SectionCard(
+                title = "Quotes",
+                subtitle = "Validity and the default terms.",
+                leadingIcon = Icons.Outlined.RequestQuote,
+            ) {
                 Column(
                     modifier = Modifier.padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -984,7 +1035,7 @@ fun SettingsScreen(
         item {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
+                shape = RoundedCornerShape(JwTokens.cardRadius),
                 color = MaterialTheme.colorScheme.secondary,
             ) {
                 Column(Modifier.padding(16.dp)) {
@@ -1016,9 +1067,10 @@ fun SettingsScreen(
             )
         }
     }
+    }
 
     removing?.let { member ->
-        AlertDialog(
+        JwAlertDialog(
             onDismissRequest = { removing = null },
             title = { Text("Remove access for ${member.email}?") },
             text = { Text("They will no longer be able to sign in to this workspace on this account.") },
@@ -1068,7 +1120,7 @@ private fun BusinessKnowledgeDialog(
     onSave: (String) -> Unit,
 ) {
     var text by remember(initial) { mutableStateOf(initial) }
-    AlertDialog(
+    JwAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Business knowledge") },
         text = {

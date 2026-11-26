@@ -36,7 +36,6 @@ import androidx.compose.material.icons.outlined.Clear
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.People
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -44,7 +43,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -61,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import uk.co.jwgardenservices.crm.ui.common.JwAlertDialog
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.JobPhotoWithUrl
 import uk.co.jwgardenservices.crm.data.model.ClientDraft
@@ -68,10 +67,15 @@ import uk.co.jwgardenservices.crm.domain.filterBy
 import uk.co.jwgardenservices.crm.domain.money
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
 import uk.co.jwgardenservices.crm.ui.common.ContactButtons
+import uk.co.jwgardenservices.crm.ui.common.DialogTitle
 import uk.co.jwgardenservices.crm.ui.common.EmptyState
 import uk.co.jwgardenservices.crm.ui.common.ErrorState
+import uk.co.jwgardenservices.crm.ui.common.HeaderPillButton
+import uk.co.jwgardenservices.crm.ui.common.JwDialog
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
-import uk.co.jwgardenservices.crm.ui.common.PageHeader
+import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
+import uk.co.jwgardenservices.crm.ui.common.SettingSwitchRow
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 
 @Composable
 fun ClientsScreen(viewModel: CrmViewModel, isStaff: Boolean) {
@@ -90,39 +94,41 @@ fun ClientsScreen(viewModel: CrmViewModel, isStaff: Boolean) {
     }
 
     if (state.loading) {
-        Column(Modifier.padding(20.dp)) {
-            PageHeader("Clients", "Rates, contact details and who to chase.")
-            LoadingState()
+        Column(Modifier.fillMaxSize()) {
+            ScreenHeader(title = "Clients", subtitle = "Rates, contact details and who to chase.")
+            LoadingState(modifier = Modifier.padding(horizontal = JwTokens.screenPadding))
         }
         return
     }
 
     Column(Modifier.fillMaxSize()) {
+        ScreenHeader(
+            title = "Clients",
+            subtitle = if (isStaff) {
+                "Names, addresses and notes for the round."
+            } else {
+                "Rates, contact details and who to chase."
+            },
+            topActions = {
+                if (!isStaff) {
+                    HeaderPillButton(
+                        label = "Add client",
+                        icon = Icons.Outlined.Add,
+                        onClick = {
+                            saveError = null
+                            creating = true
+                        },
+                    )
+                }
+            },
+        )
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(20.dp),
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(JwTokens.screenPadding),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            item {
-                PageHeader(
-                    title = "Clients",
-                    description = if (isStaff) {
-                        "Names, addresses and notes for the round."
-                    } else {
-                        "Rates, contact details and who to chase."
-                    },
-                    action = {
-                        if (!isStaff) {
-                            Button(onClick = { saveError = null; creating = true }) {
-                                Icon(Icons.Outlined.Add, contentDescription = null)
-                                Spacer(Modifier.width(6.dp))
-                                Text("Add")
-                            }
-                        }
-                    },
-                )
-            }
-
             if (state.error != null) {
                 item { ErrorState(state.error!!, viewModel::refresh) }
             }
@@ -144,7 +150,7 @@ fun ClientsScreen(viewModel: CrmViewModel, isStaff: Boolean) {
                             }
                         }
                     },
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(JwTokens.controlRadius),
                 )
             }
 
@@ -253,9 +259,9 @@ private fun ClientCard(client: Client, isStaff: Boolean, onClick: (() -> Unit)?,
         modifier = Modifier
             .fillMaxWidth()
             .clickable(enabled = onClick != null) { onClick?.invoke() },
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(JwTokens.cardRadius),
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        border = BorderStroke(JwTokens.hairline, MaterialTheme.colorScheme.outline),
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -352,25 +358,8 @@ private fun ClientEditorDialog(
 
     val valid = name.isNotBlank()
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 16.dp)
-                .heightIn(max = 720.dp),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    text = if (existing == null) "Add client" else "Edit client",
-                    style = MaterialTheme.typography.headlineSmall,
-                )
+    JwDialog(onDismissRequest = onDismiss, maxHeight = 720.dp) {
+                DialogTitle(if (existing == null) "Add client" else "Edit client")
 
                 OutlinedTextField(
                     value = name,
@@ -461,22 +450,12 @@ private fun ClientEditorDialog(
                     )
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Switch(checked = reminders, onCheckedChange = { reminders = it })
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Chase this client about unpaid invoices",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                        )
-                        Text(
-                            text = "Off by default. When on, an invoice past its due date is chased weekly.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+                SettingSwitchRow(
+                    title = "Chase this client about unpaid invoices",
+                    description = "Off by default. When on, an invoice past its due date is chased weekly.",
+                    checked = reminders,
+                    onCheckedChange = { reminders = it },
+                )
 
                 if (errorMessage != null) {
                     Text(
@@ -523,12 +502,10 @@ private fun ClientEditorDialog(
                         Text(if (existing == null) "Add client" else "Save")
                     }
                 }
-            }
-        }
     }
 
     if (confirmDelete && onDelete != null) {
-        AlertDialog(
+        JwAlertDialog(
             onDismissRequest = { confirmDelete = false },
             title = { Text("Delete ${existing?.name.orEmpty()}?") },
             text = { Text("This removes the client and every job, visit and invoice attached to them.") },
@@ -566,7 +543,7 @@ private fun ClientPhotosDialog(
         }
     }
 
-    AlertDialog(
+    JwAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Photos — ${client.name}") },
         text = {
@@ -591,7 +568,7 @@ private fun ClientPhotosDialog(
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 .aspectRatio(1f)
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(JwTokens.smallRadius))
                                 .background(MaterialTheme.colorScheme.surfaceContainer),
                         )
                     }

@@ -14,10 +14,9 @@ import kotlinx.coroutines.flow.map
 /**
  * Kokoro voice profiles exposed in the assistant settings.
  *
- * The speaker ids are positions in `kokoro-multi-lang-v1_0`'s 53-voice bank.
- * Ids 20–27 are the eight British English voices; the rest of the bank is
- * American, Chinese, Japanese and so on. The bank is ordered
- * af_… → am_… → bf_… → bm_…, which is why alice is 20 and fable is 25.
+ * The speaker ids are positions in `kokoro-multi-lang-v1_0`'s 54-slot bank.
+ * Ids 20–27 are the eight British English voices; the last slot is replaced
+ * at load time with the cached Fable + George cab blend.
  */
 /** How the assistant sounds, beyond the voice itself. */
 enum class PersonaTone(val label: String) {
@@ -45,6 +44,14 @@ enum class KokoroVoice(val speakerId: Int, val label: String) {
     BmFable(25, "bm_fable — British male"),
     BmGeorge(26, "bm_george — British male"),
     BmLewis(27, "bm_lewis — British male"),
+
+    /** 0.70 × bm_fable + 0.30 × bm_george, written into slot 53 at load. */
+    CabBlend(53, "Fable + George (Cab Blend)"),
+    ;
+
+    companion object {
+        val DEFAULT = CabBlend
+    }
 }
 
 private val Context.assistantDataStore by preferencesDataStore(name = "assistant")
@@ -67,6 +74,8 @@ private val PERSONA_LENGTH_KEY = stringPreferencesKey("persona_length")
 private val PHONON_VOICE_KEY = stringPreferencesKey("phonon_voice")
 private val ASR_ENGINE_KEY = stringPreferencesKey("asr_engine")
 private val FOLLOW_UP_KEY = booleanPreferencesKey("follow_up")
+private val OWNER_NAME_KEY = stringPreferencesKey("owner_name")
+private val CUSTOM_VOICE_KEY = stringPreferencesKey("kokoro_custom_voice")
 
 /** The on-device speech recogniser. Streaming is the default; Moonshine is a test. */
 enum class AsrEngine(val label: String) {
@@ -108,13 +117,21 @@ object AssistantPreferences {
     const val DEFAULT_SPEED = 1.0f
 
     fun voiceFlow(context: Context): Flow<KokoroVoice> = context.assistantDataStore.data.map { preferences ->
-        KokoroVoice.entries.firstOrNull { it.name == preferences[VOICE_KEY] } ?: KokoroVoice.BmFable
+        KokoroVoice.entries.firstOrNull { it.name == preferences[VOICE_KEY] } ?: KokoroVoice.DEFAULT
     }
 
     suspend fun setVoice(context: Context, voice: KokoroVoice) {
         context.assistantDataStore.edit { preferences ->
             preferences[VOICE_KEY] = voice.name
         }
+    }
+
+    /** A single-speaker .bin from app storage, or blank for built-ins. */
+    fun customKokoroVoiceFlow(context: Context): Flow<String> =
+        context.assistantDataStore.data.map { it[CUSTOM_VOICE_KEY].orEmpty() }
+
+    suspend fun setCustomKokoroVoice(context: Context, name: String?) {
+        context.assistantDataStore.edit { it[CUSTOM_VOICE_KEY] = name?.trim().orEmpty() }
     }
 
     /** Optional fp32 model, downloaded separately; int8 is the default. */
@@ -232,6 +249,14 @@ object AssistantPreferences {
 
     suspend fun setDrivingMode(context: Context, enabled: Boolean) {
         context.assistantDataStore.edit { it[DRIVING_KEY] = enabled }
+    }
+
+    /** The first name used in greetings and asides; blank means "work it out". */
+    fun ownerNameFlow(context: Context): Flow<String> =
+        context.assistantDataStore.data.map { it[OWNER_NAME_KEY].orEmpty() }
+
+    suspend fun setOwnerName(context: Context, name: String) {
+        context.assistantDataStore.edit { it[OWNER_NAME_KEY] = name.trim().take(40) }
     }
 
     fun personaToneFlow(context: Context): Flow<PersonaTone> =

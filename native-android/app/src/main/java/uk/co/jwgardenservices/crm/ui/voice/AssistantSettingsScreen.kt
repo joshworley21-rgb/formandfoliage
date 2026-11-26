@@ -14,7 +14,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.BugReport
+import androidx.compose.material.icons.outlined.Call
+import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.GraphicEq
+import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Notes
+import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -23,7 +31,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
@@ -50,13 +57,17 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import uk.co.jwgardenservices.crm.core.CrashLog
 import uk.co.jwgardenservices.crm.ui.common.OptionPicker
-import uk.co.jwgardenservices.crm.ui.common.PageHeader
+import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
 import uk.co.jwgardenservices.crm.ui.common.SectionCard
+import uk.co.jwgardenservices.crm.ui.common.SegmentedPills
+import uk.co.jwgardenservices.crm.ui.common.SettingSwitchRow
 import uk.co.jwgardenservices.crm.ui.common.ShareText
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 import uk.co.jwgardenservices.crm.voice.AssistantContext
 import uk.co.jwgardenservices.crm.voice.AssistantMemory
 import uk.co.jwgardenservices.crm.voice.AsrEngine
 import uk.co.jwgardenservices.crm.voice.AssistantPreferences
+import uk.co.jwgardenservices.crm.voice.KokoroCustomVoices
 import uk.co.jwgardenservices.crm.voice.KokoroHqDownloader
 import uk.co.jwgardenservices.crm.voice.KokoroEngine
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
@@ -73,7 +84,7 @@ import uk.co.jwgardenservices.crm.voice.PiperVoiceDownloader
 import uk.co.jwgardenservices.crm.voice.PersonaHumour
 import uk.co.jwgardenservices.crm.voice.PersonaLength
 import uk.co.jwgardenservices.crm.voice.PersonaTone
-import uk.co.jwgardenservices.crm.voice.Pronunciation
+import uk.co.jwgardenservices.crm.voice.PronunciationDictionary
 import uk.co.jwgardenservices.crm.voice.SpeechEngine
 
 /**
@@ -85,7 +96,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val voice by AssistantPreferences.voiceFlow(context)
-        .collectAsStateWithLifecycle(initialValue = KokoroVoice.BmFable)
+        .collectAsStateWithLifecycle(initialValue = KokoroVoice.DEFAULT)
 
     val highQuality by AssistantPreferences.highQualityFlow(context)
         .collectAsStateWithLifecycle(initialValue = false)
@@ -116,9 +127,17 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = PersonaHumour.Normal)
     val personaLength by AssistantPreferences.personaLengthFlow(context)
         .collectAsStateWithLifecycle(initialValue = PersonaLength.Normal)
+    val selectedCustomVoice by AssistantPreferences.customKokoroVoiceFlow(context)
+        .collectAsStateWithLifecycle(initialValue = "")
+    var kokoroCustomVoices by remember { mutableStateOf(KokoroCustomVoices.list(context)) }
+    var customVoiceError by remember { mutableStateOf<String?>(null) }
+    val savedOwnerName by AssistantPreferences.ownerNameFlow(context)
+        .collectAsStateWithLifecycle(initialValue = "")
+    var ownerNameDraft by remember { mutableStateOf(savedOwnerName) }
+    LaunchedEffect(savedOwnerName) { ownerNameDraft = savedOwnerName }
     val pronunciations by AssistantPreferences.pronunciationsFlow(context)
         .collectAsStateWithLifecycle(initialValue = emptyMap())
-    LaunchedEffect(pronunciations) { Pronunciation.userEntries = pronunciations }
+    LaunchedEffect(pronunciations) { PronunciationDictionary.userEntries = pronunciations }
     val localLlmState by LocalLlm.state.collectAsStateWithLifecycle()
     var localLlmInstalled by remember { mutableStateOf(LocalLlm.isInstalled(context)) }
     var localLlmSaved by remember { mutableLongStateOf(LocalLlm.savedBytes(context)) }
@@ -252,32 +271,38 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     var crashRefresh by remember { mutableIntStateOf(0) }
     val crashReport = remember(crashRefresh) { CrashLog.read(context) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        TextButton(onClick = onBack) { Text("Back") }
-
-        PageHeader(
+    Column(modifier = Modifier.fillMaxSize()) {
+        ScreenHeader(
             title = "Secretary settings",
-            description = "Voice, personality and local models for Secretary.",
+            subtitle = "Voice, personality and local models.",
+            onBack = onBack,
+            backLabel = "Settings",
         )
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(JwTokens.screenPadding),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
         TextButton(onClick = { showAdvanced = !showAdvanced }) {
             Text(if (showAdvanced) "Hide advanced model settings" else "Advanced model settings")
         }
 
-        SectionCard(title = "Phonon 31m (fast)") {
+        SectionCard(
+            title = "Phonon 31m (manual alternative)",
+            subtitle = "Whole-call voice, off by default.",
+            leadingIcon = Icons.Outlined.RecordVoiceOver,
+        ) {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
                     text = "Phonon 31m is Apache 2.0, about 62 MB, and streams audio while it " +
-                        "speaks on the CPU. It replaces the other local voices while it is on; " +
-                        "Kokoro stays as the fallback.",
+                        "speaks on the CPU. It is off by default. Turning it on switches the " +
+                        "whole call to Phonon; fillers, backchannels and replies never mix engines.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -298,21 +323,17 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 }
 
                 if (phononInstalled) {
-                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Switch(
-                            checked = phononEnabled,
-                            onCheckedChange = { enabled ->
-                                scope.launch {
-                                    AssistantPreferences.setPhonon(context, enabled)
-                                    KokoroEngine.get(context).reload()
-                                }
-                            },
-                        )
-                        Text(
-                            text = "Use Phonon 31m",
-                            modifier = Modifier.padding(start = 8.dp),
-                        )
-                    }
+                    SettingSwitchRow(
+                        title = "Use Phonon for the whole call",
+                        description = "One engine throughout. Kokoro is the default when this is off.",
+                        checked = phononEnabled,
+                        onCheckedChange = { enabled ->
+                            scope.launch {
+                                AssistantPreferences.setPhonon(context, enabled)
+                                KokoroEngine.get(context).reload()
+                            }
+                        },
+                    )
                     Text(
                         text = "Voice",
                         style = MaterialTheme.typography.labelMedium,
@@ -511,22 +532,26 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
-        SectionCard(title = "Kokoro 82M (fallback)") {
+        SectionCard(
+            title = "Kokoro 82M (primary)",
+            subtitle = "Conversational voice.",
+            leadingIcon = Icons.Outlined.VolumeUp,
+        ) {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "Kokoro speaks when Phonon is off or fails. These are the eight " +
-                        "British Kokoro voices; they are expressive but heavier than Phonon, " +
-                        "so Phonon remains the first choice for a call.",
+                    text = "Kokoro int8 runs on four CPU threads and speaks the whole call, " +
+                        "including fillers and backchannels, when Phonon is off. Choose one of " +
+                        "the British voices or the cached cab blend.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OptionPicker(
                     options = KokoroVoice.entries,
                     selected = voice,
-                    label = { it?.label ?: KokoroVoice.BmFable.label },
+                    label = { it?.label ?: KokoroVoice.DEFAULT.label },
                     onSelect = { selected ->
                         scope.launch {
                             AssistantPreferences.setVoice(context, selected)
@@ -534,6 +559,70 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         }
                     },
                 )
+                val pickCustomVoice = rememberLauncherForActivityResult(
+                    ActivityResultContracts.GetContent(),
+                ) { uri ->
+                    if (uri == null) return@rememberLauncherForActivityResult
+                    val name = KokoroCustomVoices.import(context, uri)
+                    if (name == null) {
+                        customVoiceError = "That file is not a 510 × 256 float32 Kokoro voice."
+                    } else {
+                        customVoiceError = null
+                        kokoroCustomVoices = KokoroCustomVoices.list(context)
+                        scope.launch {
+                            AssistantPreferences.setCustomKokoroVoice(context, name)
+                            KokoroEngine.get(context).reload()
+                        }
+                    }
+                }
+                Text("Custom voice", style = MaterialTheme.typography.labelMedium)
+                OptionPicker(
+                    options = listOf("") + kokoroCustomVoices.map { it.name },
+                    selected = selectedCustomVoice,
+                    label = { name ->
+                        if (name.isNullOrBlank()) "Built-in voices" else name
+                    },
+                    onSelect = { name ->
+                        scope.launch {
+                            AssistantPreferences.setCustomKokoroVoice(context, name)
+                            KokoroEngine.get(context).reload()
+                        }
+                    },
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(onClick = { pickCustomVoice.launch("*/*") }) {
+                        Text("Import .bin")
+                    }
+                    if (selectedCustomVoice.isNotBlank()) {
+                        OutlinedButton(
+                            onClick = {
+                                val name = selectedCustomVoice
+                                scope.launch {
+                                    KokoroCustomVoices.delete(context, name)
+                                    AssistantPreferences.setCustomKokoroVoice(context, null)
+                                    kokoroCustomVoices = KokoroCustomVoices.list(context)
+                                    KokoroEngine.get(context).reload()
+                                }
+                            },
+                        ) { Text("Remove custom") }
+                    }
+                }
+                Text(
+                    text = "A custom 510 × 256 float32 .bin overrides the built-in voice above. " +
+                        "Files can also be placed in app storage under kokoro-custom.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                customVoiceError?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 TextButton(
                     onClick = {
                         previewingVoice = true
@@ -558,7 +647,11 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         }
 
         if (showAdvanced) {
-        SectionCard(title = "Nemotron ASR (streaming)") {
+        SectionCard(
+            title = "Nemotron ASR (streaming)",
+            subtitle = "Optional streaming recogniser.",
+            leadingIcon = Icons.Outlined.GraphicEq,
+        ) {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -641,7 +734,11 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
-        SectionCard(title = "Moonshine ASR (experimental)") {
+        SectionCard(
+            title = "Moonshine ASR (experimental)",
+            subtitle = "Default offline recogniser.",
+            leadingIcon = Icons.Outlined.Mic,
+        ) {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -677,10 +774,9 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    OptionPicker(
+                    SegmentedPills(
                         options = AsrEngine.entries,
                         selected = asrEngine,
-                        label = { it?.label ?: AsrEngine.Moonshine.label },
                         onSelect = { engine ->
                             scope.launch {
                                 AssistantPreferences.setAsrEngine(context, engine)
@@ -689,6 +785,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                                 if (engine != AsrEngine.Nemotron) speechEngine.releaseNemotron()
                             }
                         },
+                        label = { it.label },
                     )
                     Text(
                         text = "Takes effect on the next call. Recommended: Moonshine — it " +
@@ -739,7 +836,11 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
-        SectionCard(title = "Punctuation") {
+        SectionCard(
+            title = "Punctuation",
+            subtitle = "How spoken sentences are written.",
+            leadingIcon = Icons.Outlined.Notes,
+        ) {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -803,7 +904,11 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
 
         }
 
-        SectionCard(title = "Call") {
+        SectionCard(
+            title = "Call",
+            subtitle = "Driving and call behaviour.",
+            leadingIcon = Icons.Outlined.Call,
+        ) {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -814,62 +919,44 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Switch(
-                        checked = drivingMode,
-                        onCheckedChange = { enabled ->
-                            scope.launch { AssistantPreferences.setDrivingMode(context, enabled) }
-                        },
-                    )
-                    Column(modifier = Modifier.padding(start = 8.dp)) {
-                        Text("Driving mode")
-                        Text(
-                            text = "Shorter turn-taking, slightly slower speech, louder output " +
-                                "and no \"anything else?\" nudge.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Switch(
-                        checked = autoDrivingMode,
-                        onCheckedChange = { enabled ->
-                            scope.launch {
-                                AssistantPreferences.setAutoDrivingMode(context, enabled)
-                            }
-                        },
-                    )
-                    Column(modifier = Modifier.padding(start = 8.dp)) {
-                        Text("Turn on automatically in the car")
-                        Text(
-                            text = "Uses the Bluetooth car connection as the trigger; the " +
-                                "manual switch above still works when this is off.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+                SettingSwitchRow(
+                    title = "Driving mode",
+                    description = "Shorter turns, slower speech, louder output and no follow-up nudge.",
+                    checked = drivingMode,
+                    onCheckedChange = { enabled ->
+                        scope.launch { AssistantPreferences.setDrivingMode(context, enabled) }
+                    },
+                )
+                SettingSwitchRow(
+                    title = "Turn on automatically in the car",
+                    description = "Uses the Bluetooth car connection as the trigger.",
+                    checked = autoDrivingMode,
+                    onCheckedChange = { enabled ->
+                        scope.launch {
+                            AssistantPreferences.setAutoDrivingMode(context, enabled)
+                        }
+                    },
+                )
             }
         }
 
-        SectionCard(title = "Conversation & memory") {
+        SectionCard(
+            title = "Conversation & memory",
+            subtitle = "What Secretary remembers.",
+            leadingIcon = Icons.Outlined.Chat,
+        ) {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Switch(
-                        checked = cloudConversation,
-                        onCheckedChange = { enabled ->
-                            scope.launch { AssistantMemory.setCloudConversation(context, enabled) }
-                        },
-                    )
-                    Text(
-                        text = "Ask OpenAI for anything else (costs per reply)",
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
-                }
+                SettingSwitchRow(
+                    title = "Ask OpenAI for anything else",
+                    description = "Billed per reply to your OpenAI key.",
+                    checked = cloudConversation,
+                    onCheckedChange = { enabled ->
+                        scope.launch { AssistantMemory.setCloudConversation(context, enabled) }
+                    },
+                )
                 Text(
                     text = "Off by default: the diary, hours, jobs and money answers are free " +
                         "and instant. Turn this on and a sentence they cannot place is sent to " +
@@ -916,7 +1003,11 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
-        SectionCard(title = "Local thinking (free)") {
+        SectionCard(
+            title = "Local thinking (free)",
+            subtitle = "Optional on-device answers.",
+            leadingIcon = Icons.Outlined.Memory,
+        ) {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -929,18 +1020,14 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Switch(
-                        checked = localThinking,
-                        onCheckedChange = { enabled ->
-                            scope.launch { AssistantPreferences.setLocalThinking(context, enabled) }
-                        },
-                    )
-                    Text(
-                        text = "Use the local model for general questions",
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
-                }
+                SettingSwitchRow(
+                    title = "Use the local model for general questions",
+                    description = "Answer general questions without sending them to the cloud.",
+                    checked = localThinking,
+                    onCheckedChange = { enabled ->
+                        scope.launch { AssistantPreferences.setLocalThinking(context, enabled) }
+                    },
+                )
                 val working = localLlmState as? LocalLlm.State.Working
                 if (working != null) {
                     LinearProgressIndicator(
@@ -991,15 +1078,20 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
-        SectionCard(title = "Pronunciation") {
+        SectionCard(
+            title = "Pronunciations",
+            subtitle = "Shared by recognition and speech.",
+            leadingIcon = Icons.Outlined.RecordVoiceOver,
+        ) {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "Teach the voice how to say a word. Enter the spelling, then how it " +
-                        "should sound: Bierton → Beerton, Aideen → Aydeen. The transcript keeps " +
-                        "the real spelling; only the speech changes.",
+                    text = "Teach both sides a word. The recogniser fixes near misses back to the " +
+                        "real spelling, and the voice uses the sounds-like form: Bierton → Beerton, " +
+                        "Buckinghamshire → Buckinghamshur, Stihl → Steel. Built-in UK place, client " +
+                        "and trade terms are included; your entries win.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1053,7 +1145,11 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
-        SectionCard(title = "Personality") {
+        SectionCard(
+            title = "Personality",
+            subtitle = "Tone, humour and length.",
+            leadingIcon = Icons.Outlined.Chat,
+        ) {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -1064,48 +1160,66 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                OutlinedTextField(
+                    value = ownerNameDraft,
+                    onValueChange = { value ->
+                        ownerNameDraft = value
+                        scope.launch { AssistantPreferences.setOwnerName(context, value) }
+                    },
+                    label = { Text("Your first name") },
+                    placeholder = { Text("Josh") },
+                    supportingText = {
+                        Text("Used in the pickup line and the occasional aside. Blank uses your sign-in name.")
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Text("Tone", style = MaterialTheme.typography.labelMedium)
-                OptionPicker(
+                SegmentedPills(
                     options = PersonaTone.entries,
                     selected = personaTone,
-                    label = { it?.label ?: PersonaTone.Warm.label },
                     onSelect = { tone ->
                         scope.launch { AssistantPreferences.setPersonaTone(context, tone) }
                     },
+                    label = { it.label },
                 )
                 Text("Humour", style = MaterialTheme.typography.labelMedium)
-                OptionPicker(
+                SegmentedPills(
                     options = PersonaHumour.entries,
                     selected = personaHumour,
-                    label = { it?.label ?: PersonaHumour.Normal.label },
                     onSelect = { humour ->
                         scope.launch { AssistantPreferences.setPersonaHumour(context, humour) }
                     },
+                    label = { it.label },
                 )
                 Text("Length", style = MaterialTheme.typography.labelMedium)
-                OptionPicker(
+                SegmentedPills(
                     options = PersonaLength.entries,
                     selected = personaLength,
-                    label = { it?.label ?: PersonaLength.Normal.label },
                     onSelect = { length ->
                         scope.launch { AssistantPreferences.setPersonaLength(context, length) }
                     },
+                    label = { it.label },
                 )
             }
         }
 
-        SectionCard(title = "Microphone") {
+        SectionCard(
+            title = "Microphone",
+            subtitle = "Audio source for recognition.",
+            leadingIcon = Icons.Outlined.Mic,
+        ) {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                OptionPicker(
+                SegmentedPills(
                     options = MicSource.entries,
                     selected = micSource,
-                    label = { it?.label ?: "Barge-in (echo cancelling)" },
                     onSelect = { selected ->
                         scope.launch { AssistantPreferences.setMicSource(context, selected) }
                     },
+                    label = { it.label },
                 )
                 Text(
                     text = "Best recognition is the reliable default. Barge-in uses " +
@@ -1160,7 +1274,11 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         }
 
         if (showAdvanced) {
-        SectionCard(title = "Diagnostics") {
+        SectionCard(
+            title = "Diagnostics",
+            subtitle = "Crash and model status.",
+            leadingIcon = Icons.Outlined.BugReport,
+        ) {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -1196,6 +1314,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
 
         }
         Spacer(Modifier.height(8.dp))
+        }
     }
 }
 

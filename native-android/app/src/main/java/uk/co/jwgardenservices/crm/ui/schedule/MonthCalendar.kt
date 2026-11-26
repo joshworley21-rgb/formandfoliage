@@ -55,6 +55,7 @@ import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 import kotlin.math.roundToInt
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 import uk.co.jwgardenservices.crm.domain.formatTime
 import uk.co.jwgardenservices.crm.domain.localDate
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
@@ -126,7 +127,7 @@ fun MonthCalendar(
     }
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(JwTokens.cardRadius),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
     ) {
@@ -176,7 +177,7 @@ fun MonthCalendar(
                                     .onGloballyPositioned { coordinates ->
                                         dayBounds[day] = coordinates.boundsInRoot()
                                     }
-                                    .clip(RoundedCornerShape(7.dp))
+                                    .clip(RoundedCornerShape(JwTokens.tinyRadius))
                                     .background(
                                         if (day == selectedDay) {
                                             MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
@@ -275,7 +276,7 @@ fun MonthCalendar(
                             )
                         }
                         .zIndex(2f),
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(JwTokens.tinyRadius),
                     color = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                 ) {
@@ -330,7 +331,7 @@ private fun JobChip(
         } else {
             MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
         },
-        shape = RoundedCornerShape(3.dp),
+        shape = RoundedCornerShape(JwTokens.microRadius),
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 2.dp)

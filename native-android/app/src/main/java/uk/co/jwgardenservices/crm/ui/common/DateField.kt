@@ -3,6 +3,8 @@ package uk.co.jwgardenservices.crm.ui.common
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CalendarMonth
@@ -28,6 +30,7 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import uk.co.jwgardenservices.crm.domain.formatDayMonthYear
 import uk.co.jwgardenservices.crm.domain.parseDate
+import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 
 /**
  * A date field that opens the platform Material date picker.
@@ -59,7 +62,10 @@ fun DateField(
         OutlinedButton(
             onClick = { open = true },
             enabled = enabled,
-            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(JwTokens.fieldRadius),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
         ) {
             Text(
                 text = date?.formatDayMonthYear() ?: "Choose date",

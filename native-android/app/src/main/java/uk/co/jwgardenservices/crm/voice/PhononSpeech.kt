@@ -53,9 +53,10 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
      * was produced (not downloaded, engine failed to load, or already closed),
      * so the caller can fall back to the local voice.
      */
-    suspend fun speak(text: String): Boolean {
+    suspend fun speak(text: String, speed: Float = 1f): Boolean {
         // Phonon-only shaping: em-dash breaths and money said like a
-        // tradesperson says it. The pace marker decides the playback rate.
+        // tradesperson says it. The pace marker and caller speed decide the
+        // playback rate.
         val (pace, stripped) = TtsProsody.extract(text)
         val clean = TtsProsody.forPhonon(stripped)
         if (closed || clean.isEmpty()) return false
@@ -64,12 +65,13 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
             val engine = ensureEngine() ?: return@withLock false
             stopped = false
             val player = withContext(Dispatchers.IO) { buildPlayer() } ?: return@withLock false
-            if (pace != 1f) {
+            val rate = (pace * speed).coerceIn(0.5f, 1.6f)
+            if (rate != 1f) {
                 // Zero-compute pacing: the sink plays the same samples at a
                 // different rate, which lifts or drops the pitch a shade —
                 // brisker for action confirmations, calmer for totals.
                 runCatching {
-                    player.playbackRate = (SAMPLE_RATE * pace).toInt()
+                    player.playbackRate = (SAMPLE_RATE * rate).toInt()
                         .coerceIn(SAMPLE_RATE / 2, SAMPLE_RATE * 2)
                 }
             }
@@ -145,7 +147,19 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
         runCatching {
             track?.pause()
             track?.flush()
+            track?.stop()
+            track?.setVolume(1f)
         }
+    }
+
+    /** Dip the voice while a possible interruption is confirmed. */
+    fun duck(volume: Float = 0.32f) {
+        runCatching { track?.setVolume(volume) }
+    }
+
+    /** Speaker bleed, not a person: bring the reply back up. */
+    fun restore() {
+        runCatching { track?.setVolume(1f) }
     }
 
     override fun close() {
