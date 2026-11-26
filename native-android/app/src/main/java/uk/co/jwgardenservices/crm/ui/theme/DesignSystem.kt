@@ -62,6 +62,9 @@ data class JwPalette(
     val callEnd: Color,
     val callToggle: Color,
     val onCall: Color,
+    val kpiCard: Color,
+    val kpiCardAlt: Color,
+    val kpiBorder: Color,
 )
 
 private val LightPalette = JwPalette(
@@ -91,6 +94,9 @@ private val LightPalette = JwPalette(
     callEnd = Color(0xFFC33B3B),
     callToggle = Color(0xFF2C4A2E),
     onCall = Color(0xFFFFFFFF),
+    kpiCard = Color(0xFF1C2E20),
+    kpiCardAlt = Color(0xFF2A4230),
+    kpiBorder = Color(0x33F6F2E7),
 )
 
 private val DarkPalette = JwPalette(
@@ -120,6 +126,9 @@ private val DarkPalette = JwPalette(
     callEnd = Color(0xFFC33B3B),
     callToggle = Color(0xFF36583A),
     onCall = Color(0xFFFFFFFF),
+    kpiCard = Color(0xFF1C2E20),
+    kpiCardAlt = Color(0xFF2A4230),
+    kpiBorder = Color(0x33F6F2E7),
 )
 
 val LocalJwPalette = staticCompositionLocalOf { LightPalette }

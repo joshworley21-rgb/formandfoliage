@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -46,6 +48,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,6 +74,8 @@ import uk.co.jwgardenservices.crm.ui.business.BusinessRunningScreen
 import uk.co.jwgardenservices.crm.ui.clients.ClientsScreen
 import uk.co.jwgardenservices.crm.ui.components.BrandMark
 import uk.co.jwgardenservices.crm.ui.common.ActionRow
+import uk.co.jwgardenservices.crm.ui.common.LocalStatusBarInsetConsumed
+import uk.co.jwgardenservices.crm.ui.common.SystemBarAppearance
 import uk.co.jwgardenservices.crm.ui.dashboard.DashboardScreen
 import uk.co.jwgardenservices.crm.ui.enquiries.EnquiriesScreen
 import uk.co.jwgardenservices.crm.ui.invoices.InvoicesScreen
@@ -122,6 +127,9 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
         AppDestination.moreItems.filter { it != AppDestination.Secretary }
     }
 
+    val hasBanners = failedWrites.isNotEmpty() || crmState.pendingWrites > 0
+    SystemBarAppearance(darkStatusBar = true)
+
     fun navigate(destination: AppDestination) {
         navController.navigate(destination.route) {
             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
@@ -132,6 +140,9 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        // The forest header draws behind the status bar; the content itself
+        // still clears the navigation bar and the bottom bar.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         // No global app bar: each screen leads with its own hero or title, like
         // the reference. Settings and sign-out live in More.
 
@@ -178,18 +189,28 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            if (failedWrites.isNotEmpty()) {
-                FailedWritesBanner(
-                    count = failedWrites.size,
-                    onClick = { failedOpen = true },
-                )
+            if (hasBanners) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(JwTheme.colors.forest)
+                        .statusBarsPadding(),
+                ) {
+                    if (failedWrites.isNotEmpty()) {
+                        FailedWritesBanner(
+                            count = failedWrites.size,
+                            onClick = { failedOpen = true },
+                        )
+                    }
+                    if (crmState.pendingWrites > 0) {
+                        PendingWritesBanner(
+                            count = crmState.pendingWrites,
+                            offline = crmState.offline,
+                        )
+                    }
+                }
             }
-            if (crmState.pendingWrites > 0) {
-                PendingWritesBanner(
-                    count = crmState.pendingWrites,
-                    offline = crmState.offline,
-                )
-            }
+            CompositionLocalProvider(LocalStatusBarInsetConsumed provides hasBanners) {
             NavHost(
                 navController = navController,
                 startDestination = if (isStaff) {
@@ -254,6 +275,7 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                         AssistantSettingsScreen(onBack = { navController.popBackStack() })
                     }
                 }
+            }
             }
         }
     }

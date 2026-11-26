@@ -25,7 +25,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import uk.co.jwgardenservices.crm.ui.common.JwAlertDialog
 import uk.co.jwgardenservices.crm.ui.common.SectionCard
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -69,7 +68,6 @@ import uk.co.jwgardenservices.crm.domain.parseDate
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
 import uk.co.jwgardenservices.crm.ui.common.DateField
-import uk.co.jwgardenservices.crm.ui.common.DialogTitle
 import uk.co.jwgardenservices.crm.ui.common.EmptyState
 import uk.co.jwgardenservices.crm.ui.common.ErrorState
 import uk.co.jwgardenservices.crm.ui.common.HeaderPillButton
@@ -78,18 +76,20 @@ import uk.co.jwgardenservices.crm.ui.common.JwDialog
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
 import uk.co.jwgardenservices.crm.ui.common.OptionPicker
 import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
+import uk.co.jwgardenservices.crm.ui.common.SystemBarAppearance
 import uk.co.jwgardenservices.crm.ui.common.StatusChip
 import uk.co.jwgardenservices.crm.ui.theme.JwTheme
 import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 
 @Composable
 fun InvoicesScreen(viewModel: CrmViewModel) {
+    SystemBarAppearance(darkStatusBar = true)
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     val invoices = state.invoices
-    val unpaid = invoices.filter { it.status != "paid" }
+    val unpaid = invoices.filter { it.status == "sent" }
     val owed = unpaid.sumOf { it.total }
     val clientNames = remember(state.clients) { state.clients.associate { it.id to it.name } }
     val warning = JwTheme.colors.attention
@@ -960,8 +960,41 @@ private fun ReadyToBillCard(
             .sortedByDescending { it.third }
     }
     if (groups.isEmpty()) return
+    val totalReady = groups.sumOf { it.third }
+    val visitCount = groups.sumOf { it.second.size }
     SectionCard(title = "Ready to bill") {
         Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "READY TO INVOICE",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = money(totalReady),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(JwTokens.chipRadius),
+                    color = MaterialTheme.colorScheme.secondary,
+                ) {
+                    Text(
+                        text = "$visitCount ${if (visitCount == 1) "visit" else "visits"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    )
+                }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             groups.forEach { (clientId, rows, total) ->
                 val client = clients.firstOrNull { it.id == clientId } ?: return@forEach
                 Row(
@@ -983,11 +1016,18 @@ private fun ReadyToBillCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    FilledTonalButton(
+                    Surface(
                         onClick = { onCreate(client, rows.map { it.id }) },
                         enabled = !busy,
+                        shape = RoundedCornerShape(JwTokens.chipRadius),
+                        color = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
                     ) {
-                        Text("Bill all")
+                        Text(
+                            text = "Bill all",
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                        )
                     }
                 }
             }

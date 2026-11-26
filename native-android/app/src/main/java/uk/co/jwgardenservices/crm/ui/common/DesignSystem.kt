@@ -23,6 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.AlertDialog
@@ -35,12 +36,18 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import android.app.Activity
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,8 +55,29 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.core.view.WindowCompat
 import uk.co.jwgardenservices.crm.ui.theme.JwTheme
 import uk.co.jwgardenservices.crm.ui.theme.JwTokens
+
+/** True when a banner above the screen has already consumed the status inset. */
+val LocalStatusBarInsetConsumed = staticCompositionLocalOf { false }
+
+/**
+ * Keep the system status bar transparent over the forest band with light
+ * icons, while the white navigation bar keeps dark icons. Light screens
+ * (auth, splash, lock) call this with false.
+ */
+@Composable
+fun SystemBarAppearance(darkStatusBar: Boolean) {
+    val view = LocalView.current
+    val context = LocalContext.current
+    SideEffect {
+        val window = (context as? Activity)?.window ?: return@SideEffect
+        val controller = WindowCompat.getInsetsController(window, view)
+        controller.isAppearanceLightStatusBars = !darkStatusBar
+        controller.isAppearanceLightNavigationBars = true
+    }
+}
 
 /**
  * The one page header. A full-bleed forest band with the screen's name, an
@@ -67,103 +95,92 @@ fun ScreenHeader(
     backLabel: String? = null,
     topActions: @Composable RowScope.() -> Unit = {},
     titleAction: (@Composable () -> Unit)? = null,
-    footerPadding: Dp = JwTokens.headerBottom,
+    footerPadding: Dp = 14.dp,
+    footerVisible: Boolean = false,
+    largeTitle: Boolean = false,
     footer: @Composable ColumnScope.() -> Unit = {},
 ) {
     val palette = JwTheme.colors
     val ink = palette.onForestMuted
+    val consumedStatusInset = LocalStatusBarInsetConsumed.current
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = palette.forest,
         contentColor = ink,
     ) {
-        Column {
+        Column(
+            modifier = if (consumedStatusInset) Modifier else Modifier.statusBarsPadding(),
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(
                         start = JwTokens.screenPadding,
                         end = JwTokens.screenPadding,
-                        top = JwTokens.headerTop,
-                        bottom = 0.dp,
+                        top = 8.dp,
+                        bottom = if (footerVisible) 10.dp else footerPadding,
                     ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                when {
-                    onBack != null && backLabel != null -> {
-                        TextButton(
-                            onClick = onBack,
-                            contentPadding = PaddingValues(0.dp),
-                            modifier = Modifier.height(30.dp),
-                        ) {
-                            Text(
-                                text = "‹ $backLabel",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = ink.copy(alpha = 0.65f),
-                            )
-                        }
-                    }
-                    onBack != null -> {
-                        HeaderIconAction(
-                            icon = Icons.AutoMirrored.Outlined.ArrowBack,
-                            contentDescription = "Back",
-                            onClick = onBack,
-                        )
-                    }
-                    eyebrow != null -> {
+                if (onBack != null) {
+                    HeaderIconAction(
+                        icon = Icons.AutoMirrored.Outlined.ArrowBack,
+                        contentDescription = backLabel?.let { "Back to $it" } ?: "Back",
+                        onClick = onBack,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    if (eyebrow != null) {
                         Text(
                             text = eyebrow.uppercase(),
                             style = MaterialTheme.typography.labelSmall,
                             color = ink.copy(alpha = 0.6f),
                         )
+                        Spacer(Modifier.height(2.dp))
                     }
-                }
-                Spacer(Modifier.weight(1f))
-                topActions()
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(
-                        start = JwTokens.screenPadding,
-                        end = JwTokens.screenPadding,
-                        top = 10.dp,
-                        bottom = footerPadding,
-                    ),
-                verticalAlignment = Alignment.Bottom,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = title,
-                        style = MaterialTheme.typography.headlineMedium,
+                        style = if (largeTitle) {
+                            MaterialTheme.typography.headlineMedium
+                        } else {
+                            MaterialTheme.typography.headlineSmall
+                        },
                         fontWeight = FontWeight.Bold,
                         color = ink,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     if (subtitle != null) {
-                        Spacer(Modifier.height(3.dp))
+                        Spacer(Modifier.height(2.dp))
                         Text(
                             text = subtitle,
                             style = MaterialTheme.typography.bodySmall,
-                            color = ink.copy(alpha = 0.62f),
-                            maxLines = 2,
+                            color = ink.copy(alpha = 0.68f),
+                            maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
-                if (titleAction != null) {
-                    Spacer(Modifier.width(12.dp))
-                    titleAction()
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    topActions()
+                    if (titleAction != null) titleAction()
                 }
             }
-
-            Column(
-                modifier = Modifier.padding(horizontal = JwTokens.screenPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                footer()
+            if (footerVisible) {
+                Column(
+                    modifier = Modifier.padding(
+                        start = JwTokens.screenPadding,
+                        end = JwTokens.screenPadding,
+                        bottom = 14.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    footer()
+                }
             }
         }
     }

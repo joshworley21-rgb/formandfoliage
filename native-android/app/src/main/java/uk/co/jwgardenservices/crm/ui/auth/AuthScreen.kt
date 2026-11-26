@@ -43,6 +43,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import uk.co.jwgardenservices.crm.ui.common.SystemBarAppearance
 import uk.co.jwgardenservices.crm.ui.components.BrandMark
 import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 
@@ -53,6 +54,7 @@ fun AuthScreen(
     val state = viewModel.state
     var showPassword by remember { mutableStateOf(false) }
 
+    SystemBarAppearance(darkStatusBar = false)
     val title = when (state.mode) {
         AuthMode.SIGN_IN -> "Sign in"
         AuthMode.SIGN_UP -> "Create your account"

@@ -41,6 +41,7 @@ import androidx.compose.material.icons.outlined.HomeWork
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.LocalGasStation
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.People
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Savings
@@ -114,6 +115,7 @@ import uk.co.jwgardenservices.crm.ui.common.HeaderGhostAction
 import uk.co.jwgardenservices.crm.ui.common.HeaderPillButton
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
 import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
+import uk.co.jwgardenservices.crm.ui.common.SystemBarAppearance
 import uk.co.jwgardenservices.crm.ui.common.SectionCard
 import uk.co.jwgardenservices.crm.ui.common.SegmentedPills
 import uk.co.jwgardenservices.crm.ui.common.StatCard
@@ -180,6 +182,7 @@ fun BusinessRunningScreen(
     onOpenSchedule: () -> Unit,
     onOpenClients: () -> Unit,
 ) {
+    SystemBarAppearance(darkStatusBar = true)
     val state by viewModel.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var tab by remember { mutableStateOf(BusinessTab.Overview) }
@@ -308,6 +311,11 @@ fun BusinessRunningScreen(
                     title = "Business",
                     subtitle = "Costs, profit and the next useful move.",
                     topActions = {
+                        HeaderGhostAction(
+                            icon = Icons.Outlined.Mic,
+                            contentDescription = "Call Secretary",
+                            onClick = { tab = BusinessTab.Secretary },
+                        )
                         HeaderGhostAction(
                             icon = Icons.Outlined.Refresh,
                             contentDescription = "Refresh",

@@ -198,12 +198,19 @@ fun DashboardScreen(
                         else -> "Evening"
                     }}, ${VoiceLines.OWNER_NAME}",
                     subtitle = today.formatWeekday(),
-                    footerPadding = 128.dp,
+                    footerPadding = 112.dp,
+                    largeTitle = true,
                     topActions = {
                         HeaderIconAction(
                             icon = Icons.Outlined.NotificationsNone,
                             contentDescription = "Reminders",
                             onClick = onOpenInvoices,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        HeaderIconAction(
+                            icon = Icons.Outlined.Mic,
+                            contentDescription = "Call Secretary",
+                            onClick = onOpenSecretary,
                         )
                         Spacer(Modifier.width(8.dp))
                         HeaderIconAction(
@@ -238,9 +245,10 @@ fun DashboardScreen(
                         projected = projected,
                         detail = "${weekVisits.size} ${if (weekVisits.size == 1) "visit" else "visits"} · so far",
                         hint = if (projected) "Projected to Sunday" else "Swipe to see projected →",
+                        alt = false,
                         modifier = Modifier
                             .weight(1f)
-                            .height(128.dp),
+                            .height(112.dp),
                     )
                     HomeStat(
                         label = "THIS MONTH",
@@ -249,9 +257,10 @@ fun DashboardScreen(
                         projected = projected,
                         detail = "${monthVisits.size} ${if (monthVisits.size == 1) "visit" else "visits"} · so far",
                         hint = if (projected) "Projected month end" else null,
+                        alt = true,
                         modifier = Modifier
                             .weight(1f)
-                            .height(128.dp),
+                            .height(112.dp),
                     )
                 }
         }
@@ -263,7 +272,7 @@ fun DashboardScreen(
             contentPadding = PaddingValues(
                 start = JwTokens.screenPadding,
                 end = JwTokens.screenPadding,
-                bottom = 24.dp,
+                bottom = 40.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
@@ -365,14 +374,17 @@ private fun HomeStat(
     projected: Boolean,
     detail: String,
     hint: String?,
+    alt: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val palette = JwTheme.colors
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(JwTokens.cardRadius),
-        color = palette.forest,
+        color = if (alt) palette.kpiCardAlt else palette.kpiCard,
         contentColor = palette.onForestMuted,
+        border = BorderStroke(1.dp, palette.kpiBorder),
+        shadowElevation = 6.dp,
     ) {
         Column(
             modifier = Modifier
@@ -394,7 +406,7 @@ private fun HomeStat(
             Text(
                 text = detail,
                 style = MaterialTheme.typography.bodySmall,
-                color = palette.onForestMuted.copy(alpha = 0.58f),
+                color = palette.onForestMuted.copy(alpha = 0.78f),
             )
             Spacer(Modifier.weight(1f))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -424,7 +436,8 @@ private fun HomeStat(
                     Text(
                         text = hint,
                         style = MaterialTheme.typography.bodySmall,
-                        color = palette.onForestMuted.copy(alpha = 0.55f),
+                        fontWeight = FontWeight.Medium,
+                        color = palette.onForestMuted.copy(alpha = 0.92f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -449,6 +462,13 @@ private fun ReminderPill(
         reminders.tomorrowJobs.isNotEmpty() ->
             "${reminders.tomorrowJobs.size} booked tomorrow"
         else -> "No reminders today"
+    }
+    val actionLabel = if (reminders.overdue.isEmpty() && unbilledTotal <= 0.0 &&
+        reminders.tomorrowJobs.isEmpty()
+    ) {
+        "+ Add"
+    } else {
+        "Review"
     }
     Surface(
         modifier = modifier
@@ -480,8 +500,9 @@ private fun ReminderPill(
                 contentColor = MaterialTheme.colorScheme.onPrimary,
             ) {
                 Text(
-                    text = "+ Add",
+                    text = actionLabel,
                     style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
                 )
             }
@@ -508,7 +529,7 @@ private fun WeekPanel(
     weekHours: Double,
 ) {
     val delta = weekNet - lastWeekNet
-    Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+    Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = if (delta < 0) "↓" else "↑",
@@ -556,6 +577,7 @@ private fun WeekPanel(
         SummaryRow("Materials", money(weekMaterials))
         SummaryRow("Overheads", money(weekOverheads))
         SummaryRow("Net profit", money(weekNet), emphasis = true)
+        Spacer(Modifier.height(8.dp))
     }
 }
 

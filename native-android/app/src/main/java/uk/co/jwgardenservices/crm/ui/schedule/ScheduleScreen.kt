@@ -109,6 +109,7 @@ import uk.co.jwgardenservices.crm.domain.monthlyRunningCosts
 import uk.co.jwgardenservices.crm.domain.parseDate
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
 import uk.co.jwgardenservices.crm.domain.priceVisit
+import uk.co.jwgardenservices.crm.domain.rotaWeekTotals
 import uk.co.jwgardenservices.crm.domain.todayIso
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
 import uk.co.jwgardenservices.crm.ui.common.DateField
@@ -119,6 +120,7 @@ import uk.co.jwgardenservices.crm.ui.common.HeaderGhostAction
 import uk.co.jwgardenservices.crm.ui.common.HeaderOutlineButton
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
 import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
+import uk.co.jwgardenservices.crm.ui.common.SystemBarAppearance
 import uk.co.jwgardenservices.crm.ui.common.SegmentedPills
 import uk.co.jwgardenservices.crm.ui.common.ShareText
 import uk.co.jwgardenservices.crm.ui.common.StatusChip
@@ -135,6 +137,7 @@ private enum class RotaView(val label: String) {
 
 @Composable
 fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
+    SystemBarAppearance(darkStatusBar = true)
     val state by viewModel.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val today = LocalDate.now()
@@ -190,11 +193,6 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
 
     val weekStart = weekCursor.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
     val weekDays = (0..6).map { weekStart.plusDays(it.toLong()) }
-    val weekVisits = state.visits.filter { visit ->
-        !visit.missed && parseDate(visit.visitDate)?.let {
-            !it.isBefore(weekStart) && !it.isAfter(weekStart.plusDays(6))
-        } == true
-    }
     val weekJobs = state.jobs.filter { job ->
         job.status != "cancelled" &&
             parseTimestamp(job.startsAt)?.localDate()?.let {
@@ -202,12 +200,31 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
             } == true
     }
     val labourRate = state.settings?.labourRate ?: 0.0
-    val weekIncome = weekVisits.sumOf { it.amount }
-    val weekMaterials = weekVisits.sumOf { it.materialsCost }
+    val weeklyOverheads = state.runningCosts.monthlyRunningCosts() * 12.0 / 52.0
+    val totals = remember(
+        weekStart,
+        state.visits,
+        state.jobs,
+        state.clients,
+        labourRate,
+        weeklyOverheads,
+    ) {
+        rotaWeekTotals(
+            weekStart = weekStart,
+            weekEnd = weekStart.plusDays(6),
+            visits = state.visits,
+            jobs = state.jobs,
+            clients = state.clients,
+            labourRate = labourRate,
+            weeklyOverheads = weeklyOverheads,
+        )
+    }
+    val weekIncome = totals.income
+    val weekMaterials = totals.materials
     val weekHours = weekJobs.sumOf { it.durationMinutes / 60.0 }
-    val weekLabour = weekVisits.sumOf { it.hours } * labourRate
-    val weekOverheads = state.runningCosts.monthlyRunningCosts() * 12.0 / 52.0 + weekMaterials
-    val weekNet = weekIncome - weekLabour - weekOverheads
+    val weekLabour = totals.labour
+    val weekOverheads = totals.overheads
+    val weekNet = totals.net
     val weekSummary = weekJobs
         .groupBy { it.clientId }
         .map { (clientId, jobs) ->

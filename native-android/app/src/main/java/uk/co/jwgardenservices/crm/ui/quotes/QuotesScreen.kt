@@ -272,6 +272,7 @@ fun QuotesScreen(viewModel: CrmViewModel) {
                 ScreenHeader(
                     title = "Quotes",
                     subtitle = "Proposals & price agreements",
+                    footerVisible = true,
                     footer = {
                         Row(
                             modifier = Modifier.fillMaxWidth(),

@@ -42,6 +42,7 @@ import uk.co.jwgardenservices.crm.core.AppLock
 import uk.co.jwgardenservices.crm.data.repository.AuthState
 import uk.co.jwgardenservices.crm.ui.auth.AuthScreen
 import uk.co.jwgardenservices.crm.ui.common.ErrorState
+import uk.co.jwgardenservices.crm.ui.common.SystemBarAppearance
 import uk.co.jwgardenservices.crm.ui.components.BrandMark
 import uk.co.jwgardenservices.crm.ui.main.MainScaffold
 
@@ -126,6 +127,7 @@ fun AppRoot(
 
 @Composable
 private fun WorkspaceErrorScreen(message: String, onRetry: () -> Unit) {
+    SystemBarAppearance(darkStatusBar = false)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -139,6 +141,7 @@ private fun WorkspaceErrorScreen(message: String, onRetry: () -> Unit) {
 
 @Composable
 private fun SplashScreen() {
+    SystemBarAppearance(darkStatusBar = false)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -167,6 +170,7 @@ private fun SplashScreen() {
 
 @Composable
 private fun LockScreen() {
+    SystemBarAppearance(darkStatusBar = false)
     val context = LocalContext.current
     var error by remember { mutableStateOf<String?>(null) }
 
