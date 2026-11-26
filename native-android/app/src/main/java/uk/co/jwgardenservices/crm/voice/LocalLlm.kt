@@ -5,10 +5,12 @@ import android.content.Context
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
+import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.SamplerConfig
+import com.google.ai.edge.litertlm.ThinkingConfig
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -33,21 +35,17 @@ import uk.co.jwgardenservices.crm.core.CrashLog
 /**
  * Free, fully local "thinking".
  *
- * A 0.5B instruct model is enough for short factual/conversational answers
- * without a cloud key. It is deliberately not loaded at startup: the first
- * question that needs it pays a one-off load, and it is closed again after a
- * minute idle so Nemotron/Moonshine keep the RAM.
+ * A small instruct model is enough for short answers and for labelling a
+ * sentence without a cloud key. The owner can also install a larger Qwen3 and
+ * switch to it; the small one stays the fallback when memory is short. Nothing
+ * is loaded at startup: the first question that needs a model pays a one-off
+ * load, and it is closed again after a few idle minutes so the speech models
+ * keep the RAM.
  */
 object LocalLlm {
     private const val TAG = "LocalLlm"
     private const val DIR = "local-llm"
-    private const val FILE = "qwen3-0.6b-int4.litertlm"
-    private const val URL =
-        "https://huggingface.co/litert-community/Qwen3-0.6B-int4/resolve/main/" +
-            "qwen3_0.6b_nothink_q4_block32_ekv1280.litertlm"
-    const val BYTES = 347_251_840L
     private const val IDLE_CLOSE_MS = 300_000L
-    private const val MIN_FREE_MB = 900L
 
     sealed interface State {
         data object Idle : State
@@ -60,49 +58,78 @@ object LocalLlm {
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val _state = MutableStateFlow<State>(State.Idle)
-    val state: StateFlow<State> = _state.asStateFlow()
+    private val states = LlmModel.entries.associateWith { MutableStateFlow<State>(State.Idle) }
+    private val jobs = HashMap<LlmModel, Job>()
 
-    private var job: Job? = null
+    /** Download state of the small model. */
+    val state: StateFlow<State> = stateFor(LlmModel.Small)
+
+    fun stateFor(model: LlmModel): StateFlow<State> = states.getValue(model).asStateFlow()
+
+    /** The model the owner chose. Changing it closes the loaded engine so the next use reloads. */
+    @Volatile
+    var preferred: LlmModel = LlmModel.Small
+        set(value) {
+            if (field == value) return
+            field = value
+            release()
+        }
+
+    private class Loaded(val engine: Engine, val model: LlmModel)
+
     private var idleJob: Job? = null
-    private var engine: Engine? = null
+    private var loaded: Loaded? = null
     private val loadLock = Any()
 
-    fun file(context: Context): File = File(File(context.filesDir, DIR), FILE)
-    fun isInstalled(context: Context): Boolean = file(context).let {
-        it.isFile && it.length() == BYTES
-    }
-    fun savedBytes(context: Context): Long =
-        file(context).length().coerceIn(0L, BYTES)
+    fun file(context: Context, model: LlmModel = LlmModel.Small): File =
+        File(File(context.filesDir, DIR), model.fileName)
 
-    fun start(context: Context) {
-        if (job?.isActive == true) return
+    private fun partFile(context: Context, model: LlmModel): File =
+        File(File(context.filesDir, DIR), "${model.fileName}.part")
+
+    fun isInstalled(context: Context, model: LlmModel): Boolean = file(context, model).let {
+        it.isFile && it.length() == model.bytes
+    }
+
+    /** True when any model is installed. */
+    fun isInstalled(context: Context): Boolean = LlmModel.entries.any { isInstalled(context, it) }
+
+    fun savedBytes(context: Context, model: LlmModel = LlmModel.Small): Long =
+        maxOf(file(context, model).length(), partFile(context, model).length())
+            .coerceIn(0L, model.bytes)
+
+    fun start(context: Context, model: LlmModel = LlmModel.Small) {
+        if (jobs[model]?.isActive == true) return
         val app = context.applicationContext
-        job = scope.launch {
+        val flow = states.getValue(model)
+        jobs[model] = scope.launch {
             try {
-                download(app)
-                _state.value = State.Done
+                download(app, model, flow)
+                flow.value = State.Done
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
             } catch (error: Exception) {
-                CrashLog.note(app, TAG, "download failed: ${error.message}")
-                _state.value = State.Failed(error.message ?: "Download failed.")
+                CrashLog.note(app, TAG, "${model.id} download failed: ${error.message}")
+                flow.value = State.Failed(error.message ?: "Download failed.")
             }
         }
     }
 
-    fun cancel() {
-        job?.cancel()
-        _state.value = State.Idle
+    fun cancel(model: LlmModel = LlmModel.Small) {
+        jobs[model]?.cancel()
+        states.getValue(model).value = State.Idle
     }
 
-    fun clearResult() {
-        if (job?.isActive != true) _state.value = State.Idle
+    fun clearResult(model: LlmModel = LlmModel.Small) {
+        if (jobs[model]?.isActive != true) states.getValue(model).value = State.Idle
     }
 
-    fun remove(context: Context) {
-        cancel()
+    fun remove(context: Context, model: LlmModel = LlmModel.Small) {
+        cancel(model)
         release()
-        file(context).delete()
-        _state.value = State.Idle
+        file(context, model).delete()
+        partFile(context, model).delete()
+        states.getValue(model).value = State.Idle
     }
 
     suspend fun generate(
@@ -117,28 +144,16 @@ object LocalLlm {
         // could shut the engine down mid-generation.
         idleJob?.cancel()
         idleJob = null
-        if (!isInstalled(app)) return@withContext null
-        if (!hasHeadroom(app)) {
-            CrashLog.note(app, TAG, "not enough memory for local model")
-            return@withContext null
-        }
-        val llm = load(app) ?: return@withContext null
+        val ready = load(app) ?: return@withContext null
 
         val answer: String? = runCatching {
-            val conversation: com.google.ai.edge.litertlm.Conversation =
-                llm.createConversation(
-                    ConversationConfig(
-                        systemInstruction = Contents.of(system),
-                        samplerConfig = SamplerConfig(
-                            topK = 40,
-                            topP = 0.95,
-                            temperature = temperature,
-                        ),
-                        maxOutputToken = maxTokens,
-                    ),
-                )
+            val conversation: Conversation = ready.engine.createConversation(
+                configFor(ready.model, system, maxTokens, temperature),
+            )
             try {
+                val started = System.nanoTime()
                 val message = conversation.sendMessage(question)
+                note(app, ready.model, "answered", started)
                 message.contents.contents
                     .filterIsInstance<Content.Text>()
                     .joinToString(" ") { it.text }
@@ -155,7 +170,7 @@ object LocalLlm {
     /**
      * The reply as it is generated, so the first sentence can be spoken while
      * the rest is still being written. Cancelling the collector stops the
-     * model. Emits nothing when the model is missing or memory is short.
+     * model. Emits nothing when no model is installed or memory is short.
      */
     fun stream(
         context: Context,
@@ -166,28 +181,28 @@ object LocalLlm {
         val app = context.applicationContext
         idleJob?.cancel()
         idleJob = null
-        if (!isInstalled(app)) return@flow
-        if (!hasHeadroom(app)) {
-            CrashLog.note(app, TAG, "not enough memory for local model")
-            return@flow
-        }
-        val llm = load(app) ?: return@flow
-        val conversation: com.google.ai.edge.litertlm.Conversation = llm.createConversation(
-            ConversationConfig(
-                systemInstruction = Contents.of(system),
-                samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.4),
-                maxOutputToken = maxTokens,
-            ),
+        val ready = load(app) ?: return@flow
+        val conversation: Conversation = ready.engine.createConversation(
+            configFor(ready.model, system, maxTokens, 0.4),
         )
         var finished = false
+        var firstWord = true
+        val started = System.nanoTime()
         try {
             conversation.sendMessageAsync(question).collect { message ->
                 val text = message.contents.contents
                     .filterIsInstance<Content.Text>()
                     .joinToString("") { it.text }
-                if (text.isNotEmpty()) emit(text)
+                if (text.isNotEmpty()) {
+                    if (firstWord) {
+                        firstWord = false
+                        note(app, ready.model, "first words", started)
+                    }
+                    emit(text)
+                }
             }
             finished = true
+            note(app, ready.model, "reply finished", started)
         } finally {
             if (!finished) runCatching { conversation.cancelProcess() }
             runCatching { conversation.close() }
@@ -200,42 +215,86 @@ object LocalLlm {
      * question does not wait ~12 s for the engine. Still call-scoped: it is
      * never loaded at app start, and it closes on the usual idle timer.
      */
-    suspend fun warm(context: Context) = withContext(Dispatchers.Default) {
+    suspend fun warm(context: Context): Unit = withContext(Dispatchers.Default) {
         val app = context.applicationContext
-        if (!isInstalled(app) || !hasHeadroom(app)) return@withContext
         idleJob?.cancel()
         idleJob = null
         runCatching { load(app) }
+        Unit
     }
 
-    private fun load(app: Context): Engine? = synchronized(loadLock) {
-        engine ?: runCatching {
-            val started = System.currentTimeMillis()
-            Engine(
-                EngineConfig(
-                    modelPath = file(app).absolutePath,
-                    backend = Backend.CPU(),
-                    cacheDir = app.cacheDir.path,
-                ),
-            ).also {
-                it.initialize()
-                CrashLog.note(
-                    app,
-                    TAG,
-                    "loaded in ${System.currentTimeMillis() - started} ms",
-                )
-            }
-        }.onFailure {
-            CrashLog.note(app, TAG, "load failed: ${it.message}")
-        }.getOrNull()?.also { engine = it }
+    private fun configFor(
+        model: LlmModel,
+        system: String,
+        maxTokens: Int,
+        temperature: Double,
+    ): ConversationConfig {
+        val sampler = SamplerConfig(topK = 40, topP = 0.95, temperature = temperature)
+        return if (model.reasonsByDefault) {
+            ConversationConfig(
+                systemInstruction = Contents.of(system),
+                samplerConfig = sampler,
+                maxOutputToken = maxTokens,
+                thinkingConfig = ThinkingConfig(false),
+                extraContext = mapOf("enable_thinking" to false),
+            )
+        } else {
+            ConversationConfig(
+                systemInstruction = Contents.of(system),
+                samplerConfig = sampler,
+                maxOutputToken = maxTokens,
+            )
+        }
+    }
+
+    /** Timings in the assistant log, so a model can be judged on the phone it runs on. */
+    private fun note(app: Context, model: LlmModel, what: String, startedNanos: Long) {
+        val seconds = (System.nanoTime() - startedNanos) / 1_000_000_000.0
+        CrashLog.note(app, TAG, "${model.id}: $what after ${"%.1f".format(seconds)} s")
+    }
+
+    private fun load(app: Context): Loaded? = synchronized(loadLock) {
+        loaded?.let { return@synchronized it }
+        val options = LlmModel.candidates(
+            preferred,
+            LlmModel.entries.filter { isInstalled(app, it) }.toSet(),
+            availableMb(app),
+        )
+        if (options.isEmpty()) {
+            CrashLog.note(app, TAG, "no installed local model fits the free memory")
+            return@synchronized null
+        }
+        for (model in options) {
+            val engine = runCatching {
+                val started = System.currentTimeMillis()
+                Engine(
+                    EngineConfig(
+                        modelPath = file(app, model).absolutePath,
+                        backend = Backend.CPU(),
+                        cacheDir = app.cacheDir.path,
+                    ),
+                ).also {
+                    it.initialize()
+                    CrashLog.note(
+                        app,
+                        TAG,
+                        "${model.id} loaded in ${System.currentTimeMillis() - started} ms",
+                    )
+                }
+            }.onFailure {
+                CrashLog.note(app, TAG, "${model.id} load failed: ${it.message}")
+            }.getOrNull()
+            if (engine != null) return@synchronized Loaded(engine, model).also { loaded = it }
+        }
+        null
     }
 
     fun release() {
         idleJob?.cancel()
         idleJob = null
         synchronized(loadLock) {
-            runCatching { engine?.close() }
-            engine = null
+            runCatching { loaded?.engine?.close() }
+            loaded = null
         }
     }
 
@@ -247,25 +306,25 @@ object LocalLlm {
         }
     }
 
-    private fun hasHeadroom(context: Context): Boolean {
+    private fun availableMb(context: Context): Long {
         val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-            ?: return true
+            ?: return Long.MAX_VALUE
         val info = ActivityManager.MemoryInfo()
         manager.getMemoryInfo(info)
-        return info.availMem / (1024L * 1024L) >= MIN_FREE_MB
+        return info.availMem / (1024L * 1024L)
     }
 
-    private suspend fun download(context: Context) {
-        val target = file(context)
+    private fun download(context: Context, model: LlmModel, flow: MutableStateFlow<State>) {
+        val target = file(context, model)
         target.parentFile?.mkdirs()
-        val part = File(target.parentFile, "$FILE.part")
-        var have = part.length().coerceAtMost(BYTES)
-        _state.value = State.Working(have, BYTES)
+        val part = partFile(context, model)
+        var have = part.length().coerceAtMost(model.bytes)
+        flow.value = State.Working(have, model.bytes)
         val client = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(120, TimeUnit.SECONDS)
             .build()
-        val request = Request.Builder().url(URL).apply {
+        val request = Request.Builder().url(model.url).apply {
             if (have > 0) header("Range", "bytes=$have-")
         }.build()
         client.newCall(request).execute().use { response ->
@@ -285,18 +344,18 @@ object LocalLlm {
                         if (read < 0) break
                         output.write(buffer, 0, read)
                         done += read
-                        _state.value = State.Working(done.coerceAtMost(BYTES), BYTES)
+                        flow.value = State.Working(done.coerceAtMost(model.bytes), model.bytes)
                     }
                 }
             }
         }
-        if (part.length() != BYTES) {
-            throw IOException("Download stopped at ${part.length()} of $BYTES bytes.")
+        if (part.length() != model.bytes) {
+            throw IOException("Download stopped at ${part.length()} of ${model.bytes} bytes.")
         }
         if (!part.renameTo(target)) {
             part.copyTo(target, overwrite = true)
             part.delete()
         }
-        CrashLog.note(context, TAG, "model downloaded")
+        CrashLog.note(context, TAG, "${model.id} downloaded")
     }
 }

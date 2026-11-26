@@ -356,6 +356,10 @@ class AssistantService : Service() {
                 .collect { localThinking = it }
         }
         scope.launch {
+            AssistantPreferences.localModelFlow(this@AssistantService)
+                .collect { LocalLlm.preferred = it }
+        }
+        scope.launch {
             AssistantPreferences.drivingModeFlow(this@AssistantService).collect {
                 manualDrivingMode = it
                 refreshDrivingMode()

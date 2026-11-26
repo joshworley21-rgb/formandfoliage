@@ -67,6 +67,7 @@ import uk.co.jwgardenservices.crm.voice.KokoroCustomVoices
 import uk.co.jwgardenservices.crm.voice.KokoroHqDownloader
 import uk.co.jwgardenservices.crm.voice.KokoroEngine
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
+import uk.co.jwgardenservices.crm.voice.LlmModel
 import uk.co.jwgardenservices.crm.voice.LocalLlm
 import uk.co.jwgardenservices.crm.voice.MicSource
 import uk.co.jwgardenservices.crm.voice.MicTest
@@ -148,7 +149,16 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = emptyMap())
     LaunchedEffect(pronunciations) { PronunciationDictionary.userEntries = pronunciations }
     val localLlmState by LocalLlm.state.collectAsStateWithLifecycle()
-    var localLlmInstalled by remember { mutableStateOf(LocalLlm.isInstalled(context)) }
+    var localLlmInstalled by remember {
+        mutableStateOf(LocalLlm.isInstalled(context, LlmModel.Small))
+    }
+    val largeState by LocalLlm.stateFor(LlmModel.Large).collectAsStateWithLifecycle()
+    var largeInstalled by remember {
+        mutableStateOf(LocalLlm.isInstalled(context, LlmModel.Large))
+    }
+    var largeSaved by remember { mutableLongStateOf(LocalLlm.savedBytes(context, LlmModel.Large)) }
+    val localModel by AssistantPreferences.localModelFlow(context)
+        .collectAsStateWithLifecycle(initialValue = LlmModel.Small)
     var localLlmSaved by remember { mutableLongStateOf(LocalLlm.savedBytes(context)) }
     val pickupGreeting by AssistantPreferences.pickupFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
@@ -191,6 +201,17 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     val asrEngine by AssistantPreferences.asrEngineFlow(context)
         .collectAsStateWithLifecycle(initialValue = AsrEngine.Moonshine)
 
+    LaunchedEffect(largeState) {
+        when (val snapshot = largeState) {
+            is LocalLlm.State.Done -> {
+                largeInstalled = true
+                largeSaved = 0
+                LocalLlm.clearResult(LlmModel.Large)
+            }
+            is LocalLlm.State.Working -> largeSaved = snapshot.done
+            else -> largeSaved = LocalLlm.savedBytes(context, LlmModel.Large)
+        }
+    }
     LaunchedEffect(localLlmState) {
         when (val snapshot = localLlmState) {
             is LocalLlm.State.Done -> {
@@ -1124,6 +1145,89 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     }
                 }
                 (localLlmState as? LocalLlm.State.Failed)?.let { failure ->
+                    Text(
+                        text = failure.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+
+        SectionCard(
+            title = "Bigger local model (experimental)",
+            subtitle = "Qwen3 1.7B, still fully on this phone.",
+            leadingIcon = Icons.Outlined.Memory,
+        ) {
+            Column(
+                modifier = Modifier.padding(JwTokens.cardPadding),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "Understands loose phrasing and answers more sensibly, but it is " +
+                        "slower to the first word and needs about 3 GB of free memory while a " +
+                        "call is open. If memory is short it quietly falls back to the small " +
+                        "model. The assistant log records its timings so you can judge it on " +
+                        "this phone. 932 MB, downloaded once.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                SettingSwitchRow(
+                    title = "Use the bigger model",
+                    description = "Switch off to go back to the small, faster one.",
+                    checked = localModel == LlmModel.Large && largeInstalled,
+                    enabled = largeInstalled,
+                    onCheckedChange = { enabled ->
+                        scope.launch {
+                            AssistantPreferences.setLocalModel(
+                                context,
+                                if (enabled) LlmModel.Large else LlmModel.Small,
+                            )
+                        }
+                    },
+                )
+                val working = largeState as? LocalLlm.State.Working
+                if (working != null) {
+                    LinearProgressIndicator(
+                        progress = { working.progress },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "Downloading ${working.done / MEGABYTE} of " +
+                            "${working.total / MEGABYTE} MB",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = { LocalLlm.cancel(LlmModel.Large) }) { Text("Cancel") }
+                } else if (largeInstalled) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Installed",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(
+                            onClick = {
+                                scope.launch {
+                                    AssistantPreferences.setLocalModel(context, LlmModel.Small)
+                                }
+                                LocalLlm.remove(context, LlmModel.Large)
+                                largeInstalled = false
+                                largeSaved = 0
+                            },
+                        ) { Text("Remove") }
+                    }
+                } else {
+                    OutlinedButton(onClick = { LocalLlm.start(context, LlmModel.Large) }) {
+                        Text(
+                            if (largeSaved > 0) {
+                                "Resume download (${largeSaved / MEGABYTE} MB saved)"
+                            } else {
+                                "Download bigger model (932 MB)"
+                            },
+                        )
+                    }
+                }
+                (largeState as? LocalLlm.State.Failed)?.let { failure ->
                     Text(
                         text = failure.message,
                         style = MaterialTheme.typography.bodySmall,

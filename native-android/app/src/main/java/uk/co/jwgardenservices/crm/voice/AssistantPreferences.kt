@@ -88,6 +88,7 @@ private val PHONON_KEY = booleanPreferencesKey("phonon_enabled")
 private val PICKUP_KEY = booleanPreferencesKey("pickup_greeting")
 private val USED_KEY = booleanPreferencesKey("assistant_used")
 private val LOCAL_THINKING_KEY = booleanPreferencesKey("local_thinking")
+private val LOCAL_MODEL_KEY = stringPreferencesKey("local_model")
 private val PRONUNCIATION_KEY = stringPreferencesKey("pronunciation")
 private val DRIVING_KEY = booleanPreferencesKey("driving_mode")
 private val AUTO_DRIVING_KEY = booleanPreferencesKey("auto_driving_mode")
@@ -299,6 +300,15 @@ object AssistantPreferences {
     /** Free on-device answers; the model loads only when a question needs it. */
     fun localThinkingFlow(context: Context): Flow<Boolean> =
         context.assistantDataStore.data.map { it[LOCAL_THINKING_KEY] ?: true }
+
+    /** Which on-device model answers; the small one stands in whenever the chosen one cannot load. */
+    fun localModelFlow(context: Context): Flow<LlmModel> =
+        context.assistantDataStore.data.map { LlmModel.fromId(it[LOCAL_MODEL_KEY]) }
+
+    suspend fun setLocalModel(context: Context, model: LlmModel) {
+        context.assistantDataStore.edit { it[LOCAL_MODEL_KEY] = model.id }
+        LocalLlm.preferred = model
+    }
 
     suspend fun setLocalThinking(context: Context, enabled: Boolean) {
         context.assistantDataStore.edit { it[LOCAL_THINKING_KEY] = enabled }
