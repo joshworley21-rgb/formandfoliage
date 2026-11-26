@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -46,6 +45,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import uk.co.jwgardenservices.crm.ui.common.SystemBarAppearance
 import uk.co.jwgardenservices.crm.ui.components.BrandMark
 import uk.co.jwgardenservices.crm.ui.theme.JwTokens
+import androidx.compose.foundation.BorderStroke
+import uk.co.jwgardenservices.crm.ui.theme.JwTheme
 
 @Composable
 fun AuthScreen(
@@ -91,13 +92,12 @@ fun AuthScreen(
 
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(JwTokens.bandRadius),
+                shape = RoundedCornerShape(JwTokens.cardRadius),
                 color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 2.dp,
-                shadowElevation = 1.dp,
+                border = BorderStroke(JwTokens.hairline, JwTheme.colors.cardBorder),
             ) {
                 Column(
-                    modifier = Modifier.padding(24.dp),
+                    modifier = Modifier.padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {

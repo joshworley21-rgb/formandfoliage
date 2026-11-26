@@ -4,7 +4,6 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,7 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.MoreVert
@@ -29,7 +27,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -53,9 +50,10 @@ import uk.co.jwgardenservices.crm.ui.CrmViewModel
 import uk.co.jwgardenservices.crm.ui.common.EmptyState
 import uk.co.jwgardenservices.crm.ui.common.ErrorState
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
-import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
 import uk.co.jwgardenservices.crm.ui.common.StatusChip
 import uk.co.jwgardenservices.crm.ui.theme.JwTokens
+import uk.co.jwgardenservices.crm.ui.common.CompactScreenHeader
+import uk.co.jwgardenservices.crm.ui.common.JwCard
 
 private val STATUS_LABELS = mapOf(
     "new" to "New",
@@ -144,23 +142,23 @@ fun EnquiriesScreen(viewModel: CrmViewModel, onStartQuote: (Enquiry) -> Unit) {
 
     if (state.loading) {
         Column(Modifier.fillMaxSize()) {
-            ScreenHeader(title = "Enquiries", subtitle = "Website enquiries, ready to become clients.")
+            CompactScreenHeader(title = "Enquiries", subtitle = "From the website, ready to quote")
             LoadingState(modifier = Modifier.padding(horizontal = JwTokens.screenPadding))
         }
         return
     }
 
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader(
+        CompactScreenHeader(
             title = "Enquiries",
-            subtitle = "Website enquiries, ready to become clients.",
+            subtitle = "From the website, ready to quote",
         )
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
             contentPadding = PaddingValues(JwTokens.screenPadding),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(JwTokens.sectionGap),
         ) {
         if (state.error != null) {
             item { ErrorState(state.error!!, viewModel::refresh) }
@@ -228,11 +226,9 @@ private fun EnquiryCard(
         else -> MaterialTheme.colorScheme.onSurfaceVariant to MaterialTheme.colorScheme.secondary
     }
 
-    Surface(
+    JwCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(JwTokens.cardRadius),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(JwTokens.hairline, MaterialTheme.colorScheme.outline),
+        padding = PaddingValues(0.dp),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

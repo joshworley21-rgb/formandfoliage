@@ -1,10 +1,7 @@
 package uk.co.jwgardenservices.crm.ui.quotes
 
 import android.widget.Toast
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,22 +9,18 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Cancel
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -45,7 +38,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -60,14 +52,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.LocalDate
 import kotlin.math.abs
@@ -93,13 +82,9 @@ import uk.co.jwgardenservices.crm.ui.common.DateField
 import uk.co.jwgardenservices.crm.ui.common.DialogTitle
 import uk.co.jwgardenservices.crm.ui.common.EmptyState
 import uk.co.jwgardenservices.crm.ui.common.ErrorState
-import uk.co.jwgardenservices.crm.ui.common.FilterPillRow
-import uk.co.jwgardenservices.crm.ui.common.GoldFab
 import uk.co.jwgardenservices.crm.ui.common.JwDialog
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
 import uk.co.jwgardenservices.crm.ui.common.OptionPicker
-import uk.co.jwgardenservices.crm.ui.common.PillOption
-import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
 import uk.co.jwgardenservices.crm.ui.common.ShareText
 import uk.co.jwgardenservices.crm.ui.common.StatusChip
 import uk.co.jwgardenservices.crm.ui.common.StatusStripe
@@ -107,6 +92,11 @@ import uk.co.jwgardenservices.crm.ui.common.StatusTile
 import uk.co.jwgardenservices.crm.ui.common.SummaryStrip
 import uk.co.jwgardenservices.crm.ui.theme.JwTheme
 import uk.co.jwgardenservices.crm.ui.theme.JwTokens
+import uk.co.jwgardenservices.crm.ui.common.CompactScreenHeader
+import uk.co.jwgardenservices.crm.ui.common.ForestCard
+import uk.co.jwgardenservices.crm.ui.common.JwCard
+import uk.co.jwgardenservices.crm.ui.common.PillButton
+import uk.co.jwgardenservices.crm.ui.common.SectionLabel
 
 private const val SITE_URL_MISSING =
     "Add your website address in Settings first — the customer needs a link to accept the quote."
@@ -165,6 +155,7 @@ fun QuotesScreen(viewModel: CrmViewModel) {
     }
     val shownTotal = shown.sumOf { it.first.total }
     val awaiting = shown.count { it.second == "sent" }
+    val awaitingTotal = withStatus.filter { it.second == "sent" }.sumOf { it.first.total }
 
     val origin = state.settings?.publicSiteUrl?.trim()?.trimEnd('/')
     val warning = JwTheme.colors.attention
@@ -258,74 +249,30 @@ fun QuotesScreen(viewModel: CrmViewModel) {
 
     if (state.loading) {
         Column(Modifier.fillMaxSize()) {
-            ScreenHeader(
+            CompactScreenHeader(
                 title = "Quotes",
-                subtitle = "Price up work and let the customer accept it online.",
+                subtitle = "Proposals & price agreements",
             )
-            LoadingState(modifier = Modifier.padding(JwTokens.screenPadding))
+            LoadingState(modifier = Modifier.padding(horizontal = JwTokens.screenPadding))
         }
         return
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-                ScreenHeader(
-                    title = "Quotes",
-                    subtitle = "Proposals & price agreements",
-                    footerVisible = true,
-                    footer = {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            StatusTile(
-                                label = "Drafts",
-                                count = counts["draft"] ?: 0,
-                                icon = Icons.Outlined.Description,
-                                tint = JwTheme.colors.brass,
-                                active = filter == "draft",
-                                onClick = { filter = if (filter == "draft") "all" else "draft" },
-                                modifier = Modifier.weight(1f),
-                            )
-                            StatusTile(
-                                label = "Sent",
-                                count = counts["sent"] ?: 0,
-                                icon = Icons.Outlined.Send,
-                                tint = JwTheme.colors.info,
-                                active = filter == "sent",
-                                onClick = { filter = if (filter == "sent") "all" else "sent" },
-                                modifier = Modifier.weight(1f),
-                            )
-                            StatusTile(
-                                label = "Approved",
-                                count = counts["approved"] ?: 0,
-                                icon = Icons.Outlined.CheckCircle,
-                                tint = JwTheme.colors.positive,
-                                active = filter == "approved",
-                                onClick = { filter = if (filter == "approved") "all" else "approved" },
-                                modifier = Modifier.weight(1f),
-                            )
-                            StatusTile(
-                                label = "Converted",
-                                count = counts["converted"] ?: 0,
-                                icon = Icons.Outlined.HowToReg,
-                                tint = JwTheme.colors.onForestMuted.copy(alpha = 0.7f),
-                                active = filter == "converted",
-                                onClick = { filter = if (filter == "converted") "all" else "converted" },
-                                modifier = Modifier.weight(1f),
-                            )
-                            StatusTile(
-                                label = "Declined",
-                                count = counts["declined"] ?: 0,
-                                icon = Icons.Outlined.Cancel,
-                                tint = JwTheme.colors.attention,
-                                active = filter == "declined",
-                                onClick = { filter = if (filter == "declined") "all" else "declined" },
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                    },
-                )
+            CompactScreenHeader(
+                title = "Quotes",
+                subtitle = "Proposals & price agreements",
+                actions = {
+                    PillButton(
+                        label = "New quote",
+                        onClick = {
+                            editorError = null
+                            editor = QuoteEditorState(quote = null, items = emptyList())
+                        },
+                    )
+                },
+            )
 
             LazyColumn(
                 modifier = Modifier
@@ -334,11 +281,82 @@ fun QuotesScreen(viewModel: CrmViewModel) {
                 contentPadding = PaddingValues(
                     start = JwTokens.screenPadding,
                     end = JwTokens.screenPadding,
-                    top = 14.dp,
-                    bottom = 24.dp,
+                    top = JwTokens.sectionGap,
+                    bottom = 32.dp,
                 ),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(JwTokens.sectionGap),
             ) {
+
+            item {
+                ForestCard(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        SectionLabel("Awaiting response", onForest = true)
+                        SectionLabel(
+                            "${counts["sent"] ?: 0} sent",
+                            onForest = true,
+                        )
+                    }
+                    Text(
+                        text = money(awaitingTotal),
+                        style = MaterialTheme.typography.displaySmall,
+                        color = JwTheme.colors.brass,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        StatusTile(
+                            label = "Drafts",
+                            count = counts["draft"] ?: 0,
+                            icon = Icons.Outlined.Description,
+                            tint = JwTheme.colors.brass,
+                            active = filter == "draft",
+                            onClick = { filter = if (filter == "draft") "all" else "draft" },
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatusTile(
+                            label = "Sent",
+                            count = counts["sent"] ?: 0,
+                            icon = Icons.AutoMirrored.Outlined.Send,
+                            tint = JwTheme.colors.onForestMuted,
+                            active = filter == "sent",
+                            onClick = { filter = if (filter == "sent") "all" else "sent" },
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatusTile(
+                            label = "Approved",
+                            count = counts["approved"] ?: 0,
+                            icon = Icons.Outlined.CheckCircle,
+                            tint = JwTheme.colors.callBar,
+                            active = filter == "approved",
+                            onClick = { filter = if (filter == "approved") "all" else "approved" },
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatusTile(
+                            label = "Converted",
+                            count = counts["converted"] ?: 0,
+                            icon = Icons.Outlined.HowToReg,
+                            tint = JwTheme.colors.onForestMuted.copy(alpha = 0.7f),
+                            active = filter == "converted",
+                            onClick = { filter = if (filter == "converted") "all" else "converted" },
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatusTile(
+                            label = "Declined",
+                            count = counts["declined"] ?: 0,
+                            icon = Icons.Outlined.Cancel,
+                            tint = MaterialTheme.colorScheme.errorContainer,
+                            active = filter == "declined",
+                            onClick = { filter = if (filter == "declined") "all" else "declined" },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
 
             if (state.error != null) {
                 item {
@@ -355,19 +373,6 @@ fun QuotesScreen(viewModel: CrmViewModel) {
                     )
                 }
             } else {
-                item {
-                    FilterPillRow(
-                        options = listOf(
-                            PillOption("all", "All", counts["all"] ?: 0),
-                            PillOption("draft", "Draft", counts["draft"] ?: 0),
-                            PillOption("sent", "Sent", counts["sent"] ?: 0),
-                            PillOption("approved", "Approved", counts["approved"] ?: 0),
-                            PillOption("declined", "Declined", counts["declined"] ?: 0),
-                        ),
-                        selected = filter,
-                        onSelect = { filter = it },
-                    )
-                }
                 item {
                     SummaryStrip(
                         text = buildString {
@@ -404,18 +409,6 @@ fun QuotesScreen(viewModel: CrmViewModel) {
             }
         }
         }
-
-        GoldFab(
-            onClick = {
-                editorError = null
-                editor = QuoteEditorState(quote = null, items = emptyList())
-            },
-            contentDescription = "New quote",
-            icon = Icons.Outlined.Add,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(JwTokens.fabMargin),
-        )
     }
 
     editor?.let { quoteEditor ->
@@ -540,7 +533,7 @@ private fun QuoteCard(
     var menuOpen by remember { mutableStateOf(false) }
     var drag by remember(quote.id) { mutableStateOf(0f) }
 
-    Surface(
+    JwCard(
         modifier = modifier
             .fillMaxWidth()
             .pointerInput(quote.id) {
@@ -555,9 +548,7 @@ private fun QuoteCard(
                     onHorizontalDrag = { _, amount -> drag += amount },
                 )
             },
-        shape = RoundedCornerShape(JwTokens.cardRadius),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(JwTokens.hairline, MaterialTheme.colorScheme.outlineVariant),
+        padding = PaddingValues(0.dp),
     ) {
         Row(modifier = Modifier.height(IntrinsicSize.Min)) {
             StatusStripe(chipColor)

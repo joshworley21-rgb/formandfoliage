@@ -36,17 +36,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Undo
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -284,7 +279,7 @@ fun AssistantScreen() {
         Spacer(Modifier.height(10.dp))
 
         Surface(
-            shape = RoundedCornerShape(JwTokens.cardRadius),
+            shape = RoundedCornerShape(JwTokens.chipRadius),
             color = MaterialTheme.colorScheme.surfaceVariant,
         ) {
             Text(
@@ -485,7 +480,7 @@ private fun Transcript(
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(JwTokens.bandRadius),
+        shape = RoundedCornerShape(JwTokens.cardRadius),
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
         val listState = rememberLazyListState()

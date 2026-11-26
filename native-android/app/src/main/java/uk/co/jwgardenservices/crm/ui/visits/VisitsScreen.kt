@@ -1,6 +1,5 @@
 package uk.co.jwgardenservices.crm.ui.visits
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,17 +9,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.ChevronRight
@@ -28,7 +23,6 @@ import androidx.compose.material.icons.outlined.Payments
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -49,7 +43,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import uk.co.jwgardenservices.crm.ui.common.JwAlertDialog
@@ -75,15 +68,17 @@ import uk.co.jwgardenservices.crm.ui.common.DateField
 import uk.co.jwgardenservices.crm.ui.common.DialogTitle
 import uk.co.jwgardenservices.crm.ui.common.EmptyState
 import uk.co.jwgardenservices.crm.ui.common.ErrorState
-import uk.co.jwgardenservices.crm.ui.common.HeaderOutlineButton
-import uk.co.jwgardenservices.crm.ui.common.HeaderPillButton
 import uk.co.jwgardenservices.crm.ui.common.JwDialog
 import uk.co.jwgardenservices.crm.ui.common.LoadingState
-import uk.co.jwgardenservices.crm.ui.common.ScreenHeader
 import uk.co.jwgardenservices.crm.ui.common.SettingSwitchRow
-import uk.co.jwgardenservices.crm.ui.common.StatCard
 import uk.co.jwgardenservices.crm.ui.common.StatusChip
 import uk.co.jwgardenservices.crm.ui.theme.JwTokens
+import uk.co.jwgardenservices.crm.ui.common.CompactScreenHeader
+import uk.co.jwgardenservices.crm.ui.common.FilterPill
+import uk.co.jwgardenservices.crm.ui.common.JwCard
+import uk.co.jwgardenservices.crm.ui.common.PillButton
+import uk.co.jwgardenservices.crm.ui.common.PillStyle
+import uk.co.jwgardenservices.crm.ui.common.StatTile
 
 @Composable
 fun VisitsScreen(viewModel: CrmViewModel) {
@@ -105,29 +100,28 @@ fun VisitsScreen(viewModel: CrmViewModel) {
 
     if (state.loading) {
         Column(Modifier.fillMaxSize()) {
-            ScreenHeader(title = "Visits", subtitle = "Hours, materials and the days that did not happen.")
+            CompactScreenHeader(title = "Visits", subtitle = "Hours and materials")
             LoadingState(modifier = Modifier.padding(horizontal = JwTokens.screenPadding))
         }
         return
     }
 
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader(
+        CompactScreenHeader(
             title = "Visits",
-            subtitle = "Hours, materials and the days that did not happen.",
-            topActions = {
-                HeaderOutlineButton(
+            subtitle = "Hours and materials",
+            actions = {
+                PillButton(
                     label = "Missed",
+                    style = PillStyle.OnForest,
                     onClick = {
                         saveError = null
                         defaultMissed = true
                         creating = true
                     },
                 )
-                Spacer(Modifier.width(8.dp))
-                HeaderPillButton(
+                PillButton(
                     label = "Log visit",
-                    icon = Icons.Outlined.Add,
                     onClick = {
                         saveError = null
                         defaultMissed = false
@@ -141,7 +135,7 @@ fun VisitsScreen(viewModel: CrmViewModel) {
                 .weight(1f)
                 .fillMaxWidth(),
             contentPadding = PaddingValues(JwTokens.screenPadding),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(JwTokens.sectionGap),
         ) {
         if (state.error != null) {
             item { ErrorState(state.error!!, viewModel::refresh) }
@@ -152,13 +146,13 @@ fun VisitsScreen(viewModel: CrmViewModel) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                StatCard(
+                StatTile(
                     label = "Unbilled visits",
                     value = unbilled.size.toString(),
                     icon = Icons.Outlined.Checklist,
                     modifier = Modifier.weight(1f),
                 )
-                StatCard(
+                StatTile(
                     label = "Ready to invoice",
                     value = money(unbilled.sumOf { it.amount }),
                     icon = Icons.Outlined.Payments,
@@ -235,13 +229,11 @@ fun VisitsScreen(viewModel: CrmViewModel) {
 
 @Composable
 private fun VisitCard(visit: Visit, clientName: String, onClick: () -> Unit) {
-    Surface(
+    JwCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(JwTokens.cardRadius),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(JwTokens.hairline, MaterialTheme.colorScheme.outline),
+        padding = PaddingValues(0.dp),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -463,21 +455,21 @@ private fun VisitEditorDialog(
 
                     if (!locked) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(
+                            FilterPill(
+                                label = "Hourly rate",
                                 selected = payMode == PayMode.HOURLY,
                                 onClick = {
                                     payMode = PayMode.HOURLY
                                     rate = rateFor(client, PayMode.HOURLY)
                                 },
-                                label = { Text("Hourly rate") },
                             )
-                            FilterChip(
+                            FilterPill(
+                                label = "Day rate",
                                 selected = payMode == PayMode.DAY,
                                 onClick = {
                                     payMode = PayMode.DAY
                                     rate = rateFor(client, PayMode.DAY)
                                 },
-                                label = { Text("Day rate") },
                             )
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
