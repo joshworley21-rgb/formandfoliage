@@ -165,7 +165,7 @@ dependencies {
     implementation(libs.coil.network.okhttp)
     implementation(libs.androidx.exifinterface)
     // On-device LLM runtime for the free "local thinking" fallback.
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.16.1")
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.0")
 
     coreLibraryDesugaring(libs.desugar.jdk.libs)
 
