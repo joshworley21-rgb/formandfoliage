@@ -51,7 +51,8 @@ class CloudVoice(private val context: Context) : AutoCloseable {
     @Volatile
     private var stopped = false
 
-    suspend fun speak(text: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun speak(text: String, voice: String = OpenAiVoice.DEFAULT.id): Boolean =
+        withContext(Dispatchers.IO) {
         if (text.isBlank()) return@withContext false
         if (!online()) {
             CrashLog.note(context, TAG, "no network; using the on-device voice")
@@ -64,20 +65,11 @@ class CloudVoice(private val context: Context) : AutoCloseable {
             return@withContext false
         }
 
-        // Some OpenAI voices/models reject `instructions`; retry once without
-        // it rather than falling back to a robotic voice over a 400.
-        val first = runCatching { client.newCall(request(text, true, token)).execute() }
+        val response = runCatching { client.newCall(request(text, voice, token)).execute() }
             .getOrElse { error ->
                 CrashLog.note(context, TAG, "request failed: ${error.message}")
                 return@withContext false
             }
-        val response = if (first.code == 400) {
-            first.close()
-            runCatching { client.newCall(request(text, false, token)).execute() }.getOrNull()
-                ?: return@withContext false
-        } else {
-            first
-        }
 
         val bytes = runCatching {
             response.use { result ->
@@ -139,10 +131,10 @@ class CloudVoice(private val context: Context) : AutoCloseable {
         }
     }
 
-    private fun request(text: String, withInstructions: Boolean, token: String): Request {
+    private fun request(text: String, voice: String, token: String): Request {
         val payload = SpeakRequest(
-            input = text.take(600),
-            instructions = if (withInstructions) INSTRUCTIONS else null,
+            text = text.take(600),
+            voice = voice,
         )
         return Request.Builder()
             .url("${AppConfig.supabaseUrl}/functions/v1/voice-speak")
@@ -175,20 +167,12 @@ class CloudVoice(private val context: Context) : AutoCloseable {
 
     @Serializable
     private data class SpeakRequest(
-        val model: String = MODEL,
-        val voice: String = VOICE,
-        val input: String,
-        val instructions: String? = null,
-        @SerialName("response_format") val format: String = "mp3",
+        val text: String,
+        val voice: String,
     )
 
     private companion object {
         const val TAG = "CloudVoice"
-        const val MODEL = "gpt-4o-mini-tts"
-        const val VOICE = "fable"
-        const val INSTRUCTIONS =
-            "You are the voice of a calm, friendly British gardening assistant. " +
-                "Speak naturally and warmly at a measured pace. No theatrics."
         val JSON = "application/json; charset=utf-8".toMediaType()
     }
 }

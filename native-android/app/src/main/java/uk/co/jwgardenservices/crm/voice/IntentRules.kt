@@ -20,6 +20,11 @@ object IntentRules {
             .replace(Regex("[,\\.!?;:]+"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
+        val completionQuestion = Regex(
+            "\\b(?:did|have|has|was|were|is|are)\\b.*" +
+                "\\b(?:mark|marked|finish|finished|complete|completed|done)\\b",
+            RegexOption.IGNORE_CASE,
+        ).containsMatchIn(text)
         val kind = when {
             // "Say again" must win over every schedule/word match below.
             text.containsAny(
@@ -304,7 +309,12 @@ object IntentRules {
                 "what's next",
                 "whats next",
             ) -> SpokenIntent.NextJob
-            text.containsAny("mark", "finished", "complete", "completed", "done with") &&
+            // Word-boundary "mark" matters: "Markoff" and "Billy" are client
+            // names, not commands. A question about completion is also a
+            // status question, never an instruction to change the record.
+            (text.containsWord("mark") ||
+                text.containsAny("finished", "complete", "completed", "done with")) &&
+                !completionQuestion &&
                 !text.containsAny("how many", "hours", "hrs") -> SpokenIntent.MarkJobDone
             text.containsAny("hour", "hours", "hrs", "log", "worked", "work for") ->
                 SpokenIntent.LogHours
@@ -373,6 +383,9 @@ object IntentRules {
     }
 
     private fun String.containsAny(vararg needles: String): Boolean = needles.any { contains(it) }
+
+    private fun String.containsWord(word: String): Boolean =
+        Regex("\\b${Regex.escape(word)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(this)
 
     private fun String.startsWithAny(vararg prefixes: String): Boolean =
         prefixes.any { startsWith(it) }

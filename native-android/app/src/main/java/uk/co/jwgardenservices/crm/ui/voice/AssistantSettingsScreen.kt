@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Chat
+import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Memory
@@ -67,6 +68,7 @@ import uk.co.jwgardenservices.crm.voice.AssistantContext
 import uk.co.jwgardenservices.crm.voice.AssistantMemory
 import uk.co.jwgardenservices.crm.voice.AsrEngine
 import uk.co.jwgardenservices.crm.voice.AssistantPreferences
+import uk.co.jwgardenservices.crm.voice.CloudVoice
 import uk.co.jwgardenservices.crm.voice.KokoroCustomVoices
 import uk.co.jwgardenservices.crm.voice.KokoroHqDownloader
 import uk.co.jwgardenservices.crm.voice.KokoroEngine
@@ -76,6 +78,7 @@ import uk.co.jwgardenservices.crm.voice.MicSource
 import uk.co.jwgardenservices.crm.voice.MicTest
 import uk.co.jwgardenservices.crm.voice.MoonshineDownloader
 import uk.co.jwgardenservices.crm.voice.NemotronDownloader
+import uk.co.jwgardenservices.crm.voice.OpenAiVoice
 import uk.co.jwgardenservices.crm.voice.PhononDownloader
 import uk.co.jwgardenservices.crm.voice.PunctuationDownloader
 import uk.co.jwgardenservices.crm.voice.PhononVoice
@@ -104,6 +107,9 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = AssistantPreferences.DEFAULT_SPEED)
     var draftSpeed by remember(savedSpeed) { mutableFloatStateOf(savedSpeed) }
     var previewingVoice by remember { mutableStateOf(false) }
+    var previewingOnline by remember { mutableStateOf(false) }
+    var previewingOnlineVoice by remember { mutableStateOf<OpenAiVoice?>(null) }
+    var onlinePreviewError by remember { mutableStateOf<String?>(null) }
     val hqState by KokoroHqDownloader.state.collectAsStateWithLifecycle()
     var hqInstalled by remember { mutableStateOf(KokoroHqDownloader.isInstalled(context)) }
     var savedBytes by remember { mutableLongStateOf(KokoroHqDownloader.savedBytes(context)) }
@@ -115,6 +121,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = false)
     val onlineVoice by AssistantPreferences.onlineVoiceFlow(context)
         .collectAsStateWithLifecycle(initialValue = false)
+    val openAiVoice by AssistantPreferences.openAiVoiceFlow(context)
+        .collectAsStateWithLifecycle(initialValue = OpenAiVoice.DEFAULT)
     val localThinking by AssistantPreferences.localThinkingFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
     val drivingMode by AssistantPreferences.drivingModeFlow(context)
@@ -643,6 +651,127 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 ) {
                     Text(if (previewingVoice) "Playing sample…" else "Preview Kokoro voice")
                 }
+            }
+        }
+
+        SectionCard(
+            title = "Online voice (OpenAI)",
+            subtitle = "Cloud voice with offline fallback.",
+            leadingIcon = Icons.Outlined.Cloud,
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                SettingSwitchRow(
+                    title = "Use OpenAI online",
+                    description = "Answers and replies try OpenAI first. Network, key or " +
+                        "service failures fall back to the selected offline voice.",
+                    checked = onlineVoice,
+                    onCheckedChange = { enabled ->
+                        scope.launch {
+                            AssistantPreferences.setOnlineVoice(context, enabled)
+                            AssistantMemory.setCloudConversation(context, enabled)
+                        }
+                    },
+                )
+                Text("OpenAI voice", style = MaterialTheme.typography.labelMedium)
+                OptionPicker(
+                    options = OpenAiVoice.entries,
+                    selected = openAiVoice,
+                    label = { it?.label ?: OpenAiVoice.DEFAULT.label },
+                    enabled = onlineVoice,
+                    onSelect = { selected ->
+                        scope.launch { AssistantPreferences.setOpenAiVoice(context, selected) }
+                    },
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        enabled = !previewingOnline,
+                        onClick = {
+                            onlinePreviewError = null
+                            scope.launch {
+                                previewingOnline = true
+                                previewingOnlineVoice = openAiVoice
+                                val voice = CloudVoice(context)
+                                try {
+                                    val played = voice.speak(PREVIEW_TEXT, openAiVoice.id)
+                                    if (!played) {
+                                        onlinePreviewError =
+                                            "Could not play that OpenAI voice. Check the online switch, " +
+                                                "connection and OPENAI_API_KEY."
+                                    }
+                                } catch (error: Exception) {
+                                    onlinePreviewError =
+                                        error.message ?: "Could not play that OpenAI voice."
+                                } finally {
+                                    voice.close()
+                                    previewingOnline = false
+                                    previewingOnlineVoice = null
+                                }
+                            }
+                        },
+                    ) {
+                        Text(if (previewingOnline) "Playing…" else "Preview selected")
+                    }
+                    OutlinedButton(
+                        enabled = !previewingOnline,
+                        onClick = {
+                            onlinePreviewError = null
+                            scope.launch {
+                                previewingOnline = true
+                                try {
+                                    for (voiceOption in OpenAiVoice.entries) {
+                                        previewingOnlineVoice = voiceOption
+                                        val voice = CloudVoice(context)
+                                        val played = try {
+                                            voice.speak(PREVIEW_TEXT, voiceOption.id)
+                                        } finally {
+                                            voice.close()
+                                        }
+                                        if (!played) {
+                                            onlinePreviewError =
+                                                "Stopped at ${voiceOption.label}. Check the online switch, " +
+                                                    "connection and OPENAI_API_KEY."
+                                            break
+                                        }
+                                    }
+                                } catch (error: Exception) {
+                                    onlinePreviewError =
+                                        error.message ?: "Could not play the OpenAI voices."
+                                } finally {
+                                    previewingOnline = false
+                                    previewingOnlineVoice = null
+                                }
+                            }
+                        },
+                    ) {
+                        Text(if (previewingOnline) "Playing…" else "Preview all voices")
+                    }
+                }
+                if (previewingOnline && previewingOnlineVoice != null) {
+                    Text(
+                        text = "Playing ${previewingOnlineVoice!!.label}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                onlinePreviewError?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                Text(
+                    text = "The OpenAI key stays in Supabase; only the reply text is sent. " +
+                        "Offline fillers remain on-device so the line never waits for the network.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 

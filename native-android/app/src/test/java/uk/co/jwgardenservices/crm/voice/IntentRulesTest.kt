@@ -39,6 +39,10 @@ class IntentRulesTest {
         Case("finished the Jones job", SpokenIntent.MarkJobDone),
         Case("mark the Smiths job done", SpokenIntent.MarkJobDone),
         Case("I've completed the Browns", SpokenIntent.MarkJobDone),
+        // A question or a surname must never mutate the diary.
+        Case("did you mark off Louisa", SpokenIntent.Other),
+        Case("have you finished the Smiths", SpokenIntent.Other),
+        Case("Billy Markoff-Lewis are a full day today", SpokenIntent.Other),
 
         Case("who owes me money", SpokenIntent.CheckDebtors),
         Case("how much is outstanding", SpokenIntent.CheckDebtors),

@@ -54,11 +54,30 @@ enum class KokoroVoice(val speakerId: Int, val label: String) {
     }
 }
 
+/** OpenAI TTS voices supported by `voice-speak`. */
+enum class OpenAiVoice(val id: String, val label: String) {
+    Fable("fable", "Fable — warm British"),
+    Onyx("onyx", "Onyx — deep"),
+    Nova("nova", "Nova — bright"),
+    Alloy("alloy", "Alloy — neutral"),
+    Echo("echo", "Echo — male"),
+    Shimmer("shimmer", "Shimmer — female"),
+    Sage("sage", "Sage — calm"),
+    Coral("coral", "Coral — friendly"),
+    Ash("ash", "Ash — dry"),
+    ;
+
+    companion object {
+        val DEFAULT = Fable
+    }
+}
+
 private val Context.assistantDataStore by preferencesDataStore(name = "assistant")
 private val VOICE_KEY = stringPreferencesKey("kokoro_voice")
 private val HIGH_QUALITY_KEY = booleanPreferencesKey("kokoro_high_quality")
 private val SPEED_KEY = floatPreferencesKey("kokoro_speed")
 private val ONLINE_VOICE_KEY = booleanPreferencesKey("online_voice")
+private val OPENAI_VOICE_KEY = stringPreferencesKey("openai_voice")
 private val PIPER_KEY = stringPreferencesKey("piper_voice")
 private val MIC_SOURCE_KEY = stringPreferencesKey("mic_source")
 private val PHONON_KEY = booleanPreferencesKey("phonon_enabled")
@@ -207,14 +226,27 @@ object AssistantPreferences {
     }
 
     /**
-     * Use the OpenAI voice through the voice-speak function when online.
-     * Falls back to Kokoro when the request fails, so the assistant is never
-     * silent.
+     * Use OpenAI for online answers and voice. Every request falls back to
+     * the selected offline voice if the network, OpenAI or the Edge Function
+     * is unavailable, so the assistant is never mute.
      */
-    /** Online voices were removed: Phonon 31m is the only offered voice. */
-    fun onlineVoiceFlow(context: Context): Flow<Boolean> = kotlinx.coroutines.flow.flowOf(false)
+    fun onlineVoiceFlow(context: Context): Flow<Boolean> =
+        context.assistantDataStore.data.map { it[ONLINE_VOICE_KEY] ?: false }
 
-    suspend fun setOnlineVoice(context: Context, enabled: Boolean) = Unit
+    suspend fun setOnlineVoice(context: Context, enabled: Boolean) {
+        context.assistantDataStore.edit { it[ONLINE_VOICE_KEY] = enabled }
+    }
+
+    fun openAiVoiceFlow(context: Context): Flow<OpenAiVoice> =
+        context.assistantDataStore.data.map { preferences ->
+            OpenAiVoice.entries.firstOrNull {
+                it.id == preferences[OPENAI_VOICE_KEY]
+            } ?: OpenAiVoice.DEFAULT
+        }
+
+    suspend fun setOpenAiVoice(context: Context, voice: OpenAiVoice) {
+        context.assistantDataStore.edit { it[OPENAI_VOICE_KEY] = voice.id }
+    }
 
     /**
      * A downloaded local voice (Piper VITS or Supertonic), or null for the

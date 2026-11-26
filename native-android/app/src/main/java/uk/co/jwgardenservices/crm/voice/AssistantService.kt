@@ -152,6 +152,7 @@ class AssistantService : Service() {
     private var autoDrivingMode = true
     private var bluetoothDriving = false
     private var onlineVoice = false
+    private var openAiVoice = OpenAiVoice.DEFAULT
     private var personaTone = PersonaTone.Warm
     private var personaHumour = PersonaHumour.Normal
     private var personaLength = PersonaLength.Normal
@@ -355,6 +356,9 @@ class AssistantService : Service() {
             AssistantPreferences.onlineVoiceFlow(this@AssistantService).collect { onlineVoice = it }
         }
         scope.launch {
+            AssistantPreferences.openAiVoiceFlow(this@AssistantService).collect { openAiVoice = it }
+        }
+        scope.launch {
             AssistantPreferences.pickupFlow(this@AssistantService).collect { pickupGreeting = it }
         }
         scope.launch {
@@ -546,11 +550,20 @@ class AssistantService : Service() {
                 // Let the ringback track release and the route settle before
                 // the first syllable.
                 delay(150)
-                // Long enough for a Phonon hiccup and the local fallback to
-                // load; the drain in PhononSpeech caps its own wait.
-                withTimeoutOrNull(8_000) {
-                    speaker.speakPickup(speakerId, speed, greeting)
-                } ?: false
+                val online = onlineVoice && !lowBattery &&
+                    withTimeoutOrNull(5_000) {
+                        onlineSpeaker().speak(greeting, openAiVoice.id)
+                    } == true
+                if (online) {
+                    CrashLog.note(this, TAG, "pickup voice=online")
+                    true
+                } else {
+                    // Long enough for a Phonon hiccup and the local fallback to
+                    // load; the drain in PhononSpeech caps its own wait.
+                    withTimeoutOrNull(8_000) {
+                        speaker.speakPickup(speakerId, speed, greeting)
+                    } ?: false
+                }
             } catch (error: Exception) {
                 CrashLog.note(this, TAG, "pickup failed: ${error.message}")
                 false
@@ -853,7 +866,8 @@ class AssistantService : Service() {
             // The natural online voice is optional; any failure falls back to
             // Kokoro rather than leaving the assistant silent.
             val spokenOnline = onlineVoice && !lowBattery &&
-                runCatching { onlineSpeaker().speak(stripped) }.getOrDefault(false)
+                runCatching { onlineSpeaker().speak(stripped, openAiVoice.id) }
+                    .getOrDefault(false)
             CrashLog.note(this, TAG, "reply speech starting: ${stripped.take(80)}")
             if (!spokenOnline) {
                 val drivingPace = if (drivingMode) 0.94f else 1f

@@ -263,6 +263,14 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @Volatile
     private var bargeFramesNeeded = BARGE_FRAMES
 
+    /** VAD can help a headset; on a loudspeaker it mostly hears the TTS. */
+    @Volatile
+    private var bargeUseVad = true
+
+    /** Longer on a loudspeaker so the first words are not mistaken for a barge. */
+    @Volatile
+    private var bargeGraceMs = BARGE_GRACE_MS
+
     @Volatile
     private var bargeFrames = 0
 
@@ -610,13 +618,24 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             android.media.AudioDeviceInfo.TYPE_USB_DEVICE,
         )
         bargeHasEchoCancel = echoCanceller != null || onHeadset
-        bargeRmsThreshold = if (bargeHasEchoCancel) BARGE_RMS else BARGE_RMS_NO_AEC
-        bargeFramesNeeded = if (bargeHasEchoCancel) BARGE_FRAMES else BARGE_FRAMES_NO_AEC
+        bargeUseVad = onHeadset
+        bargeGraceMs = if (onHeadset) BARGE_GRACE_MS else BARGE_GRACE_SPEAKER_MS
+        bargeRmsThreshold = when {
+            onHeadset -> BARGE_RMS
+            echoCanceller != null -> BARGE_RMS_AEC_SPEAKER
+            else -> BARGE_RMS_NO_AEC
+        }
+        bargeFramesNeeded = if (onHeadset) {
+            BARGE_FRAMES
+        } else {
+            BARGE_FRAMES_SPEAKER
+        }
         CrashLog.note(
             context,
             TAG,
-            "barge guard=${if (bargeHasEchoCancel) "aec/headset" else "energy"} " +
-                "threshold=${"%.3f".format(bargeRmsThreshold)} frames=$bargeFramesNeeded",
+            "barge guard=${if (onHeadset) "headset" else if (echoCanceller != null) "aec-speaker" else "energy"} " +
+                "threshold=${"%.3f".format(bargeRmsThreshold)} " +
+                "frames=$bargeFramesNeeded grace=${bargeGraceMs}ms",
         )
         // A car HFP mic is convenient but noisy; this option keeps output on
         // the car while capturing from the phone itself.
@@ -1293,7 +1312,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         vadVoiced: Boolean = false,
     ): Boolean {
         if (!bargeEnabled || length <= 0) return false
-        if (SystemClock.elapsedRealtime() - pausedAt < BARGE_GRACE_MS) return false
+        if (SystemClock.elapsedRealtime() - pausedAt < bargeGraceMs) return false
         var energy = 0.0
         for (index in 0 until length) {
             val sample = buffer[index] / 32768.0
@@ -1303,9 +1322,11 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         // With AEC/headset echo control, Silero can confirm a quieter
         // interruption. Without it, only a clearly louder-than-speaker
         // energy floor counts, so the phone cannot interrupt itself.
-        val candidate = if (bargeHasEchoCancel) {
+        val candidate = if (bargeUseVad) {
             vadVoiced && rms >= bargeRmsThreshold * 0.75f || rms >= bargeRmsThreshold
         } else {
+            // Loudspeaker: VAD hears the assistant itself, so require a
+            // clearly louder, sustained interruption.
             rms >= bargeRmsThreshold
         }
         if (candidate) {
@@ -1534,9 +1555,11 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         const val BARGE_RMS = 0.04
         const val BARGE_FRAMES = 3
 
-        /** Without AEC/headset echo control, demand louder and longer speech. */
-        const val BARGE_RMS_NO_AEC = 0.06
-        const val BARGE_FRAMES_NO_AEC = 5
+        /** A loudspeaker needs a clearly louder, longer interruption. */
+        const val BARGE_RMS_AEC_SPEAKER = 0.09
+        const val BARGE_RMS_NO_AEC = 0.11
+        const val BARGE_FRAMES_SPEAKER = 6
+        const val BARGE_GRACE_SPEAKER_MS = 900L
 
         /**
          * Raw RMS that counts as speech even when Silero says no. Quiet phone
