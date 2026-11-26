@@ -89,6 +89,7 @@ private val PICKUP_KEY = booleanPreferencesKey("pickup_greeting")
 private val USED_KEY = booleanPreferencesKey("assistant_used")
 private val LOCAL_THINKING_KEY = booleanPreferencesKey("local_thinking")
 private val LOCAL_MODEL_KEY = stringPreferencesKey("local_model")
+private val TOOL_ROUTER_KEY = booleanPreferencesKey("tool_router")
 private val PRONUNCIATION_KEY = stringPreferencesKey("pronunciation")
 private val DRIVING_KEY = booleanPreferencesKey("driving_mode")
 private val AUTO_DRIVING_KEY = booleanPreferencesKey("auto_driving_mode")
@@ -308,6 +309,14 @@ object AssistantPreferences {
     suspend fun setLocalModel(context: Context, model: LlmModel) {
         context.assistantDataStore.edit { it[LOCAL_MODEL_KEY] = model.id }
         LocalLlm.preferred = model
+    }
+
+    /** Let the small FunctionGemma model pick app actions for sentences the rules miss. */
+    fun toolRouterFlow(context: Context): Flow<Boolean> =
+        context.assistantDataStore.data.map { it[TOOL_ROUTER_KEY] ?: false }
+
+    suspend fun setToolRouter(context: Context, enabled: Boolean) {
+        context.assistantDataStore.edit { it[TOOL_ROUTER_KEY] = enabled }
     }
 
     suspend fun setLocalThinking(context: Context, enabled: Boolean) {

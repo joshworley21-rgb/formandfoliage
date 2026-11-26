@@ -85,7 +85,7 @@ class LocalBrainTest {
         assertNotNull(parse("log_hours|", "log three and a half hours"))
         assertNotNull(parse("mark_job_done|Parkers", "that's the Parkers wrapped up"))
         assertNotNull(parse("add_note|Parkers", "remember the gate sticks at the Parkers"))
-        assertNotNull(parse("add_expense|", "spent forty quid on diesel"))
+        assertNotNull(parse("add_expense|Parkers", "bought thirty quid of compost for the Parkers"))
     }
 
     @Test

@@ -154,6 +154,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     }
     val localModel by AssistantPreferences.localModelFlow(context)
         .collectAsStateWithLifecycle(initialValue = LlmModel.Small)
+    val toolRouterOn by AssistantPreferences.toolRouterFlow(context)
+        .collectAsStateWithLifecycle(initialValue = false)
     var localLlmSaved by remember { mutableLongStateOf(LocalLlm.savedBytes(context)) }
     val pickupGreeting by AssistantPreferences.pickupFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
@@ -1157,7 +1159,17 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 )
                 OptionalModelRow(
                     model = LlmModel.Gemma,
-                    selected = localModel,
+                    active = localModel == LlmModel.Gemma,
+                    onToggle = { on ->
+                        scope.launch {
+                            AssistantPreferences.setLocalModel(context, if (on) LlmModel.Gemma else LlmModel.Small)
+                        }
+                    },
+                    onRemoved = {
+                        if (localModel == LlmModel.Gemma) {
+                            scope.launch { AssistantPreferences.setLocalModel(context, LlmModel.Small) }
+                        }
+                    },
                     blurb = "Google's Gemma 3 1B. About 2.6 s to the first word on a Galaxy S22+ " +
                         "with a long prompt. It needs a Hugging Face login to download: get " +
                         "gemma3-1b-it-int4.litertlm from litert-community/Gemma3-1B-IT in your " +
@@ -1165,9 +1177,50 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 )
                 OptionalModelRow(
                     model = LlmModel.Large,
-                    selected = localModel,
+                    active = localModel == LlmModel.Large,
+                    onToggle = { on ->
+                        scope.launch {
+                            AssistantPreferences.setLocalModel(context, if (on) LlmModel.Large else LlmModel.Small)
+                        }
+                    },
+                    onRemoved = {
+                        if (localModel == LlmModel.Large) {
+                            scope.launch { AssistantPreferences.setLocalModel(context, LlmModel.Small) }
+                        }
+                    },
                     blurb = "Qwen3 1.7B. Slower on the CPU and needs about 3 GB free while a call " +
                         "is open.",
+                )
+            }
+        }
+
+        SectionCard(
+            title = "Action picker (experimental)",
+            subtitle = "FunctionGemma chooses the action.",
+            leadingIcon = Icons.Outlined.Memory,
+        ) {
+            Column(
+                modifier = Modifier.padding(JwTokens.cardPadding),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "For sentences the built-in rules do not recognise, a tiny model picks " +
+                        "one of six actions (log hours, diary, note, mark done, who owes, " +
+                        "materials) and fills in the details, so \"put Simon down for a half " +
+                        "day\" becomes four hours. Everything it returns is checked against " +
+                        "what you actually said before anything is saved. It runs on the " +
+                        "phone, about 0.5 GB of memory while a call is open, and its timings " +
+                        "go in the assistant log. Gemma terms of use apply to the model.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OptionalModelRow(
+                    model = LlmModel.Router,
+                    active = toolRouterOn,
+                    onToggle = { on -> scope.launch { AssistantPreferences.setToolRouter(context, on) } },
+                    onRemoved = { scope.launch { AssistantPreferences.setToolRouter(context, false) } },
+                    switchDescription = "Switch off to go back to the rules and the chat model only.",
+                    blurb = "FunctionGemma 270M, fine-tuned for phone actions by Google.",
                 )
             }
         }
@@ -1422,7 +1475,14 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
 }
 
 @Composable
-private fun OptionalModelRow(model: LlmModel, selected: LlmModel, blurb: String) {
+private fun OptionalModelRow(
+    model: LlmModel,
+    blurb: String,
+    active: Boolean,
+    onToggle: (Boolean) -> Unit,
+    onRemoved: () -> Unit,
+    switchDescription: String = "Switch off to go back to the small, faster model.",
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by LocalLlm.stateFor(model).collectAsStateWithLifecycle()
@@ -1452,14 +1512,10 @@ private fun OptionalModelRow(model: LlmModel, selected: LlmModel, blurb: String)
         )
         SettingSwitchRow(
             title = "Use ${model.label}",
-            description = "Switch off to go back to the small, faster model.",
-            checked = selected == model && installed,
+            description = switchDescription,
+            checked = active && installed,
             enabled = installed,
-            onCheckedChange = { enabled ->
-                scope.launch {
-                    AssistantPreferences.setLocalModel(context, if (enabled) model else LlmModel.Small)
-                }
-            },
+            onCheckedChange = onToggle,
         )
         val working = state as? LocalLlm.State.Working
         if (working != null) {
@@ -1482,9 +1538,7 @@ private fun OptionalModelRow(model: LlmModel, selected: LlmModel, blurb: String)
                 )
                 TextButton(
                     onClick = {
-                        if (selected == model) {
-                            scope.launch { AssistantPreferences.setLocalModel(context, LlmModel.Small) }
-                        }
+                        onRemoved()
                         LocalLlm.remove(context, model)
                         installed = false
                         saved = 0

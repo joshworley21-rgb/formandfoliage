@@ -101,4 +101,16 @@ class LlmModelTest {
         assertEquals(true, LlmModel.Large.leanPrompts)
         assertEquals(false, LlmModel.Gemma.reasonsByDefault)
     }
+
+    @Test
+    fun `the action picker never answers chat questions`() {
+        val all = setOf(LlmModel.Small, LlmModel.Router)
+        assertEquals(
+            listOf(LlmModel.Small),
+            LlmModel.candidates(LlmModel.Router, all, availableMb = 8_000),
+        )
+        assertEquals(true, LlmModel.Router.routesTools)
+        assertEquals(true, LlmModel.Router.downloadable)
+        assertEquals(284_426_240L, LlmModel.Router.bytes)
+    }
 }

@@ -157,6 +157,7 @@ class AssistantService : Service() {
     private var callWakeLock: PowerManager.WakeLock? = null
     private var cloudConversation = true
     private var localThinking = true
+    private var toolRouterOn = false
     private var drivingMode = false
     private var manualDrivingMode = false
     private var autoDrivingMode = true
@@ -358,6 +359,10 @@ class AssistantService : Service() {
         scope.launch {
             AssistantPreferences.localModelFlow(this@AssistantService)
                 .collect { LocalLlm.preferred = it }
+        }
+        scope.launch {
+            AssistantPreferences.toolRouterFlow(this@AssistantService)
+                .collect { toolRouterOn = it }
         }
         scope.launch {
             AssistantPreferences.drivingModeFlow(this@AssistantService).collect {
@@ -637,6 +642,9 @@ class AssistantService : Service() {
         scope.launch {
             if (localThinking && LocalLlm.isInstalled(this@AssistantService)) {
                 LocalLlm.warm(this@AssistantService)
+            }
+            if (toolRouterOn && LocalLlm.isInstalled(this@AssistantService, LlmModel.Router)) {
+                LocalLlm.warmRouter(this@AssistantService)
             }
         }
     }
@@ -1945,6 +1953,20 @@ class AssistantService : Service() {
         //     business questions as a stream, speaking each sentence as soon
         //     as it is written. The cloud below is only for what this cannot
         //     do, and not used at all when online answers are switched off.
+        // The action picker comes first: it can turn "put Simon down for a half
+        // day" into 4 hours, which the rules and the labeller cannot.
+        if (!quick.requiresCloud && toolRouterReady()) {
+            val routed = routeWithTools(text)
+            if (routed != null && (!temporal || routed.intent in dateIndependentIntents)) {
+                CrashLog.note(
+                    this,
+                    TAG,
+                    "intent=router:${routed.intent.wire} in ${System.currentTimeMillis() - started}ms",
+                )
+                runIntent(routed.text, IntentResult(routed.intent, routed.client, false))
+                return
+            }
+        }
         var localTried = false
         if (!quick.requiresCloud && localBrainReady()) {
             localTried = true
@@ -2303,6 +2325,21 @@ class AssistantService : Service() {
             style = personalityInstruction(),
         )
         return LocalBrain.Prompts(full, lean)
+    }
+
+    private fun toolRouterReady(): Boolean =
+        toolRouterOn && !lowBattery && LocalLlm.isInstalled(this, LlmModel.Router)
+
+    /** The model's choice of app action, checked against what was actually said. */
+    private suspend fun routeWithTools(text: String): RoutedCommand? {
+        val names = runCatching { ServiceLocator.crmRepository.observeClients().first() }
+            .getOrDefault(emptyList())
+            .map { it.name }
+        val calls = withTimeoutOrNull(8_000) {
+            LocalLlm.callTools(this@AssistantService, ToolRoute.SYSTEM, text, RouterTools())
+        } ?: return null
+        CrashLog.note(this, TAG, "router chose: ${calls.firstOrNull()?.let { "${it.name} ${it.arguments}" }}".take(200))
+        return calls.firstNotNullOfOrNull { ToolRoute.toCommand(it, text, names) }
     }
 
     private fun localBrainReady(): Boolean =

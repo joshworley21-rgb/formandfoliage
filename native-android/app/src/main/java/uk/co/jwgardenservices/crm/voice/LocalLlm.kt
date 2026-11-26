@@ -13,6 +13,8 @@ import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.ThinkingConfig
+import com.google.ai.edge.litertlm.ToolSet
+import com.google.ai.edge.litertlm.tool
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -83,6 +85,7 @@ object LocalLlm {
 
     private var idleJob: Job? = null
     private var loaded: Loaded? = null
+    private var routerEngine: Engine? = null
     private val loadLock = Any()
 
     fun file(context: Context, model: LlmModel = LlmModel.Small): File =
@@ -95,8 +98,9 @@ object LocalLlm {
         it.isFile && it.length() == model.bytes
     }
 
-    /** True when any model is installed. */
-    fun isInstalled(context: Context): Boolean = LlmModel.entries.any { isInstalled(context, it) }
+    /** True when any chat model is installed (the action picker does not count). */
+    fun isInstalled(context: Context): Boolean =
+        LlmModel.entries.any { !it.routesTools && isInstalled(context, it) }
 
     fun savedBytes(context: Context, model: LlmModel = LlmModel.Small): Long =
         maxOf(file(context, model).length(), partFile(context, model).length())
@@ -305,6 +309,89 @@ object LocalLlm {
         Unit
     }
 
+    /** Warm the action picker at the start of a call, like the chat model. */
+    suspend fun warmRouter(context: Context): Unit = withContext(Dispatchers.Default) {
+        idleJob?.cancel()
+        idleJob = null
+        runCatching { loadRouter(context.applicationContext) }
+        Unit
+    }
+
+    /**
+     * Ask the action picker which app function fits [question]. The functions
+     * are only described to the model and never executed here; an empty list
+     * means it chose none, or is not installed, or memory is short.
+     */
+    suspend fun callTools(
+        context: Context,
+        system: String,
+        question: String,
+        tools: ToolSet,
+    ): List<ToolInvocation> = withContext(Dispatchers.Default) {
+        val app = context.applicationContext
+        idleJob?.cancel()
+        idleJob = null
+        val engine = loadRouter(app) ?: return@withContext emptyList()
+        val calls = try {
+            val conversation: Conversation = engine.createConversation(
+                ConversationConfig(
+                    systemInstruction = Contents.of(system),
+                    tools = listOf(tool(tools)),
+                    samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.1),
+                    automaticToolCalling = false,
+                    maxOutputToken = 160,
+                ),
+            )
+            try {
+                val started = System.nanoTime()
+                val message = conversation.sendMessage(question)
+                note(app, LlmModel.Router, "answered", started)
+                logBenchmark(app, LlmModel.Router, conversation)
+                val parsed = message.toolCalls.map { ToolInvocation(it.name, it.arguments) }
+                parsed.ifEmpty {
+                    val raw = message.contents.contents
+                        .filterIsInstance<Content.Text>()
+                        .joinToString("") { it.text }
+                    listOfNotNull(ToolRoute.parseRawCall(raw))
+                }
+            } finally {
+                runCatching { conversation.close() }
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            CrashLog.note(app, TAG, "router failed: ${error.message}")
+            emptyList()
+        }
+        scheduleIdleClose()
+        calls
+    }
+
+    private fun loadRouter(app: Context): Engine? = synchronized(loadLock) {
+        routerEngine?.let { return@synchronized it }
+        val model = LlmModel.Router
+        if (!isInstalled(app, model)) return@synchronized null
+        if (availableMb(app) < model.minFreeMb) {
+            CrashLog.note(app, TAG, "not enough free memory for the action picker")
+            return@synchronized null
+        }
+        runCatching {
+            val started = System.currentTimeMillis()
+            Engine(
+                EngineConfig(
+                    modelPath = file(app, model).absolutePath,
+                    backend = Backend.CPU(),
+                    cacheDir = app.cacheDir.path,
+                ),
+            ).also {
+                it.initialize()
+                CrashLog.note(app, TAG, "${model.id} loaded in ${System.currentTimeMillis() - started} ms")
+            }
+        }.onFailure {
+            CrashLog.note(app, TAG, "${model.id} load failed: ${it.message}")
+        }.getOrNull()?.also { routerEngine = it }
+    }
+
     private fun configFor(
         model: LlmModel,
         system: String,
@@ -394,6 +481,8 @@ object LocalLlm {
         synchronized(loadLock) {
             runCatching { loaded?.engine?.close() }
             loaded = null
+            runCatching { routerEngine?.close() }
+            routerEngine = null
         }
     }
 

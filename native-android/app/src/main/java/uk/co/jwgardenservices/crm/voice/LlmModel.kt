@@ -18,6 +18,8 @@ enum class LlmModel(
     val reasonsByDefault: Boolean,
     /** Slower models take a short prompt: time to the first word is mostly prefill. */
     val leanPrompts: Boolean,
+    /** A model that only picks app actions (function calling); it never answers or chats. */
+    val routesTools: Boolean = false,
 ) {
     Small(
         id = "qwen3-0.6b",
@@ -51,6 +53,18 @@ enum class LlmModel(
         reasonsByDefault = true,
         leanPrompts = true,
     ),
+    Router(
+        id = "functiongemma-mobile-actions",
+        label = "FunctionGemma 270M",
+        fileName = "functiongemma-mobile-actions-q8.litertlm",
+        url = "https://huggingface.co/litert-community/functiongemma-mobile-actions_q8_ekv1024.litertlm/" +
+            "resolve/main/mobile-actions_q8_ekv1024.litertlm",
+        bytes = 284_426_240L,
+        minFreeMb = 700L,
+        reasonsByDefault = false,
+        leanPrompts = true,
+        routesTools = true,
+    ),
     ;
 
     val downloadable: Boolean get() = url != null
@@ -65,6 +79,6 @@ enum class LlmModel(
         fun candidates(preferred: LlmModel, installed: Set<LlmModel>, availableMb: Long): List<LlmModel> =
             listOf(preferred, Small)
                 .distinct()
-                .filter { it in installed && availableMb >= it.minFreeMb }
+                .filter { !it.routesTools && it in installed && availableMb >= it.minFreeMb }
     }
 }
