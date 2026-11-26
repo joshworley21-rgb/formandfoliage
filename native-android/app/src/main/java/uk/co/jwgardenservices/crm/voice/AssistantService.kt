@@ -43,6 +43,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -50,6 +51,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -1934,6 +1936,38 @@ class AssistantService : Service() {
             }
         }
 
+        // 1.7 The on-device model, before any network: it labels what the
+        //     rules and the phrase matcher missed, and answers chat and
+        //     business questions as a stream, speaking each sentence as soon
+        //     as it is written. The cloud below is only for what this cannot
+        //     do, and not used at all when online answers are switched off.
+        var localTried = false
+        if (!quick.requiresCloud && localBrainReady()) {
+            localTried = true
+            val understood = localIntent(text)
+            if (understood != null && (!temporal || understood.intent in dateIndependentIntents)) {
+                CrashLog.note(
+                    this,
+                    TAG,
+                    "intent=local:${understood.intent.wire} in ${System.currentTimeMillis() - started}ms",
+                )
+                runIntent(text, understood)
+                return
+            }
+            if (quick.intent == SpokenIntent.Other && looksLikeQuestion(text) &&
+                !looksLikeFactualQuestion(text) && smallTalk(text) == null
+            ) {
+                if (answerLocally(text)) {
+                    CrashLog.note(
+                        this,
+                        TAG,
+                        "local answer streamed in ${System.currentTimeMillis() - started}ms",
+                    )
+                    return
+                }
+            }
+        }
+
         // 2. Exactly one optional cloud call. The business snapshot is built
         //    only now, and only when a cloud call is actually allowed: a local
         //    answer never pays for the Room/DataStore reads.
@@ -2002,6 +2036,7 @@ class AssistantService : Service() {
         // this fallback and closed again after a minute idle. It can reason
         // about short questions; live facts still prefer the free web APIs.
         if (
+            !localTried &&
             quick.intent == SpokenIntent.Other &&
             chatter == null &&
             memo == null &&
@@ -2254,6 +2289,88 @@ class AssistantService : Service() {
             ${runCatching { AssistantMemory.lastCall(this) }.getOrNull()?.let { "Last call: $it" } ?: ""}
             ${personalityInstruction()}
         """.trimIndent()
+    }
+
+    private fun localBrainReady(): Boolean =
+        localThinking && !lowBattery && LocalLlm.isInstalled(this)
+
+    /** What the on-device model makes of a sentence the rules missed, or null. */
+    private suspend fun localIntent(text: String): IntentResult? {
+        val names = runCatching { ServiceLocator.crmRepository.observeClients().first() }
+            .getOrDefault(emptyList())
+            .map { it.name }
+        val reply = withTimeoutOrNull(12_000) {
+            LocalLlm.generate(
+                this@AssistantService,
+                LocalBrain.intentPrompt(names),
+                text,
+                maxTokens = 20,
+                temperature = 0.1,
+            )
+        }
+        CrashLog.note(this, TAG, "local label: ${reply?.take(60)}")
+        return reply?.let { LocalBrain.parseIntent(it, text, names) }
+    }
+
+    /**
+     * Answer from the on-device model, speaking whatever sentences are ready
+     * while it keeps writing. Returns false when nothing was said, so the
+     * caller can fall through to the next option.
+     */
+    private suspend fun answerLocally(question: String): Boolean {
+        val system = localPrompt()
+        val cap = if (personaLength == PersonaLength.Short) 1 else 2
+        val sentences = Channel<String>(Channel.UNLIMITED)
+        val said = StringBuilder()
+        coroutineScope {
+            val talker = launch {
+                while (true) {
+                    val first = sentences.receiveCatching().getOrNull() ?: break
+                    val batch = StringBuilder(first)
+                    while (true) {
+                        val more = sentences.tryReceive().getOrNull() ?: break
+                        batch.append(' ').append(more)
+                    }
+                    if (said.isNotEmpty()) said.append(' ')
+                    said.append(batch)
+                    say(batch.toString())
+                }
+            }
+            val stream = SpeechStream()
+            var sent = 0
+            fun offer(sentence: String) {
+                if (sent >= cap || sentence.isBlank() || echoesQuestion(sentence, question)) return
+                sent++
+                sentences.trySend(sentence)
+            }
+            withTimeoutOrNull(25_000) {
+                try {
+                    LocalLlm.stream(this@AssistantService, system, question)
+                        .takeWhile { chunk ->
+                            stream.push(chunk).forEach(::offer)
+                            sent < cap
+                        }
+                        .collect { }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    CrashLog.note(this@AssistantService, TAG, "local stream failed: ${error.message}")
+                }
+            }
+            stream.finish()?.let(::offer)
+            sentences.close()
+            talker.join()
+        }
+        if (said.isNotEmpty()) AssistantMemory.lastSpokenReply = said.toString()
+        return said.isNotEmpty()
+    }
+
+    /** The small model sometimes opens by asking the question back. */
+    private fun echoesQuestion(sentence: String, question: String): Boolean {
+        if (!sentence.trimEnd().endsWith("?")) return false
+        val words = cleanWords(sentence)
+        if (words.isEmpty()) return false
+        return words.count { it in cleanWords(question) }.toDouble() / words.size >= 0.6
     }
 
     private fun spokenLocalAnswer(text: String, question: String): String {

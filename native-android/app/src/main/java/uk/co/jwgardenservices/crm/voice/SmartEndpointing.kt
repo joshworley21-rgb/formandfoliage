@@ -10,6 +10,7 @@ package uk.co.jwgardenservices.crm.voice
  *  - ordinary speech: 800 ms
  *  - a hesitation or trailing conjunction: 1,000 ms
  *  - Bluetooth adds 100 ms for the car kit's slower, noisier path
+ *  - a noisy background (engine, road) adds 150 ms
  *
  * Moonshine has no streaming partials, so its loop uses the patient wait.
  */
@@ -18,6 +19,10 @@ object SmartEndpointing {
     const val NORMAL_MS = 800L
     const val PATIENT_MS = 1_000L
     const val BLUETOOTH_EXTRA_MS = 100L
+
+    /** Engine and road noise make the VAD flicker mid-sentence; give it room. */
+    const val NOISY_EXTRA_MS = 150L
+    const val NOISY_FLOOR = 0.02f
 
     private val hesitationTail = Regex(
         "\\b(?:um+|uh+|er+|erm|hmm+|and|plus|also|the|a|an|for|at|with|to|of|but|or|then|" +
@@ -40,7 +45,11 @@ object SmartEndpointing {
         RegexOption.IGNORE_CASE,
     )
 
-    fun waitMs(partial: String, onBluetooth: Boolean = false): Long {
+    fun waitMs(
+        partial: String,
+        onBluetooth: Boolean = false,
+        noiseFloor: Float = 0f,
+    ): Long {
         val clean = partial.trim().trimEnd('.', ',', '!', ';', ':').lowercase()
         val base = when {
             clean.isEmpty() -> NORMAL_MS
@@ -48,6 +57,8 @@ object SmartEndpointing {
             crispTail.containsMatchIn(clean) || completeQuestion.containsMatchIn(clean) -> FAST_MS
             else -> NORMAL_MS
         }
-        return base + if (onBluetooth) BLUETOOTH_EXTRA_MS else 0L
+        return base +
+            (if (onBluetooth) BLUETOOTH_EXTRA_MS else 0L) +
+            (if (noiseFloor >= NOISY_FLOOR) NOISY_EXTRA_MS else 0L)
     }
 }

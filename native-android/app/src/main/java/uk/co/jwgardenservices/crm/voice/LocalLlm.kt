@@ -18,9 +18,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -106,6 +109,8 @@ object LocalLlm {
         context: Context,
         system: String,
         question: String,
+        maxTokens: Int = 80,
+        temperature: Double = 0.4,
     ): String? = withContext(Dispatchers.Default) {
         val app = context.applicationContext
         // A new question cancels the pending idle close; otherwise the timer
@@ -127,9 +132,9 @@ object LocalLlm {
                         samplerConfig = SamplerConfig(
                             topK = 40,
                             topP = 0.95,
-                            temperature = 0.4,
+                            temperature = temperature,
                         ),
-                        maxOutputToken = 80,
+                        maxOutputToken = maxTokens,
                     ),
                 )
             try {
@@ -146,6 +151,49 @@ object LocalLlm {
         scheduleIdleClose()
         answer?.takeIf { it.isNotBlank() }
     }
+
+    /**
+     * The reply as it is generated, so the first sentence can be spoken while
+     * the rest is still being written. Cancelling the collector stops the
+     * model. Emits nothing when the model is missing or memory is short.
+     */
+    fun stream(
+        context: Context,
+        system: String,
+        question: String,
+        maxTokens: Int = 100,
+    ): Flow<String> = flow {
+        val app = context.applicationContext
+        idleJob?.cancel()
+        idleJob = null
+        if (!isInstalled(app)) return@flow
+        if (!hasHeadroom(app)) {
+            CrashLog.note(app, TAG, "not enough memory for local model")
+            return@flow
+        }
+        val llm = load(app) ?: return@flow
+        val conversation: com.google.ai.edge.litertlm.Conversation = llm.createConversation(
+            ConversationConfig(
+                systemInstruction = Contents.of(system),
+                samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.4),
+                maxOutputToken = maxTokens,
+            ),
+        )
+        var finished = false
+        try {
+            conversation.sendMessageAsync(question).collect { message ->
+                val text = message.contents.contents
+                    .filterIsInstance<Content.Text>()
+                    .joinToString("") { it.text }
+                if (text.isNotEmpty()) emit(text)
+            }
+            finished = true
+        } finally {
+            if (!finished) runCatching { conversation.cancelProcess() }
+            runCatching { conversation.close() }
+            scheduleIdleClose()
+        }
+    }.flowOn(Dispatchers.Default)
 
     /**
      * Load in the background while the call is already open, so the first

@@ -3,11 +3,9 @@ package uk.co.jwgardenservices.crm.voice
 /**
  * The fixed set of commands the assistant can act on.
  *
- * The on-device Qwen model was removed in the audit: it was never on the
- * runtime path (the rules answer common commands and the optional cloud
- * classifier handles the rest), yet it cost a 469 MB download and the
- * llama.cpp dependency. These types remain so the rules, the cloud JSON
- * classifier and the action runner share one vocabulary.
+ * The rules, the phrase matcher, the on-device model ([LocalBrain]) and the
+ * optional cloud classifier all label sentences with these types, so one
+ * action runner serves every route.
  */
 enum class SpokenIntent(val wire: String) {
     LogHours("log_hours"),
