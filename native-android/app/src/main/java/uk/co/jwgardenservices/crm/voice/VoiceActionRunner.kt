@@ -258,6 +258,14 @@ class VoiceActionRunner(
 
     fun hasPending(): Boolean = pending != null
 
+    /**
+     * True while the assistant has asked "Which client was that for?" or
+     * "Which one?" — the next transcript is a name, so the ASR corrector can
+     * be more forgiving than it would be for an ordinary command.
+     */
+    fun awaitingClientName(): Boolean =
+        (pending != null && pending?.client == null) || pendingClarification != null
+
     fun clearPending() {
         pending = null
     }
@@ -367,7 +375,8 @@ class VoiceActionRunner(
 
         val hours = spokenHours(text) ?: pending.hours
         val clients = repository.observeClients().first()
-        val client = pending.client ?: clientFor(clients, text)
+        val named = if (pending.client == null) clientsFor(clients, text) else emptyList()
+        val client = pending.client ?: named.firstOrNull()
 
         if (hours == null && client == null) {
             this.pending = null
@@ -390,6 +399,9 @@ class VoiceActionRunner(
             return "Which client was that for? Say a name, or 'new client'."
         }
         this.pending = null
+        if (pending.client == null && named.size > 1) {
+            return saveHoursFor(named, hours, pending.date, transcript)
+        }
         return saveHours(client, hours, pending.date, transcript)
     }
 
@@ -714,10 +726,13 @@ class VoiceActionRunner(
         val hours = spokenHours(text)
         val date = dateFor(text)
         val clients = repository.observeClients().first()
+        // A joint record ("Louisa & George") wins outright; otherwise every
+        // separately named client in the sentence is logged.
+        val named = clientsFor(clients, text)
         // No name spoken: the call briefing just said where the owner is, so
         // use the job on the schedule right now. Today only — "log four hours
         // yesterday" must not land on this afternoon's client.
-        val client = clientFor(clients, text)
+        val client = named.firstOrNull()
             ?: if (date == LocalDate.now()) inferredClient(clients) else null
 
         if (hours == null && client == null) {
@@ -731,7 +746,21 @@ class VoiceActionRunner(
             pending = PendingLog(client = null, date = date, hours = hours)
             return "Which client was that for?"
         }
+        if (named.size > 1) return saveHoursFor(named, hours, date, text)
         return saveHours(client, hours, date, text)
+    }
+
+    /** Log the same duration against every client named in one sentence. */
+    private suspend fun saveHoursFor(
+        clients: List<Client>,
+        hours: Double,
+        date: LocalDate,
+        source: String = "",
+    ): String {
+        if (clients.size == 1) return saveHours(clients.first(), hours, date, source)
+        clients.forEach { saveHours(it, hours, date, source) }
+        val names = clients.joinToString(" and ") { it.name }
+        return fast("${tradeAck()} ${hoursLabel(hours)} for $names.")
     }
 
     private suspend fun saveHours(
@@ -2113,21 +2142,21 @@ class VoiceActionRunner(
             .sortedBy { (_, starts) -> starts }
 
     /**
-     * Match a spoken sentence against a client's name or any of the
-     * nicknames the owner saved for it ("the rectory", "Smiths"). The alias
-     * map is read once per sentence, not per client.
+     * Every client explicitly named in [text]. A joint record ("Louisa &
+     * George") scores 1.0 and wins alone; separate Louisa and George records
+     * both score 0.75 and are returned together.
      */
-    private suspend fun clientFor(clients: List<Client>, text: String): Client? {
+    private suspend fun clientsFor(clients: List<Client>, text: String): List<Client> {
         // A clarification just picked one: use it before anything re-scores.
         resolvedClientId?.let { id ->
             val chosen = clients.firstOrNull { it.id == id }
             if (chosen != null) {
                 resolvedClientId = null
                 lastMentionedClientId = chosen.id
-                return chosen
+                return listOf(chosen)
             }
         }
-        val lower = text.lowercase()
+        val lower = normalizeMatchText(text)
         val aliases = runCatching { repository.allVoiceAliases() }.getOrDefault(emptyList())
         val byClient = aliases.groupBy({ it.first }, { it.second })
         val scored = clients.mapNotNull { client ->
@@ -2137,11 +2166,36 @@ class VoiceActionRunner(
             val score = maxOf(nameScore, aliasScore)
             if (score > 0.0) client to score else null
         }.sortedByDescending { (_, score) -> score }
-        val matched = scored.firstOrNull()?.first
-        if (matched != null) {
-            lastMentionedClientId = matched.id
-            return matched
+        if (scored.isEmpty()) return emptyList()
+        val best = scored.first().second
+        var top = scored.filter { (_, score) -> score >= best - 0.001 }
+            .map { (client, _) -> client }
+        if (top.size > 1) {
+            // "Louisa & George" is one record containing both first names.
+            // Keep the longest exact match and drop the individual records it
+            // already represents, so hours are not logged three times.
+            val ordered = top.sortedByDescending { normalizeMatchText(it.name).length }
+            val chosen = mutableListOf<Client>()
+            for (client in ordered) {
+                val name = normalizeMatchText(client.name)
+                if (chosen.any { normalizeMatchText(it.name).contains(name) }) continue
+                chosen += client
+            }
+            top = chosen
         }
+        lastMentionedClientId = top.first().id
+        return top
+    }
+
+    /**
+     * Match a spoken sentence against a client's name or any of the
+     * nicknames the owner saved for it ("the rectory", "Smiths"). The alias
+     * map is read once per sentence, not per client.
+     */
+    private suspend fun clientFor(clients: List<Client>, text: String): Client? {
+        val found = clientsFor(clients, text)
+        if (found.isNotEmpty()) return found.first()
+        val lower = normalizeMatchText(text)
         // Conversational callback: "it", "that", "them", "their" after a
         // client was named in the previous turn. Only when no name matched.
         val pronoun = lower.split(Regex("\\s+")).any {
@@ -2208,6 +2262,17 @@ class VoiceActionRunner(
         matchScore(clientName, text) > 0.0
 
     /**
+     * Lowercase, "&" as "and", and possessives removed so "George's" and
+     * "George" are the same token to the matcher.
+     */
+    private fun normalizeMatchText(value: String): String = value.lowercase()
+        .replace("&", " and ")
+        .replace(Regex("['\u2019]s\\b"), "")
+        .replace(Regex("(?<=[a-z])['\u2019](?=\\s|$)"), "")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
+    /**
      * How strongly [clientName] appears in [text]: 1.0 for the name spoken
      * whole, 0.75 when every significant word matched exactly, 0.55 when one
      * of them only matched by prefix or a one-letter fuzzy hit.
@@ -2216,12 +2281,13 @@ class VoiceActionRunner(
      * other get a question instead of the first row in the table.
      */
     private fun matchScore(clientName: String, text: String): Double {
-        val name = clientName.lowercase().trim()
+        val name = normalizeMatchText(clientName)
         if (name.isBlank()) return 0.0
-        if (text.contains(name)) return 1.0
+        val normalizedText = normalizeMatchText(text)
+        if (Regex("\\b${Regex.escape(name)}\\b").containsMatchIn(normalizedText)) return 1.0
         val words = name.split(Regex("\\s+")).filter { it.length >= 3 && it !in STOP_WORDS }
         if (words.isEmpty()) return 0.0
-        val tokens = text.split(Regex("\\s+")).filter { it.isNotBlank() }
+        val tokens = normalizedText.split(Regex("\\s+")).filter { it.isNotBlank() }
         var score = 0.75
         for (word in words) {
             val exact = tokens.any { it == word }
@@ -2239,7 +2305,7 @@ class VoiceActionRunner(
     /** Clients matched so closely that a human would ask before acting. */
     private suspend fun ambiguousFor(clients: List<Client>, transcript: String): List<Client> {
         if (resolvedClientId != null) return emptyList()
-        val lower = transcript.lowercase()
+        val lower = normalizeMatchText(transcript)
         val aliases = runCatching { repository.allVoiceAliases() }
             .getOrDefault(emptyList())
             .groupBy({ it.first }, { it.second })

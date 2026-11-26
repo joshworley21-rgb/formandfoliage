@@ -15,8 +15,8 @@ import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
  */
 object AsrHotwords {
     private const val TAG = "AsrHotwords"
-    private const val MAX_NAMES = 40
-    private const val MAX_TOTAL = 90
+    private const val MAX_NAMES = 57
+    private const val MAX_TOTAL = 240
 
     /** Client names for this call, sanitised for the tokenizer. */
     suspend fun names(): List<String> = runCatching {
@@ -43,7 +43,13 @@ object AsrHotwords {
             .flatMap { villagesFromAddress(it.address) }
             .filter { it.length in 3..30 }
             .distinct()
-        val clients = rawClients.map { sanitize(it) }
+        // Full names, first names and couple variants. Narrowband Bluetooth
+        // often drops "Louisa & George" down to a single mangled word, so a
+        // first-name entry gives the corrector something to land on.
+        val clients = rawClients.flatMap { nameVariants(it) }
+            .map { sanitize(it) }
+            .filter { it.length >= 3 }
+            .distinct()
         val villages = rawVillages.map { sanitize(it) }
         val profile = BusinessBrain.load(context)
         val aliases = runCatching {
@@ -61,6 +67,25 @@ object AsrHotwords {
         return (clients + villages + dictionary + aliases + patch).distinct().take(MAX_TOTAL)
     }
 
+    /** Full name, first name, and the "X and Y" / "X Y" couple forms. */
+    private fun nameVariants(raw: String): List<String> {
+        val cleaned = raw.replace("&", " and ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        val tokens = sanitize(cleaned).split(' ')
+            .filter { it.length >= 3 && it !in PERSON_STOP }
+        if (tokens.isEmpty()) return listOf(cleaned)
+        val variants = mutableListOf(cleaned)
+        variants += tokens.first()
+        val lower = cleaned.lowercase().split(Regex("\\s+"))
+        val andAt = lower.indexOf("and")
+        if (andAt in 0 until lower.lastIndex) {
+            variants += lower[andAt + 1]
+            variants += lower.filterIndexed { index, _ -> index != andAt }.joinToString(" ")
+        }
+        return variants
+    }
+
     /** Last meaningful address line, with the postcode removed. */
     private fun villagesFromAddress(address: String?): List<String> {
         if (address.isNullOrBlank()) return emptyList()
@@ -76,7 +101,11 @@ object AsrHotwords {
             .takeLast(2)
     }
 
-    fun correct(text: String, names: List<String>): String {
+    fun correct(
+        text: String,
+        names: List<String>,
+        aggressive: Boolean = false,
+    ): String {
         if (text.isBlank() || names.isEmpty()) return text
         val tokens = text.split(Regex("\\s+")).toMutableList()
         var index = 0
@@ -87,7 +116,7 @@ object AsrHotwords {
             for (name in names) {
                 val end = index + words(name)
                 if (end > tokens.size) continue
-                if (slice(tokens, index, end) == name) {
+                if (slice(tokens, index, end).equals(name, ignoreCase = true)) {
                     exactEnd = end
                     break
                 }
@@ -97,22 +126,31 @@ object AsrHotwords {
                 continue
             }
 
-            // Otherwise take the closest near miss at this position.
+            // Otherwise take the closest near miss at this position. The
+            // window is the name's own word count (1-gram for a first name,
+            // 2-gram for "Louisa George"), and a phonetic code catches the
+            // narrowband symptoms where the leading consonant is lost.
             var bestName: String? = null
             var bestEnd = index
-            var bestDistance = Int.MAX_VALUE
+            var bestScore = Int.MAX_VALUE
             for (name in names) {
                 val end = index + words(name)
                 if (end > tokens.size) continue
-                val allowed = allowedEdits(name)
-                if (allowed == 0) continue
-                val heard = slice(tokens, index, end)
-                if (abs(heard.length - name.length) > allowed) continue
+                val allowed = allowedEdits(name) + if (aggressive) 1 else 0
+                val heard = slice(tokens, index, end).uppercase()
+                val lengthGap = abs(heard.length - name.length)
                 val distance = distance(heard, name)
-                if (distance in 1..allowed && distance < bestDistance) {
+                val fuzzy = distance in 1..allowed
+                val phonetic = !fuzzy && heard.length >= 3 &&
+                    lengthGap <= (if (aggressive) 4 else 2) &&
+                    heard.lowercase() !in COMMON_WORDS &&
+                    phoneticMatch(heard, name)
+                if (!fuzzy && !phonetic) continue
+                val score = if (fuzzy) distance else allowed + 1 + lengthGap
+                if (score < bestScore) {
                     bestName = name
                     bestEnd = end
-                    bestDistance = distance
+                    bestScore = score
                 }
             }
             if (bestName == null) {
@@ -152,6 +190,48 @@ object AsrHotwords {
         .replace(Regex("\\s+"), " ")
         .trim()
 
+    /**
+     * Soundex with the leading consonant deliberately ignored on the tail
+     * comparison: "WEAS" and "LOUISA" both reduce to 200 there, which is how
+     * a narrowband headset drops the first letter.
+     */
+    private fun phoneticMatch(heard: String, name: String): Boolean {
+        val heardWords = heard.uppercase().split(Regex("\\s+")).filter { it.isNotBlank() }
+        val nameWords = name.uppercase().split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (heardWords.size != nameWords.size) return false
+        return heardWords.zip(nameWords).all { (a, b) ->
+            val codeA = soundex(a)
+            val codeB = soundex(b)
+            codeA.isNotEmpty() && codeB.isNotEmpty() &&
+                (codeA == codeB ||
+                    (codeA.length == 4 && codeB.length == 4 &&
+                        codeA.drop(1) == codeB.drop(1)))
+        }
+    }
+
+    private fun soundex(value: String): String {
+        val letters = value.filter { it in 'A'..'Z' }
+        if (letters.isEmpty()) return ""
+        val code = StringBuilder().append(letters[0])
+        var previous = digit(letters[0])
+        for (index in 1 until letters.length) {
+            val current = digit(letters[index])
+            if (current != '0' && current != previous) code.append(current)
+            previous = current
+        }
+        return (code.toString() + "000").take(4)
+    }
+
+    private fun digit(letter: Char): Char = when (letter) {
+        'B', 'F', 'P', 'V' -> '1'
+        'C', 'G', 'J', 'K', 'Q', 'S', 'X', 'Z' -> '2'
+        'D', 'T' -> '3'
+        'L' -> '4'
+        'M', 'N' -> '5'
+        'R' -> '6'
+        else -> '0'
+    }
+
     private fun distance(a: String, b: String): Int {
         var previous = IntArray(b.length + 1) { it }
         var current = IntArray(b.length + 1)
@@ -167,4 +247,15 @@ object AsrHotwords {
         }
         return previous[b.length]
     }
+
+    private val PERSON_STOP = setOf(
+        "THE", "AND", "LTD", "LIMITED", "LLP", "MR", "MRS", "MS", "MISS", "DR",
+    )
+
+    /** Command words a tail-only phonetic hit must never rewrite. */
+    private val COMMON_WORDS = setOf(
+        "TODAY", "TOMORROW", "YESTERDAY", "VISIT", "HOURS", "HOUR", "MARK",
+        "LOG", "DONE", "CLIENT", "WHICH", "THAT", "THIS", "WHAT", "WHEN",
+        "WHERE", "PLEASE", "THANKS", "MORNING", "AFTERNOON", "SCHEDULE",
+    )
 }

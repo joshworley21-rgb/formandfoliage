@@ -6,6 +6,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.Manifest
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothClass
+import android.bluetooth.BluetoothManager
 import android.app.ActivityManager
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -208,7 +211,7 @@ class AssistantService : Service() {
     private var askFollowUp = true
 
     /** Selected recogniser, mirrored so the quick-resume check is synchronous. */
-    private var selectedEngine = AsrEngine.Moonshine
+    private var selectedEngine = AsrEngine.Nemotron
 
     /** Set once the caller has said something in this call. */
     @Volatile
@@ -893,6 +896,9 @@ class AssistantService : Service() {
             actions.chasePending() || actions.clarificationPending() ||
             actions.readAllPending() || actions.hasPending()
         speech.fastPath = speech.captureInterjections
+        // The next utterance answers "Which client?" — let the corrector be
+        // more forgiving about a narrowband misheard name.
+        speech.expectClientName = actions.awaitingClientName()
         AssistantMemory.lastSpokenReply = stripped
         _thinking.value = false
         addTurn(AssistantTurn(fromUser = false, text = stripped))
@@ -1240,6 +1246,7 @@ class AssistantService : Service() {
         cloudVoice?.stop()
         _speaking.value = false
         speech.stopListening()
+        speech.expectClientName = false
         abandonAudioFocus()
         releaseCallAudio()
         releaseCallWakeLock()
@@ -1351,9 +1358,34 @@ class AssistantService : Service() {
                     AudioDeviceInfo.TYPE_USB_HEADSET,
                     AudioDeviceInfo.TYPE_WIRED_HEADSET,
                 )
-                val device = manager.availableCommunicationDevices
-                    .firstOrNull { it.type in preferences }
+                // Earbuds beat a car kit when both are connected: a car
+                // hands-free mic sits across the cabin and sounds further
+                // away, while the earbuds are on the owner's head.
+                val adapter = runCatching {
+                    getSystemService(BluetoothManager::class.java)?.adapter
+                }.getOrNull()
+                val ordered = manager.availableCommunicationDevices
+                    .filter { it.type in preferences }
+                    .sortedWith(
+                        compareBy(
+                            { bluetoothRouteRank(it, adapter) },
+                            { preferences.indexOf(it.type) },
+                        ),
+                    )
+                val device = ordered.firstOrNull()
                 val current = manager.communicationDevice
+                if (device != null && ordered.size > 1 &&
+                    bluetoothRouteRank(device, adapter) <
+                    bluetoothRouteRank(ordered[1], adapter) &&
+                    bluetoothRouteRank(ordered[1], adapter) == 2
+                ) {
+                    CrashLog.note(
+                        this,
+                        TAG,
+                        "car audio deprioritised (${ordered[1].productName}); " +
+                            "using ${device.productName}",
+                    )
+                }
                 // A Bluetooth headset needs communication mode for HFP/SCO.
                 // Keep it active so Phonon's AudioTrack leaves over the same
                 // SCO link instead of drifting to A2DP or the earpiece.
@@ -1413,6 +1445,35 @@ class AssistantService : Service() {
                 if (sco) manager.setSpeakerphoneOn(false)
             }
         }.onFailure { CrashLog.record(this, it, "routeCallAudio") }
+    }
+
+    /**
+     * Sort key for Bluetooth communication devices: 0 for headphones and
+     * earbuds, 1 for an unknown headset, 2 for a car hands-free kit. The
+     * product name is checked first because some earbuds still report the
+     * generic AUDIO_VIDEO_HANDSFREE class; then BluetoothClass decides.
+     */
+    private fun bluetoothRouteRank(device: AudioDeviceInfo, adapter: BluetoothAdapter?): Int {
+        val name = device.productName?.toString()?.uppercase().orEmpty()
+        if (CAR_NAMES.any { name.contains(it) }) return 2
+        if (HEADPHONE_NAMES.any { name.contains(it) }) return 0
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+            (device.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                device.type == AudioDeviceInfo.TYPE_BLE_HEADSET)
+        ) {
+            val remote = runCatching { adapter?.getRemoteDevice(device.address) }.getOrNull()
+            val deviceClass = runCatching { remote?.bluetoothClass?.deviceClass }.getOrNull()
+            return when (deviceClass) {
+                BluetoothClass.Device.AUDIO_VIDEO_CAR_AUDIO,
+                BluetoothClass.Device.AUDIO_VIDEO_HANDSFREE,
+                -> 2
+                BluetoothClass.Device.AUDIO_VIDEO_WEARABLE_HEADSET,
+                BluetoothClass.Device.AUDIO_VIDEO_HEADPHONES,
+                -> 0
+                else -> 1
+            }
+        }
+        return 1
     }
 
     /** True when a Bluetooth device can carry media output for this call. */
@@ -2655,6 +2716,30 @@ class AssistantService : Service() {
 
     companion object {
         const val TAG = "AssistantService"
+
+        /** Product-name hints for a vehicle kit when BluetoothClass is vague. */
+        val CAR_NAMES = listOf(
+            "MY CAR",
+            "CAR AUDIO",
+            "CAR KIT",
+            "HANDSFREE",
+            "HANDS-FREE",
+            "VIVARO",
+        )
+
+        /** Names that identify earbuds even when their class looks like HFP. */
+        val HEADPHONE_NAMES = listOf(
+            "SOUNDPEATS",
+            "EARBUD",
+            "EARPHONE",
+            "HEADPHONE",
+            "HEADSET",
+            "AIRPOD",
+            "BUDS",
+            "PODS",
+            "Q40",
+        )
+
         const val CHANNEL_ID = "assistant_mic"
         const val NOTIFICATION_ID = 41
         const val CALL_BUTTON_DOUBLE_MS = 900L

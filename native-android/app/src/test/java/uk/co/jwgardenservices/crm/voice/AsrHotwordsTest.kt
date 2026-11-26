@@ -54,6 +54,16 @@ class AsrHotwordsTest {
     }
 
     @Test
+    fun `a dropped leading consonant still finds the first name`() {
+        // Narrowband Bluetooth turns "Louisa" into "weas": W200 and L200
+        // share the same Soundex tail, so the first-name index recovers it.
+        assertEquals(
+            "MARK LOUISA TODAY",
+            AsrHotwords.correct("MARK WEAS TODAY", listOf("LOUISA")),
+        )
+    }
+
+    @Test
     fun `an exact name wins over a similar shorter name`() {
         assertEquals("SMITHS", AsrHotwords.correct("SMITHS", listOf("SMITHS", "SMITH")))
         assertEquals("SMITH", AsrHotwords.correct("SMITH", listOf("SMITHS", "SMITH")))

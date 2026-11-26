@@ -115,7 +115,7 @@ private class InputAgc {
  *
  * Hardware AGC is usually unavailable on that route, so a 100 Hz single-pole
  * high-pass removes the low rumble first, then a light AGC lifts the voice
- * toward RMS 0.12. The gain is limited to 1.5–3.5x and ramped per 100 ms frame,
+ * toward RMS 0.12. The gain is limited to 1.4–2.6x and ramped per 100 ms frame,
  * so it does not pump or suddenly amplify a gust of wind. The result is
  * softly clipped to ±1.0 before it reaches Silero VAD or Moonshine.
  */
@@ -144,7 +144,7 @@ private class HeadsetAudio {
         }
         val rms = sqrt(energy / raw.size).toFloat()
         val desired = if (rms < 0.0025f) {
-            1.5f
+            1.4f
         } else {
             (TARGET_RMS / rms).coerceIn(MIN_GAIN, MAX_GAIN).toFloat()
         }
@@ -165,8 +165,8 @@ private class HeadsetAudio {
 
     private companion object {
         const val TARGET_RMS = 0.12f
-        const val MIN_GAIN = 1.5f
-        const val MAX_GAIN = 3.5f
+        const val MIN_GAIN = 1.4f
+        const val MAX_GAIN = 2.6f
 
         /** 100 Hz one-pole high-pass at 16 kHz. */
         const val HPF_ALPHA = 0.9622f
@@ -277,6 +277,14 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     var fastPath = false
 
     /**
+     * Set while the assistant has asked which client was meant. The name
+     * corrector then widens its phonetic/Levenshtein window, because a
+     * narrowband headset answer is often one mangled word.
+     */
+    @Volatile
+    var expectClientName = false
+
+    /**
      * Called with the finalised interjection instead of the transcript queue,
      * so the answer to a question the assistant was still asking skips the
      * processing pause entirely. Fired from the recognition thread.
@@ -306,6 +314,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     /** True when this session explicitly pinned the built-in microphone. */
     @Volatile
     private var forcedBuiltInMic = false
+
+    /** True when a Bluetooth headset is connected for this listening session. */
+    @Volatile
+    private var bluetoothRouteAvailable = false
 
     /** Quiet "Mm-hmm" while the owner is talking; wired headsets only. */
     @Volatile
@@ -631,23 +643,50 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         listenWanted = true
         headsetAudio.reset()
 
-        val selected = engineOverride
+        var selected = engineOverride
             ?: AssistantPreferences.asrEngineFlow(context).first()
         CrashLog.note(context, TAG, "startListening: engine=${selected.name}")
-        offlineMode = selected == AsrEngine.Moonshine && MoonshineDownloader.isInstalled(context)
+        val moonshineInstalled = MoonshineDownloader.isInstalled(context)
+        val nemotronInstalled = NemotronDownloader.isInstalled(context)
+        if (selected == AsrEngine.Nemotron && !nemotronInstalled) {
+            if (!moonshineInstalled) {
+                fail("Nemotron is not downloaded. Open Assistant settings to install it.")
+                return
+            }
+            CrashLog.note(
+                context,
+                TAG,
+                "Nemotron is not installed; falling back to Moonshine",
+            )
+            selected = AsrEngine.Moonshine
+        }
+        offlineMode = selected == AsrEngine.Moonshine && moonshineInstalled
         if (selected == AsrEngine.Moonshine && !offlineMode) {
             fail("Moonshine is not downloaded. Open Assistant settings to install it.")
             return
         }
-        val onlineEngine = when {
+        var onlineEngine = when {
             offlineMode -> null
-            selected == AsrEngine.Nemotron && NemotronDownloader.isInstalled(context) ->
-                ensureNemotron()
-            selected == AsrEngine.Nemotron -> {
-                fail("Nemotron is not downloaded. Open Assistant settings to install it.")
+            selected == AsrEngine.Nemotron -> ensureNemotron()
+            else -> null
+        }
+        if (selected == AsrEngine.Nemotron && onlineEngine == null) {
+            if (!moonshineInstalled) {
+                fail("Nemotron could not be loaded, and Moonshine is not installed.")
                 return
             }
-            else -> null
+            // A load failure (including a retired Nemotron after native
+            // deaths) must not leave the call dead. Continue this session on
+            // Moonshine and clear the error the failed load just posted.
+            CrashLog.note(
+                context,
+                TAG,
+                "Nemotron unavailable; falling back to Moonshine",
+            )
+            selected = AsrEngine.Moonshine
+            offlineMode = true
+            onlineEngine = null
+            _state.update { it.copy(phase = Phase.Ready, message = null, partial = "") }
         }
         if (!offlineMode && onlineEngine == null) return
         // Load the tiny punctuation model off the call path; the first
@@ -673,6 +712,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             ?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
             ?.any { it.type in BLUETOOTH_OUTPUT_TYPES } == true
         preferPhoneMic = preferSetting && bluetoothConnected
+        bluetoothRouteAvailable = bluetoothConnected
         // Prefer-phone-mic captures on the built-in VOICE_RECOGNITION source
         // at 16 kHz while Bluetooth carries the reply as normal media audio.
         val micSource = silentFallbackSource
@@ -886,7 +926,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         // gain lifts it and the VAD threshold stays low enough to hear speech.
         val onBluetooth = record.routedDevice?.type in BLUETOOTH_INPUT_TYPES
         val headsetRoute = !forcedBuiltInMic &&
-            record.routedDevice?.type in HEADSET_ROUTE_TYPES
+            (record.routedDevice?.type in HEADSET_ROUTE_TYPES || bluetoothRouteAvailable)
         val fallbackGain = if (gainController == null) SOFTWARE_MIC_GAIN else 1f
         val vad = createVad(
             if (headsetRoute) VAD_THRESHOLD_HEADSET else VAD_THRESHOLD_SPEAKER,
@@ -895,7 +935,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             context,
             TAG,
             if (headsetRoute) {
-                "mic HPF+AGC (100Hz, target=0.12, 1.5-3.5x) " +
+                "mic HPF+AGC (100Hz, target=0.12, 1.4-2.6x) " +
                     "vad=${"%.2f".format(VAD_THRESHOLD_HEADSET)}"
             } else {
                 "mic gain=${"%.1f".format(fallbackGain)}x " +
@@ -1235,7 +1275,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     private fun processOffline(record: AudioRecord) {
         val onBluetooth = record.routedDevice?.type in BLUETOOTH_INPUT_TYPES
         val headsetRoute = !forcedBuiltInMic &&
-            record.routedDevice?.type in HEADSET_ROUTE_TYPES
+            (record.routedDevice?.type in HEADSET_ROUTE_TYPES || bluetoothRouteAvailable)
         val fallbackGain = if (gainController == null) SOFTWARE_MIC_GAIN else 1f
         val vad = createVad(
             if (headsetRoute) VAD_THRESHOLD_HEADSET else VAD_THRESHOLD_SPEAKER,
@@ -1244,7 +1284,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             context,
             TAG,
             if (headsetRoute) {
-                "moonshine mic HPF+AGC (100Hz, target=0.12, 1.5-3.5x) " +
+                "moonshine mic HPF+AGC (100Hz, target=0.12, 1.4-2.6x) " +
                     "vad=${"%.2f".format(VAD_THRESHOLD_HEADSET)}"
             } else {
                 "moonshine mic gain=${"%.1f".format(fallbackGain)}x " +
@@ -1681,7 +1721,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     }
 
     private fun publish(text: String) {
-        val corrected = AsrHotwords.correct(text, hotwordNames)
+        val corrected = AsrHotwords.correct(text, hotwordNames, aggressive = expectClientName)
+        if (expectClientName) {
+            CrashLog.note(context, TAG, "client-name correction aggressive: $corrected")
+        }
         // Punctuation and truecase on the finished sentence only: it makes a
         // dictated note read like English and gives the multi-command
         // splitter real sentence boundaries. Off unless the model is

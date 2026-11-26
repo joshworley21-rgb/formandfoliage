@@ -174,7 +174,9 @@ object AssistantPreferences {
     }
 
     fun asrEngineFlow(context: Context): Flow<AsrEngine> = context.assistantDataStore.data.map { preferences ->
-        AsrEngine.entries.firstOrNull { it.name == preferences[ASR_ENGINE_KEY] } ?: AsrEngine.Moonshine
+        // Nemotron is the default: it streams live words and is more accurate
+        // on a Bluetooth headset. Moonshine remains the automatic fallback.
+        AsrEngine.entries.firstOrNull { it.name == preferences[ASR_ENGINE_KEY] } ?: AsrEngine.Nemotron
     }
 
     suspend fun setAsrEngine(context: Context, engine: AsrEngine) {
