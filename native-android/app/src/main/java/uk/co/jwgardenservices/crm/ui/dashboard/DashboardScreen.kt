@@ -198,7 +198,7 @@ fun DashboardScreen(
                         else -> "Evening"
                     }}, ${VoiceLines.OWNER_NAME}",
                     subtitle = today.formatWeekday(),
-                    footerPadding = 112.dp,
+                    footerPadding = 126.dp,
                     largeTitle = true,
                     topActions = {
                         HeaderIconAction(
@@ -248,7 +248,7 @@ fun DashboardScreen(
                         alt = false,
                         modifier = Modifier
                             .weight(1f)
-                            .height(112.dp),
+                            .height(126.dp),
                     )
                     HomeStat(
                         label = "THIS MONTH",
@@ -260,10 +260,19 @@ fun DashboardScreen(
                         alt = true,
                         modifier = Modifier
                             .weight(1f)
-                            .height(112.dp),
+                            .height(126.dp),
                     )
                 }
         }
+
+        ReminderPill(
+            reminders = reminders,
+            unbilledTotal = unbilledTotal,
+            onClick = onOpenInvoices,
+            modifier = Modifier
+                .padding(horizontal = JwTokens.screenPadding)
+                .padding(bottom = 12.dp),
+        )
 
         LazyColumn(
             modifier = Modifier
@@ -272,7 +281,7 @@ fun DashboardScreen(
             contentPadding = PaddingValues(
                 start = JwTokens.screenPadding,
                 end = JwTokens.screenPadding,
-                bottom = 40.dp,
+                bottom = 48.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
@@ -280,15 +289,6 @@ fun DashboardScreen(
             item {
                 ErrorState(state.error!!, viewModel::refresh)
             }
-        }
-
-        item {
-            ReminderPill(
-                reminders = reminders,
-                unbilledTotal = unbilledTotal,
-                onClick = onOpenInvoices,
-                modifier = Modifier.padding(bottom = 12.dp),
-            )
         }
 
         item {
@@ -380,36 +380,64 @@ private fun HomeStat(
     val palette = JwTheme.colors
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(JwTokens.cardRadius),
+        shape = RoundedCornerShape(JwTokens.controlRadius),
         color = if (alt) palette.kpiCardAlt else palette.kpiCard,
         contentColor = palette.onForestMuted,
         border = BorderStroke(1.dp, palette.kpiBorder),
-        shadowElevation = 6.dp,
+        shadowElevation = 8.dp,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxHeight()
-                .padding(horizontal = 14.dp, vertical = 13.dp),
+                .padding(14.dp),
         ) {
             Text(
-                text = label,
+                text = label.uppercase(),
                 style = MaterialTheme.typography.labelSmall,
-                color = palette.onForestMuted.copy(alpha = 0.55f),
+                color = palette.onForestMuted.copy(alpha = 0.62f),
+                maxLines = 1,
             )
             Spacer(Modifier.height(4.dp))
             Text(
                 text = if (projected) projectedValue else value,
                 style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
                 color = palette.brass,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(2.dp))
             Text(
                 text = detail,
                 style = MaterialTheme.typography.bodySmall,
                 color = palette.onForestMuted.copy(alpha = 0.78f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.weight(1f))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            if (hint != null) {
+                Text(
+                    text = hint,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontSize = 9.sp,
+                        lineHeight = 11.sp,
+                        letterSpacing = (-0.15).sp,
+                    ),
+                    fontWeight = FontWeight.Medium,
+                    color = palette.onForestMuted.copy(alpha = 0.9f),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(6.dp))
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Box(
                     modifier = Modifier
                         .size(4.dp)
@@ -431,17 +459,6 @@ private fun HomeStat(
                             CircleShape,
                         ),
                 )
-                if (hint != null) {
-                    Spacer(Modifier.width(7.dp))
-                    Text(
-                        text = hint,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Medium,
-                        color = palette.onForestMuted.copy(alpha = 0.92f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
             }
         }
     }
