@@ -232,6 +232,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @Volatile
     private var activeEngine = AsrEngine.Moonshine
 
+    /** A raw-mic fallback chosen after a silent source; clears with the service. */
+    @Volatile
+    private var silentFallbackSource: MicSource? = null
+
     /** Quiet "Mm-hmm" while the owner is talking; wired headsets only. */
     @Volatile
     var onBackchannel: (() -> Unit)? = null
@@ -578,13 +582,17 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             return
         }
 
-        val preferredSource = AssistantPreferences.micSourceFlow(context).first()
-        val micSource = resolveMicSource(preferredSource)
+        val savedSource = AssistantPreferences.micSourceFlow(context).first()
+        val micSource = silentFallbackSource ?: savedSource
         bargeEnabled = true
         CrashLog.note(
             context,
             TAG,
-            "mic=${micSource.name}${if (micSource != preferredSource) " (auto from ${preferredSource.name})" else ""}",
+            "mic=${micSource.name}" +
+                when {
+                    silentFallbackSource != null -> " (silent-source fallback from ${savedSource.name})"
+                    else -> ""
+                },
         )
         val record = try {
             withContext(Dispatchers.IO) { createAudioRecord(micSource.androidSource) }
@@ -704,19 +712,30 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     // --- audio loop -------------------------------------------------------
 
     /**
-     * Communication (VOICE_COMMUNICATION) is silent on this Samsung when the
-     * built-in mic is used: peaks stay at 0.00 while Recognition hears normally.
-     * Switch and persist Recognition rather than leaving the call deaf.
+     * A source can open cleanly yet deliver a flat-zero signal: Samsung does
+     * this for VOICE_COMMUNICATION on the loudspeaker, and Bluetooth SCO can
+     * do it when the headset does not hand its mic to the app. Fall back to
+     * the raw microphone without changing the owner's saved setting.
      */
-    private fun healSilentCommunication(record: AudioRecord) {
-        CrashLog.note(context, TAG, "Communication mic silent; switching to Recognition")
+    private fun healSilentInput(record: AudioRecord) {
+        val current = record.audioSource
+        if (silentFallbackSource == MicSource.Phone) {
+            CrashLog.note(context, TAG, "built-in phone mic is silent too; leaving source as-is")
+            return
+        }
+        // Phone is VOICE_RECOGNITION pinned to the built-in mic: it bypasses
+        // both Samsung's silent communication path and a Bluetooth HFP mic
+        // that never handed audio to the app.
+        silentFallbackSource = MicSource.Phone
+        CrashLog.note(
+            context,
+            TAG,
+            "mic source $current delivered no signal; retrying with built-in phone mic",
+        )
         Thread({
-            kotlinx.coroutines.runBlocking {
-                AssistantPreferences.setMicSource(context, MicSource.Recognition)
-            }
             listening = false
             runCatching { record.stop() }
-            Thread.sleep(700)
+            Thread.sleep(500)
             if (!listenWanted) return@Thread
             runCatching { kotlinx.coroutines.runBlocking { startListening() } }
         }, "mic-heal").start()
@@ -762,10 +781,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             var beatDecodeMs = 0L
             var speechStartedAt = 0L
             var lastBackchannelAt = 0L
-            val checkCommunication = record.audioSource == MediaRecorder.AudioSource.VOICE_COMMUNICATION &&
-                record.routedDevice?.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_MIC
-            var earlyFrames = 0
-            var earlyPeak = 0f
+            val checkSilentInput = true
+            var silentFrames = 0
+            var silentPeak = 0f
+            var sawSignal = false
             val wired = record.routedDevice?.type in setOf(
                 android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
                 android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
@@ -840,13 +859,19 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 }
                 rawBeatPeak = maxOf(rawBeatPeak, framePeak)
                 inputPeak = maxOf(inputPeak * 0.985f, framePeak)
-                if (checkCommunication && earlyFrames < 400) {
-                    earlyFrames++
-                    earlyPeak = maxOf(earlyPeak, framePeak)
-                    if (earlyFrames == 400 && earlyPeak < 0.004f) {
-                        healSilentCommunication(record)
+                if (framePeak > 0.0025f) sawSignal = true
+                if (checkSilentInput && !sawSignal && !hasSpeech) {
+                    silentFrames++
+                    silentPeak = maxOf(silentPeak, framePeak)
+                    // 2.5 s of a digitally flat input is not a quiet room; it
+                    // is a route that never delivered the mic.
+                    if (silentFrames >= 25 && silentPeak < 0.0025f) {
+                        healSilentInput(record)
                         return
                     }
+                } else {
+                    silentFrames = 0
+                    silentPeak = 0f
                 }
                 val frameRms = sqrt(frameEnergy / raw.size).toFloat()
                 beatRms = maxOf(beatRms, frameRms)
@@ -1057,10 +1082,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         var noiseFloor = 0.008f
         var speechStartedAt = 0L
         var lastBackchannelAt = 0L
-        val checkCommunication = record.audioSource == MediaRecorder.AudioSource.VOICE_COMMUNICATION &&
-            record.routedDevice?.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_MIC
-        var earlyFrames = 0
-        var earlyPeak = 0f
+        val checkSilentInput = true
+        var silentFrames = 0
+        var silentPeak = 0f
+        var sawSignal = false
         val wired = record.routedDevice?.type in setOf(
             android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
             android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
@@ -1119,13 +1144,18 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 var energy = 0.0
                 for (sample in raw) energy += sample * sample
                 val frameRms = sqrt(energy / raw.size).toFloat()
-                if (checkCommunication && earlyFrames < 400) {
-                    earlyFrames++
-                    earlyPeak = maxOf(earlyPeak, kotlin.math.abs(raw.maxOrNull() ?: 0f))
-                    if (earlyFrames == 400 && earlyPeak < 0.004f) {
-                        healSilentCommunication(record)
+                val framePeak = kotlin.math.abs(raw.maxOrNull() ?: 0f)
+                if (framePeak > 0.0025f) sawSignal = true
+                if (checkSilentInput && !sawSignal && !hasSpeech) {
+                    silentFrames++
+                    silentPeak = maxOf(silentPeak, framePeak)
+                    if (silentFrames >= 25 && silentPeak < 0.0025f) {
+                        healSilentInput(record)
                         return
                     }
+                } else {
+                    silentFrames = 0
+                    silentPeak = 0f
                 }
                 noiseFloor = if (frameRms < noiseFloor) {
                     noiseFloor * 0.8f + frameRms * 0.2f
@@ -1411,36 +1441,6 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     }
 
     // --- setup ------------------------------------------------------------
-
-    /**
-     * Bluetooth and wired headsets work best on the communication source:
-     * that is the path with platform AEC and the car kit's own echo handling.
-     * The phone's built-in mic keeps the owner's explicit choice, including
-     * the accuracy-first Recognition setting.
-     */
-    private fun resolveMicSource(preferred: MicSource): MicSource {
-        if (preferred == MicSource.Phone) return preferred
-        val manager = context.getSystemService(AudioManager::class.java) ?: return preferred
-        val headset = manager.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull {
-            it.type in setOf(
-                AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
-                AudioDeviceInfo.TYPE_WIRED_HEADSET,
-                AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
-                AudioDeviceInfo.TYPE_USB_HEADSET,
-                AudioDeviceInfo.TYPE_USB_DEVICE,
-            )
-        } ?: return preferred
-        return if (headset.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
-            headset.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
-            headset.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
-            headset.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
-            headset.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES
-        ) {
-            MicSource.Communication
-        } else {
-            preferred
-        }
-    }
 
     @SuppressLint("MissingPermission") // checked by startListening before this point
     private fun createAudioRecord(source: Int): AudioRecord {
