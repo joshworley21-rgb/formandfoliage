@@ -82,6 +82,7 @@ import uk.co.jwgardenservices.crm.voice.PersonaHumour
 import uk.co.jwgardenservices.crm.voice.PersonaLength
 import uk.co.jwgardenservices.crm.voice.PersonaTone
 import uk.co.jwgardenservices.crm.voice.PronunciationDictionary
+import uk.co.jwgardenservices.crm.voice.SpeechDenoiser
 import uk.co.jwgardenservices.crm.voice.SpeechEngine
 import uk.co.jwgardenservices.crm.ui.common.CompactScreenHeader
 import uk.co.jwgardenservices.crm.ui.common.SegmentedPillTabs
@@ -123,6 +124,10 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = true)
     val drivingMode by AssistantPreferences.drivingModeFlow(context)
         .collectAsStateWithLifecycle(initialValue = false)
+    val denoise by AssistantPreferences.denoiseFlow(context)
+        .collectAsStateWithLifecycle(initialValue = false)
+    val denoiseState by SpeechDenoiser.state.collectAsStateWithLifecycle()
+    var denoiseInstalled by remember { mutableStateOf(SpeechDenoiser.isInstalled(context)) }
     val autoDrivingMode by AssistantPreferences.autoDrivingModeFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
     val personaTone by AssistantPreferences.personaToneFlow(context)
@@ -245,6 +250,13 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
             is NemotronDownloader.State.Working -> Unit
             else -> nemotronSaved = NemotronDownloader.savedBytes(context)
+        }
+    }
+    LaunchedEffect(denoiseState) {
+        if (denoiseState is SpeechDenoiser.State.Done) {
+            denoiseInstalled = true
+            AssistantPreferences.setDenoise(context, true)
+            SpeechDenoiser.clearResult()
         }
     }
     LaunchedEffect(punctuationState) {
@@ -521,6 +533,44 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
+                }
+            }
+        }
+
+        SectionCard(
+            title = "Noise suppression",
+            subtitle = "Engine and road noise.",
+            leadingIcon = Icons.Outlined.Mic,
+        ) {
+            Column(
+                modifier = Modifier.padding(JwTokens.cardPadding),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                SettingSwitchRow(
+                    title = "Clean up the microphone",
+                    description = "A tiny on-device model (0.5 MB) removes engine, road and wind " +
+                        "noise before the words are recognised. Try it in the van and switch " +
+                        "it off if names get worse.",
+                    checked = denoise && denoiseInstalled,
+                    onCheckedChange = { enabled ->
+                        when {
+                            !enabled -> scope.launch { AssistantPreferences.setDenoise(context, false) }
+                            denoiseInstalled -> scope.launch { AssistantPreferences.setDenoise(context, true) }
+                            else -> SpeechDenoiser.start(context)
+                        }
+                    },
+                )
+                when (val state = denoiseState) {
+                    is SpeechDenoiser.State.Working -> Text(
+                        text = "Downloading the noise model…",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    is SpeechDenoiser.State.Failed -> Text(
+                        text = state.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    else -> Unit
                 }
             }
         }

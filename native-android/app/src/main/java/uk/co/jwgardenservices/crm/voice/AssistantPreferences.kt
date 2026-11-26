@@ -83,6 +83,7 @@ private val OPENAI_VOICE_KEY = stringPreferencesKey("openai_voice")
 private val PIPER_KEY = stringPreferencesKey("piper_voice")
 private val MIC_SOURCE_KEY = stringPreferencesKey("mic_source")
 private val PREFER_PHONE_MIC_KEY = booleanPreferencesKey("prefer_phone_mic")
+private val DENOISE_KEY = booleanPreferencesKey("denoise")
 private val PHONON_KEY = booleanPreferencesKey("phonon_enabled")
 private val PICKUP_KEY = booleanPreferencesKey("pickup_greeting")
 private val USED_KEY = booleanPreferencesKey("assistant_used")
@@ -208,6 +209,14 @@ object AssistantPreferences {
         context.assistantDataStore.data.map { preferences ->
             preferences[PREFER_PHONE_MIC_KEY] ?: false
         }
+
+    /** Neural noise suppression ahead of the recogniser. Off until compared on a drive. */
+    fun denoiseFlow(context: Context): Flow<Boolean> =
+        context.assistantDataStore.data.map { it[DENOISE_KEY] ?: false }
+
+    suspend fun setDenoise(context: Context, enabled: Boolean) {
+        context.assistantDataStore.edit { it[DENOISE_KEY] = enabled }
+    }
 
     suspend fun setPreferPhoneMic(context: Context, enabled: Boolean) {
         context.assistantDataStore.edit { preferences ->

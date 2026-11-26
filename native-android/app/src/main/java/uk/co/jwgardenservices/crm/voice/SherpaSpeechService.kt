@@ -311,6 +311,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @Volatile
     private var preferPhoneMic = false
 
+    /** The noise-suppression switch, read once when listening starts. */
+    private var denoiseWanted = false
+
     /** True when this session explicitly pinned the built-in microphone. */
     @Volatile
     private var forcedBuiltInMic = false
@@ -713,6 +716,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             ?.any { it.type in BLUETOOTH_OUTPUT_TYPES } == true
         preferPhoneMic = preferSetting && bluetoothConnected
         bluetoothRouteAvailable = bluetoothConnected
+        denoiseWanted = AssistantPreferences.denoiseFlow(context).first()
         // Prefer-phone-mic captures on the built-in VOICE_RECOGNITION source
         // at 16 kHz while Bluetooth carries the reply as normal media audio.
         val micSource = silentFallbackSource
@@ -928,6 +932,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         val headsetRoute = !forcedBuiltInMic &&
             (record.routedDevice?.type in HEADSET_ROUTE_TYPES || bluetoothRouteAvailable)
         val fallbackGain = if (gainController == null) SOFTWARE_MIC_GAIN else 1f
+        val denoise = openDenoiser()
         val vad = createVad(
             if (headsetRoute) VAD_THRESHOLD_HEADSET else VAD_THRESHOLD_SPEAKER,
         )
@@ -1050,6 +1055,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 pausedClean = false
                 frames += 1
                 val raw = FloatArray(read) { buffer[it] / 32768.0f }
+                val heard = denoise?.process(raw) ?: raw
                 var framePeak = 0f
                 var frameEnergy = 0.0
                 for (sample in raw) {
@@ -1072,14 +1078,14 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     silentFrames = 0
                     silentPeak = 0f
                 }
-                val frameRms = sqrt(frameEnergy / raw.size).toFloat()
+                val frameRms = if (denoise != null) rmsOf(heard) else sqrt(frameEnergy / raw.size).toFloat()
                 beatRms = maxOf(beatRms, frameRms)
                 // AGC, not a step ladder: it follows the voice instead of the
                 // quietest recent frame, and never attenuates loud speech.
                 val samples = if (headsetRoute) {
-                    headsetAudio.process(raw)
+                    headsetAudio.process(heard)
                 } else {
-                    agc.process(boosted(raw, fallbackGain))
+                    agc.process(boosted(heard, fallbackGain))
                 }
                 vad?.acceptWaveform(samples)
                 val vadVoiced = vad?.isSpeechDetected() == true
@@ -1250,6 +1256,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             Log.e(TAG, "Recognition loop failed", error)
             if (!released) fail(error.message ?: "Speech recognition failed.")
         } finally {
+            denoise?.release()
             runCatching { vad?.release() }
             releaseMicEffects()
             runCatching { record.release() }
@@ -1274,6 +1281,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         val headsetRoute = !forcedBuiltInMic &&
             (record.routedDevice?.type in HEADSET_ROUTE_TYPES || bluetoothRouteAvailable)
         val fallbackGain = if (gainController == null) SOFTWARE_MIC_GAIN else 1f
+        val denoise = openDenoiser()
         val vad = createVad(
             if (headsetRoute) VAD_THRESHOLD_HEADSET else VAD_THRESHOLD_SPEAKER,
         )
@@ -1360,9 +1368,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 }
                 pausedClean = false
                 val raw = FloatArray(read) { buffer[it] / 32768.0f }
+                val heard = denoise?.process(raw) ?: raw
                 var energy = 0.0
                 for (sample in raw) energy += sample * sample
-                val frameRms = sqrt(energy / raw.size).toFloat()
+                val frameRms = if (denoise != null) rmsOf(heard) else sqrt(energy / raw.size).toFloat()
                 val framePeak = kotlin.math.abs(raw.maxOrNull() ?: 0f)
                 if (framePeak > 0.0025f) sawSignal = true
                 if (checkSilentInput && !sawSignal && !hasSpeech) {
@@ -1377,9 +1386,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     silentPeak = 0f
                 }
                 val samples = if (headsetRoute) {
-                    headsetAudio.process(raw)
+                    headsetAudio.process(heard)
                 } else {
-                    agc.process(boosted(raw, fallbackGain))
+                    agc.process(boosted(heard, fallbackGain))
                 }
                 vad?.acceptWaveform(samples)
                 val vadVoiced = vad?.isSpeechDetected() == true
@@ -1483,6 +1492,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             Log.e(TAG, "Moonshine loop failed", error)
             if (!released) fail(error.message ?: "Speech recognition failed.")
         } finally {
+            denoise?.release()
             runCatching { vad?.release() }
             releaseMicEffects()
             runCatching { record.release() }
@@ -1663,6 +1673,21 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
      * on the recognizer's trailing-silence heuristic. Loaded from assets; if
      * it cannot be created, the recognizer's endpoint still ends the turn.
      */
+    /** A denoiser for this listening session when the switch is on and the model is installed. */
+    private fun openDenoiser(): SpeechDenoiser.Session? {
+        if (!denoiseWanted) return null
+        val session = SpeechDenoiser.open(context)
+        CrashLog.note(context, TAG, "noise suppression ${if (session != null) "on" else "unavailable"}")
+        return session
+    }
+
+    private fun rmsOf(samples: FloatArray): Float {
+        if (samples.isEmpty()) return 0f
+        var energy = 0.0
+        for (sample in samples) energy += sample * sample
+        return sqrt(energy / samples.size).toFloat()
+    }
+
     private fun createVad(threshold: Float = VAD_THRESHOLD_SPEAKER): Vad? {
         // Real file path, like the ASR model: the AssetManager buffer path is
         // unreliable and a wrong native path can abort the process.
