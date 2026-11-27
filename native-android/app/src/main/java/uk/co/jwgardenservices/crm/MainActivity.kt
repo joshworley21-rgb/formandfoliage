@@ -53,40 +53,7 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         handleDeepLink(intent)
-        showCrashReportThenStart()
-    }
-
-    /**
-     * If a crash was recorded, show it first and only start the app once it is
-     * copied or dismissed — the report must not be swept away by another crash.
-     */
-    private fun showCrashReportThenStart() {
-        val report = CrashLog.read(this)
-        if (report == null) {
-            startApp()
-            return
-        }
-        val text = TextView(this).apply {
-            text = report.take(6000)
-            textSize = 11f
-            setPadding(48, 24, 48, 24)
-        }
-        android.app.AlertDialog.Builder(this)
-            .setTitle("Last crash report")
-            .setView(android.widget.ScrollView(this).apply { addView(text) })
-            .setCancelable(false)
-            .setPositiveButton("Copy") { _, _ ->
-                getSystemService(ClipboardManager::class.java)?.setPrimaryClip(
-                    ClipData.newPlainText("crash", report),
-                )
-                Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Close and open app") { dialog, _ ->
-                CrashLog.clear(this)
-                dialog.dismiss()
-                startApp()
-            }
-            .show()
+        startApp()
     }
 
     private fun startApp() {

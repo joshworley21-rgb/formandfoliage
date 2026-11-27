@@ -50,39 +50,6 @@ import uk.co.jwgardenservices.crm.ui.main.MainScaffold
 fun AppRoot(
     appViewModel: AppViewModel = viewModel { AppViewModel() },
 ) {
-    val context = LocalContext.current
-    var crashText by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) { crashText = CrashLog.read(context) }
-
-    crashText?.let { report ->
-        JwAlertDialog(
-            onDismissRequest = { },
-            title = { Text("Last crash report") },
-            text = {
-                Text(
-                    text = report.take(4000),
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
-                    clipboard?.setPrimaryClip(
-                        android.content.ClipData.newPlainText("crash", report),
-                    )
-                    android.widget.Toast.makeText(context, "Copied", android.widget.Toast.LENGTH_SHORT).show()
-                }) { Text("Copy") }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    CrashLog.clear(context)
-                    crashText = null
-                }) { Text("Clear") }
-            },
-        )
-    }
-
     val authState by appViewModel.authState.collectAsStateWithLifecycle()
     val workspace by appViewModel.workspace.collectAsStateWithLifecycle()
     val locked by AppLock.locked.collectAsStateWithLifecycle()
