@@ -91,6 +91,7 @@ private val LOCAL_THINKING_KEY = booleanPreferencesKey("local_thinking")
 private val LOCAL_MODEL_KEY = stringPreferencesKey("local_model")
 private val TOOL_ROUTER_KEY = booleanPreferencesKey("tool_router")
 private val STEADY_VOICE_KEY = booleanPreferencesKey("steady_voice")
+private val CONFIRM_CHANGES_KEY = booleanPreferencesKey("confirm_changes")
 private val PRONUNCIATION_KEY = stringPreferencesKey("pronunciation")
 private val DRIVING_KEY = booleanPreferencesKey("driving_mode")
 private val AUTO_DRIVING_KEY = booleanPreferencesKey("auto_driving_mode")
@@ -310,6 +311,14 @@ object AssistantPreferences {
     suspend fun setLocalModel(context: Context, model: LlmModel) {
         context.assistantDataStore.edit { it[LOCAL_MODEL_KEY] = model.id }
         LocalLlm.preferred = model
+    }
+
+    /** Read every change back and wait for a yes before saving it. On unless switched off. */
+    fun confirmChangesFlow(context: Context): Flow<Boolean> =
+        context.assistantDataStore.data.map { it[CONFIRM_CHANGES_KEY] ?: true }
+
+    suspend fun setConfirmChanges(context: Context, enabled: Boolean) {
+        context.assistantDataStore.edit { it[CONFIRM_CHANGES_KEY] = enabled }
     }
 
     /** Keep the voice the same from clause to clause: fixed sampling seed, gentler pace changes. */

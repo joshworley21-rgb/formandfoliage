@@ -158,6 +158,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = false)
     val steadyVoice by AssistantPreferences.steadyVoiceFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
+    val confirmChanges by AssistantPreferences.confirmChangesFlow(context)
+        .collectAsStateWithLifecycle(initialValue = true)
     var localLlmSaved by remember { mutableLongStateOf(LocalLlm.savedBytes(context)) }
     val pickupGreeting by AssistantPreferences.pickupFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
@@ -991,6 +993,16 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         "line open after each answer.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                SettingSwitchRow(
+                    title = "Confirm before saving changes",
+                    description = "Reads back exactly what it will do, with the date and the money, " +
+                        "and only saves when you say yes. Switch off to save straight away " +
+                        "(you can still say \"undo that\").",
+                    checked = confirmChanges,
+                    onCheckedChange = { enabled ->
+                        scope.launch { AssistantPreferences.setConfirmChanges(context, enabled) }
+                    },
                 )
                 SettingSwitchRow(
                     title = "Driving mode",

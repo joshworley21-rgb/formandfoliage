@@ -365,6 +365,10 @@ class AssistantService : Service() {
                 .collect { toolRouterOn = it }
         }
         scope.launch {
+            AssistantPreferences.confirmChangesFlow(this@AssistantService)
+                .collect { actions.confirmChanges = it }
+        }
+        scope.launch {
             AssistantPreferences.drivingModeFlow(this@AssistantService).collect {
                 manualDrivingMode = it
                 refreshDrivingMode()
@@ -667,7 +671,7 @@ class AssistantService : Service() {
                 val now = SystemClock.elapsedRealtime()
                 val pending = actions.wrapUpActive() || actions.sendPending() ||
                     actions.chasePending() || actions.clarificationPending() ||
-                    actions.readAllPending()
+                    actions.readAllPending() || actions.confirmPending()
                 if (_speaking.value || _thinking.value || _dialling.value || pending ||
                     !speech.isListening()
                 ) {
@@ -908,7 +912,7 @@ class AssistantService : Service() {
         // pause when it arrives.
         speech.captureInterjections = actions.wrapUpActive() || actions.sendPending() ||
             actions.chasePending() || actions.clarificationPending() ||
-            actions.readAllPending() || actions.hasPending()
+            actions.readAllPending() || actions.confirmPending() || actions.hasPending()
         speech.fastPath = speech.captureInterjections
         // The next utterance answers "Which client?" — let the corrector be
         // more forgiving about a narrowband misheard name.
@@ -1735,7 +1739,7 @@ class AssistantService : Service() {
             // on. Never while an answer is pending — "no" is a real answer.
             val pendingAnswer = actions.wrapUpActive() || actions.sendPending() ||
                 actions.chasePending() || actions.clarificationPending() ||
-                actions.readAllPending() || actions.hasPending()
+                actions.readAllPending() || actions.confirmPending() || actions.hasPending()
             if (!pendingAnswer && endConversationRequested(heard)) {
                 sayAndEnd(VoiceLines.signOff())
                 return@collect
@@ -1759,6 +1763,15 @@ class AssistantService : Service() {
                 // "undo that" are the safety net), so there is no pending
                 // confirmation to answer.
                 // "Say send it" — the second half of raising a draft invoice.
+                // "Shall I go ahead?" — a yes saves the held change, a no drops it,
+                // and anything else is a new command.
+                val confirmed = runCatching { actions.continueConfirm(heard) }
+                    .onFailure { CrashLog.note(this, TAG, "confirmation failed: ${it.message}") }
+                    .getOrNull()
+                if (confirmed != null) {
+                    sayAnswer(confirmed, ReplyEnding.TaskComplete)
+                    return@collect
+                }
                 val sent = runCatching { actions.continueSend(heard) }
                     .onFailure { CrashLog.note(this, TAG, "send reply failed: ${it.message}") }
                     .getOrNull()
