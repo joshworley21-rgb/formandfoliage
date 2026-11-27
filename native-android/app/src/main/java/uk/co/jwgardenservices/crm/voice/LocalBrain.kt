@@ -34,6 +34,18 @@ object LocalBrain {
         SpokenIntent.ClientList,
         SpokenIntent.InvoiceStatus,
         SpokenIntent.NextJobForClient,
+        SpokenIntent.AddClient,
+        SpokenIntent.BookJob,
+        SpokenIntent.MoveJob,
+        SpokenIntent.CancelJob,
+        SpokenIntent.BackfillVisits,
+        SpokenIntent.MarkPaid,
+        SpokenIntent.UpdateClient,
+        SpokenIntent.QuoteStatus,
+        SpokenIntent.EnquiryStatus,
+        SpokenIntent.Enquiries,
+        SpokenIntent.QuotesWaiting,
+        SpokenIntent.UnloggedJobs,
         SpokenIntent.Weather,
         SpokenIntent.Other,
     )
@@ -62,7 +74,10 @@ object LocalBrain {
                         "mark_job_done, who_owes_me unpaid invoices, today_earnings, " +
                         "weekly_earnings, month_earnings, hours_this_week, client_info, last_visit, " +
                         "best_client, profit, running_costs, add_note, add_expense, unbilled, " +
-                        "client_list, invoice_status, next_job_for_client, weather, other chat",
+                        "client_list, invoice_status, next_job_for_client, add_client, book_job, " +
+                        "move_job, cancel_job, backfill_visits fill in past visits, mark_paid, " +
+                        "update_client, quote_status, enquiry_status, enquiries, quotes_waiting, " +
+                        "unlogged_jobs, weather, other chat",
                 )
                 appendLine("stick Simon down for a half day => log_hours|Simon")
                 appendLine("who's not paid me => who_owes_me|")
@@ -92,6 +107,15 @@ object LocalBrain {
             appendLine("client_list: list the customers")
             appendLine("invoice_status: has a customer paid")
             appendLine("next_job_for_client: when a customer is next booked")
+            appendLine("add_client: add a new customer")
+            appendLine("book_job, move_job, cancel_job: book, move or cancel a booking")
+            appendLine("backfill_visits: fill in or backdate past visits")
+            appendLine("mark_paid: a customer has paid")
+            appendLine("update_client: change a customer's phone or rate")
+            appendLine("quote_status: a quote was accepted or declined")
+            appendLine("enquiries, enquiry_status: new enquiries, or update one")
+            appendLine("quotes_waiting: quotes awaiting a reply")
+            appendLine("unlogged_jobs: past jobs not logged yet")
             appendLine("weather: the forecast")
             appendLine("other: chat, advice, anything else")
             appendLine("Examples:")
@@ -162,6 +186,15 @@ object LocalBrain {
             SpokenIntent.AddNote -> NOTE_EVIDENCE
             SpokenIntent.AddExpense -> EXPENSE_EVIDENCE
             SpokenIntent.Weather -> WEATHER_EVIDENCE
+            SpokenIntent.AddClient -> CLIENT_EVIDENCE
+            SpokenIntent.BookJob -> BOOK_EVIDENCE
+            SpokenIntent.MoveJob -> MOVE_EVIDENCE
+            SpokenIntent.CancelJob -> CANCEL_EVIDENCE
+            SpokenIntent.BackfillVisits -> BACKFILL_EVIDENCE
+            SpokenIntent.MarkPaid -> PAID_EVIDENCE
+            SpokenIntent.UpdateClient -> UPDATE_EVIDENCE
+            SpokenIntent.QuoteStatus -> QUOTE_EVIDENCE
+            SpokenIntent.EnquiryStatus -> ENQUIRY_EVIDENCE
             else -> return true
         }
         return evidence.containsMatchIn(lower)
@@ -179,6 +212,15 @@ object LocalBrain {
     private val EXPENSE_EVIDENCE = Regex(
         "£|\\d|\\b(pounds?|quid|spent|spend|bought|buy|cost|paid|diesel|fuel|petrol)\\b",
     )
+    private val CLIENT_EVIDENCE = Regex("\\b(?:client|customer)\\b")
+    private val BOOK_EVIDENCE = Regex("\\b(?:book|schedule|put|pencil|arrange|set up|add|down|in for)\\b")
+    private val MOVE_EVIDENCE = Regex("\\b(?:move|reschedule|rebook|push|swap|bring|change)\\b")
+    private val CANCEL_EVIDENCE = Regex("\\b(?:cancel|call off|scrap|drop|remove)\\b")
+    private val BACKFILL_EVIDENCE = Regex("\\b(?:backdate|back date|backfill|catch up|fill|mark|log|all)\\b")
+    private val PAID_EVIDENCE = Regex("\\b(?:paid|settled|pay|payment)\\b")
+    private val UPDATE_EVIDENCE = Regex("\\b(?:change|update|set|new|rate|number|phone|mobile)\\b")
+    private val QUOTE_EVIDENCE = Regex("quote")
+    private val ENQUIRY_EVIDENCE = Regex("enquir|inquir")
     private val WEATHER_EVIDENCE = Regex(
         "\\b(weather|rain\\w*|forecast|sun\\w*|cold|warm|wind\\w*|hot|snow\\w*|frost\\w*|" +
             "temperature|dry|wet|shower\\w*|storm\\w*)\\b",

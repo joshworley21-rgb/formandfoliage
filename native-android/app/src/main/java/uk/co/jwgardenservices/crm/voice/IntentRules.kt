@@ -177,6 +177,68 @@ object IntentRules {
                 "reconcile today",
             ) -> SpokenIntent.DayWrapUp
 
+            // Changes to the client list and the diary. Every one of these is read
+            // back and confirmed before anything is saved, so being generous in
+            // what counts here is safe. They come before the next-visit reminder
+            // rule, which would otherwise take "move the Smiths' next visit".
+            text.containsAny(
+                "new client", "new customer", "add a client", "add a customer",
+                "add client", "add customer", "create a client", "create a customer",
+            ) -> SpokenIntent.AddClient
+
+            text.containsAny("backdate", "back date", "backfill", "catch up", "fill in", "fill them in") &&
+                text.containsAny("visit", "job", "hours", "diary") -> SpokenIntent.BackfillVisits
+            Regex("\\b(?:mark|set|make)\\s+(?:all|every)\\b.*\\b(?:visits?|jobs?)\\b.*" +
+                "\\b\\d+(?:\\.\\d+)?\\s*(?:hours?|hrs?)\\b").containsMatchIn(text) ->
+                SpokenIntent.BackfillVisits
+
+            Regex("\\b(?:haven't|havent|have not|hasn't|hasnt|has not)\\b.*\\blogged\\b").containsMatchIn(text) ||
+                text.containsAny(
+                    "not logged", "unlogged", "not been logged", "yet to log", "still to log",
+                    "need logging", "need to log", "forget to log", "forgotten to log",
+                ) -> SpokenIntent.UnloggedJobs
+
+            Regex("\\b(?:move|reschedule|rebook|push|bring forward|swap)\\b").containsMatchIn(text) &&
+                text.containsAny(" to ", " for ", "later", "earlier", "back", "forward") &&
+                (text.containsAny("job", "visit", "booking", "appointment") || mentionsDay(text)) ->
+                SpokenIntent.MoveJob
+
+            text.containsAny("cancel", "call off") &&
+                (text.containsAny("job", "visit", "booking", "appointment") || mentionsDay(text)) ->
+                SpokenIntent.CancelJob
+
+            (Regex("\\b(?:has|have)\\s+paid\\b|\\bpaid\\s+(?:me|up|the invoice|their invoice)\\b|\\bsettled\\b")
+                .containsMatchIn(text) ||
+                Regex("^(?:please |can you |could you )*mark\\b.*\\bpaid\\b").containsMatchIn(text)) &&
+                !Regex("^(?:who|what|which|how|has|have|did|is|are|when)\\b").containsMatchIn(text) &&
+                !text.containsAny(
+                    "who owes", "owe me", "unpaid", "not paid", "hasn't paid", "hasnt paid",
+                    "haven't paid", "havent paid",
+                ) -> SpokenIntent.MarkPaid
+
+            Regex("\\b(?:change|update|set|new)\\b.*\\b(?:phone|mobile|number)\\b").containsMatchIn(text) &&
+                Regex("\\d").containsMatchIn(text) -> SpokenIntent.UpdateClient
+
+            text.contains("quote") &&
+                text.containsAny(
+                    "accepted", "declined", "approved", "turned down", "said yes", "said no",
+                    "agreed", "gone ahead", "not going ahead", "rejected",
+                ) && !Regex("^(?:has|have|did|is|are|who|what|which|how)\\b").containsMatchIn(text) ->
+                SpokenIntent.QuoteStatus
+
+            text.containsAny(
+                "any quotes", "quotes waiting", "quotes outstanding", "quotes pending",
+                "unanswered quotes", "outstanding quotes", "pending quotes", "waiting on quotes",
+                "quotes haven't", "quotes havent",
+            ) -> SpokenIntent.QuotesWaiting
+
+            text.containsAny("enquiry", "enquiries", "inquiry", "inquiries") &&
+                text.containsAny(
+                    "contacted", "called", "rang", "spoke to", "close", "not interested",
+                    "convert", "make them a client", "as a client", "dismiss",
+                ) -> SpokenIntent.EnquiryStatus
+            text.containsAny("enquiry", "enquiries", "inquiry", "inquiries") -> SpokenIntent.Enquiries
+
             // "Remind me to get compost for the next visit to the Smiths" —
             // must be checked before AddNote, whose "note for" keywords it
             // also contains.
@@ -323,15 +385,14 @@ object IntentRules {
                 !text.containsAny("how many", "hours", "hrs") -> SpokenIntent.MarkJobDone
             text.containsAny("hour", "hours", "hrs", "log", "worked", "work for") ->
                 SpokenIntent.LogHours
-            // "Add a new client for Tuesday morning called Larry" and "book the
-            // Smiths in for Friday" are bookings, which the diary reader cannot do.
-            // Reading the diary back for them is a confident wrong answer.
+            // "Book the Smiths in for Friday" is a booking, not a diary question;
+            // reading the diary back for it would be a confident wrong answer.
             Regex(
                 "^(?:(?:can|could|would|will) you |please |i (?:need|want) to |i'd like to |let's |lets )*" +
                     "(?:add|create|book|schedule|set up|put|make)\\b",
             ).containsMatchIn(text) &&
                 (text.containsAny(" client", " customer", " job", " visit", "appointment", "booking") ||
-                    text.contains(" for ")) -> SpokenIntent.Other
+                    text.contains(" for ")) -> SpokenIntent.BookJob
             // Live data is never a diary lookup, even when it mentions a day.
             text.containsAny("weather", "forecast", "traffic") -> SpokenIntent.Other
             text.containsAny(
@@ -398,6 +459,13 @@ object IntentRules {
 
     private fun String.containsAny(vararg needles: String): Boolean = needles.any { contains(it) }
 
+    private val dayWords = listOf(
+        "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+        "tomorrow", "today", "next week", "this week",
+    )
+
+    private fun mentionsDay(text: String): Boolean = dayWords.any { text.contains(it) }
+
     private fun String.containsWord(word: String): Boolean =
         Regex("\\b${Regex.escape(word)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(this)
 
@@ -433,6 +501,18 @@ object IntentRules {
         SpokenIntent.ChaseFirst,
         SpokenIntent.Health,
         SpokenIntent.Help,
+        SpokenIntent.AddClient,
+        SpokenIntent.BookJob,
+        SpokenIntent.MoveJob,
+        SpokenIntent.CancelJob,
+        SpokenIntent.BackfillVisits,
+        SpokenIntent.MarkPaid,
+        SpokenIntent.UpdateClient,
+        SpokenIntent.QuoteStatus,
+        SpokenIntent.EnquiryStatus,
+        SpokenIntent.Enquiries,
+        SpokenIntent.QuotesWaiting,
+        SpokenIntent.UnloggedJobs,
         SpokenIntent.SayAgain -> true
 
         else -> false

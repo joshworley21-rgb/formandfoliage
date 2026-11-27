@@ -2258,6 +2258,15 @@ class AssistantService : Service() {
         SpokenIntent.NextVisitNote,
         SpokenIntent.DayWrapUp,
         SpokenIntent.Quote,
+        SpokenIntent.AddClient,
+        SpokenIntent.BookJob,
+        SpokenIntent.MoveJob,
+        SpokenIntent.CancelJob,
+        SpokenIntent.BackfillVisits,
+        SpokenIntent.MarkPaid,
+        SpokenIntent.UpdateClient,
+        SpokenIntent.QuoteStatus,
+        SpokenIntent.EnquiryStatus,
         -> ReplyEnding.TaskComplete
         else -> ReplyEnding.None
     }
@@ -3035,6 +3044,18 @@ private fun confirmationFor(intent: IntentResult): String {
         SpokenIntent.Continue -> "Go on."
         SpokenIntent.Weather -> "Checking the forecast."
         SpokenIntent.Lookup -> "Looking that up."
+        SpokenIntent.AddClient -> "Adding that client."
+        SpokenIntent.BookJob -> "Booking that in."
+        SpokenIntent.MoveJob -> "Moving that booking."
+        SpokenIntent.CancelJob -> "Cancelling that booking."
+        SpokenIntent.BackfillVisits -> "Filling in those visits."
+        SpokenIntent.MarkPaid -> "Marking that paid."
+        SpokenIntent.UpdateClient -> "Updating that client."
+        SpokenIntent.QuoteStatus -> "Updating that quote."
+        SpokenIntent.EnquiryStatus -> "Updating that enquiry."
+        SpokenIntent.Enquiries -> "Checking your enquiries."
+        SpokenIntent.QuotesWaiting -> "Checking your quotes."
+        SpokenIntent.UnloggedJobs -> "Checking what isn't logged yet."
         SpokenIntent.Other ->
             "I can log hours, check your diary, add a note, or tell you who owes you."
     }

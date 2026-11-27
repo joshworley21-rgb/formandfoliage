@@ -2545,6 +2545,12 @@ class VoiceActionRunner(
             SpokenIntent.LastVisit,
             SpokenIntent.NextJobForClient,
             SpokenIntent.InvoiceStatus,
+            SpokenIntent.BookJob,
+            SpokenIntent.MoveJob,
+            SpokenIntent.CancelJob,
+            SpokenIntent.BackfillVisits,
+            SpokenIntent.MarkPaid,
+            SpokenIntent.UpdateClient,
         )
 
         /** Natural ways to accept a pending confirmation. */

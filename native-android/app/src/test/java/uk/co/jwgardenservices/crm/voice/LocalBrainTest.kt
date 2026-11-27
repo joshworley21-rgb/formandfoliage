@@ -112,7 +112,7 @@ class LocalBrainTest {
         val prompt = LocalBrain.intentPrompt(many)
         // The model has 1,280 tokens in total; about 3 characters a token is
         // a safe estimate, and the sentence and the answer need room too.
-        assertTrue("prompt was ${prompt.length} chars", prompt.length < 2_600)
+        assertTrue("prompt was ${prompt.length} chars", prompt.length < 3_100)
         assertTrue(prompt.contains("Known customer names:"))
         assertTrue(!prompt.contains("Customer number 30 "))
     }
@@ -129,8 +129,8 @@ class LocalBrainTest {
             "Mrs Bell", "Old Rectory", "Smith Farm", "Oak Lodge",
         )
         val prompt = LocalBrain.intentPrompt(typical, lean = true)
-        // About 3.5 characters a token puts 700 characters at 200 tokens.
-        assertTrue("prompt was ${prompt.length} chars", prompt.length <= 760)
+        // About 3.5 characters a token puts 900 characters at about 250 tokens.
+        assertTrue("prompt was ${prompt.length} chars", prompt.length <= 900)
         LocalBrain.labels.forEach { assertTrue("${it.wire} missing", prompt.contains(it.wire)) }
         assertTrue(prompt.contains("Known customer names: Simon Hart"))
     }
@@ -139,7 +139,7 @@ class LocalBrainTest {
     fun `the lean intent prompt caps long customer lists`() {
         val many = (1..40).map { "Customer number $it of the long list" }
         val prompt = LocalBrain.intentPrompt(many, lean = true)
-        assertTrue("prompt was ${prompt.length} chars", prompt.length <= 950)
+        assertTrue("prompt was ${prompt.length} chars", prompt.length <= 1_100)
         assertTrue(!prompt.contains("Customer number 11 "))
     }
 

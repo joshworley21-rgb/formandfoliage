@@ -45,6 +45,18 @@ enum class SpokenIntent(val wire: String) {
     Weather("weather"),
     Lookup("lookup"),
     Quote("quote"),
+    AddClient("add_client"),
+    BookJob("book_job"),
+    MoveJob("move_job"),
+    CancelJob("cancel_job"),
+    BackfillVisits("backfill_visits"),
+    MarkPaid("mark_paid"),
+    UpdateClient("update_client"),
+    QuoteStatus("quote_status"),
+    EnquiryStatus("enquiry_status"),
+    Enquiries("enquiries"),
+    QuotesWaiting("quotes_waiting"),
+    UnloggedJobs("unlogged_jobs"),
     Other("other"),
 }
 
