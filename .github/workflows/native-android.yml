@@ -11,6 +11,11 @@ name: Native Android APK
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Publish the APK as a GitHub release with this tag (for example v1). Leave empty to only build."
+        required: false
+        default: ""
   push:
     branches: [main]
     paths:
@@ -160,3 +165,33 @@ jobs:
               echo "build will not work until a signing key is present."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Only runs when started by hand with a release tag. Creates the release (or
+  # replaces the APK on an existing one) so the phone can download it directly.
+  release:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.release_tag }}
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: jw-crm-native-apk
+          path: apk
+
+      - name: Publish the release
+        run: |
+          apk=$(find apk -name '*.apk' | head -n 1)
+          [ -n "$apk" ] || { echo "::error::No APK in the build artifact."; exit 1; }
+          cp "$apk" "form-and-foliage-$TAG.apk"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "form-and-foliage-$TAG.apk" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "form-and-foliage-$TAG.apk" \
+              --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "$TAG" --notes "Form & Foliage native Android build from $GITHUB_SHA."
+          fi
