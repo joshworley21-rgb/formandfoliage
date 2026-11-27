@@ -161,6 +161,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     private var whisper: OfflineRecognizer? = null
     private val whisperLock = Mutex()
 
+    /** whisper.cpp, the other optional second pass: shorter encoder window, built-in VAD. */
+    private var whisperCpp: WhisperCpp? = null
+
     /** Which offline recogniser takes the second look; read once when listening starts. */
     @Volatile
     private var finalPass = FinalPass.Moonshine
@@ -480,16 +483,58 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         }
     }
 
+    /** Load whisper.cpp (about 190 MB on disk) when it is chosen and installed. */
+    private suspend fun ensureWhisperCpp(): WhisperCpp? {
+        whisperCpp?.let { return it }
+        return whisperLock.withLock {
+            whisperCpp?.let { return@withLock it }
+            if (!WhisperCppDownloader.isInstalled(context)) return@withLock null
+            if (!WhisperCpp.available) {
+                CrashLog.note(context, TAG, "whisper.cpp library missing from this build; using Moonshine")
+                return@withLock null
+            }
+            val manager = context.getSystemService(android.app.ActivityManager::class.java)
+            val info = android.app.ActivityManager.MemoryInfo()
+            manager?.getMemoryInfo(info)
+            val availableMb = info.availMem / (1024L * 1024L)
+            if (manager != null && availableMb < WHISPER_CPP_MIN_FREE_MB) {
+                CrashLog.note(context, TAG, "only $availableMb MB free for whisper.cpp; using Moonshine")
+                return@withLock null
+            }
+            val dir = WhisperCppDownloader.dir(context)
+            CrashLog.note(context, TAG, "loading whisper.cpp (native construct starts)")
+            val started = System.currentTimeMillis()
+            val created = withContext(Dispatchers.IO) {
+                WhisperCpp.open(File(dir, WhisperCppDownloader.MODEL_FILE), File(dir, WhisperCppDownloader.VAD_FILE))
+            }
+            if (created == null) {
+                CrashLog.note(context, TAG, "whisper.cpp could not be loaded; using Moonshine")
+                return@withLock null
+            }
+            if (released) {
+                created.close()
+                null
+            } else {
+                whisperCpp = created
+                CrashLog.note(context, TAG, "whisper.cpp ready in ${System.currentTimeMillis() - started}ms")
+                created
+            }
+        }
+    }
+
     fun releaseWhisper() {
         if (listening) return
         whisper?.release()
         whisper = null
+        whisperCpp?.close()
+        whisperCpp = null
     }
 
     /** Load the chosen second-pass recogniser at the start of a call, not mid-sentence. */
     suspend fun warmFinalPass() {
         val pass = runCatching { AssistantPreferences.finalPassFlow(context).first() }.getOrDefault(FinalPass.Moonshine)
         if (pass == FinalPass.Whisper) ensureWhisper()
+        if (pass == FinalPass.WhisperCpp) ensureWhisperCpp()
     }
 
     /** Free the 135 MB Moonshine model when the owner switches back or removes it. */
@@ -918,6 +963,8 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         moonshine = null
         runCatching { whisper?.release() }
         whisper = null
+        runCatching { whisperCpp?.close() }
+        whisperCpp = null
         runCatching { nemotron?.release() }
         nemotron = null
         _state.value = UiState()
@@ -1518,7 +1565,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                             silentFrames = 0
                             silentPeak = 0f
                         } else {
-                            val text = decodeOffline(speech.samples, useWhisper = finalPass == FinalPass.Whisper && whisper != null)
+                            val text = whisperCpp?.takeIf { finalPass == FinalPass.WhisperCpp }
+                                ?.let { decodeWhisperCpp(it, speech.samples) }
+                                ?: decodeOffline(speech.samples, useWhisper = finalPass == FinalPass.Whisper && whisper != null)
                             if (captureWanted) {
                                 CallAudio.save(context, speech.samples.toFloatArray(), "${routeNote(record)}\nheard=$text\n")
                             }
@@ -1573,6 +1622,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         // Whisper takes about three seconds a sentence, so it only looks again
         // when the live recogniser gave next to nothing; otherwise Moonshine
         // does the quick second look.
+        if (finalPass == FinalPass.WhisperCpp && WhisperCppDownloader.isInstalled(context)) {
+            if (whisperCpp == null) runCatching { kotlinx.coroutines.runBlocking { ensureWhisperCpp() } }
+            whisperCpp?.let { return decodeWhisperCpp(it, samples) }
+        }
         val streamingMissed = streaming.split(' ').count { it.isNotBlank() } < WHISPER_MIN_WORDS
         if (finalPass == FinalPass.Whisper && streamingMissed && WhisperDownloader.isInstalled(context)) {
             if (whisper == null) runCatching { kotlinx.coroutines.runBlocking { ensureWhisper() } }
@@ -1583,6 +1636,26 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             runCatching { kotlinx.coroutines.runBlocking { ensureMoonshine() } }
         }
         return decodeOffline(samples)
+    }
+
+    private fun decodeWhisperCpp(engine: WhisperCpp, samples: List<Float>): String {
+        val started = SystemClock.elapsedRealtime()
+        return synchronized(offlineDecodeLock) {
+            val text = try {
+                engine.transcribe(samples.toFloatArray())
+            } catch (error: Exception) {
+                CrashLog.note(context, TAG, "whisper.cpp decode failed: ${error.message}")
+                ""
+            }
+            CrashLog.note(
+                context,
+                TAG,
+                "whisper.cpp ${SystemClock.elapsedRealtime() - started}ms " +
+                    "(${samples.size / SAMPLE_RATE}s, ctx=${WhisperCpp.audioContextFor(samples.size / SAMPLE_RATE.toFloat())}): " +
+                    text.take(120),
+            )
+            text
+        }
     }
 
     private fun decodeOffline(samples: List<Float>, useWhisper: Boolean = false): String {
@@ -1953,6 +2026,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
         /** Free memory needed before Whisper is loaded; below this Moonshine is used instead. */
         const val WHISPER_MIN_FREE_MB = 900L
+        const val WHISPER_CPP_MIN_FREE_MB = 500L
         private const val WHISPER_MIN_WORDS = 3
 
         /** 250 ms kept before VAD reports speech, so the first word is not clipped. */

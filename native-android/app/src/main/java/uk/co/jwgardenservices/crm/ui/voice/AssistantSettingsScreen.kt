@@ -87,6 +87,7 @@ import uk.co.jwgardenservices.crm.voice.PersonaLength
 import uk.co.jwgardenservices.crm.voice.PersonaTone
 import uk.co.jwgardenservices.crm.voice.PronunciationDictionary
 import uk.co.jwgardenservices.crm.voice.SpeechDenoiser
+import uk.co.jwgardenservices.crm.voice.WhisperCppDownloader
 import uk.co.jwgardenservices.crm.voice.WhisperDownloader
 import uk.co.jwgardenservices.crm.voice.SpeechEngine
 import uk.co.jwgardenservices.crm.ui.common.CompactScreenHeader
@@ -600,6 +601,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         }
 
         WhisperPassCard()
+        WhisperCppCard()
         AudioCaptureCard()
 
         SectionCard(
@@ -1588,6 +1590,99 @@ private fun WhisperPassCard() {
                 }
             }
             (state as? WhisperDownloader.State.Failed)?.let { failure ->
+                Text(
+                    text = failure.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WhisperCppCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val pass by AssistantPreferences.finalPassFlow(context)
+        .collectAsStateWithLifecycle(initialValue = FinalPass.Moonshine)
+    val state by WhisperCppDownloader.state.collectAsStateWithLifecycle()
+    var installed by remember { mutableStateOf(WhisperCppDownloader.isInstalled(context)) }
+    var saved by remember { mutableLongStateOf(WhisperCppDownloader.savedBytes(context)) }
+    LaunchedEffect(state) {
+        when (state) {
+            is WhisperCppDownloader.State.Done -> {
+                installed = true
+                saved = 0
+                WhisperCppDownloader.clearResult()
+            }
+            is WhisperCppDownloader.State.Working -> Unit
+            else -> saved = WhisperCppDownloader.savedBytes(context)
+        }
+    }
+    SectionCard(
+        title = "Second look: whisper.cpp (experimental)",
+        subtitle = "Whisper with a shorter window, plus voice detection.",
+        leadingIcon = Icons.Outlined.GraphicEq,
+    ) {
+        Column(
+            modifier = Modifier.padding(JwTokens.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "The same Whisper small.en model, run by whisper.cpp instead. It only looks at " +
+                    "as much audio as the sentence needs rather than a fixed 30 seconds, and a " +
+                    "voice detector skips silence so a pause is not written up as words. It needs " +
+                    "about 190 MB and spare memory; if memory is short it quietly uses Moonshine. " +
+                    "Each sentence's time is in the assistant log, so you can compare.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SettingSwitchRow(
+                title = "Use whisper.cpp for the second look",
+                description = "Switch off to go back to Moonshine.",
+                checked = pass == FinalPass.WhisperCpp && installed,
+                enabled = installed,
+                onCheckedChange = { on ->
+                    scope.launch {
+                        AssistantPreferences.setFinalPass(context, if (on) FinalPass.WhisperCpp else FinalPass.Moonshine)
+                    }
+                },
+            )
+            val working = state as? WhisperCppDownloader.State.Working
+            if (working != null) {
+                LinearProgressIndicator(progress = { working.progress }, modifier = Modifier.fillMaxWidth())
+                Text(
+                    text = "Downloading ${working.done / MEGABYTE} of ${working.total / MEGABYTE} MB",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(onClick = { WhisperCppDownloader.cancel() }) { Text("Cancel") }
+            } else if (installed) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Installed", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                AssistantPreferences.setFinalPass(context, FinalPass.Moonshine)
+                                WhisperCppDownloader.remove(context)
+                                installed = false
+                                saved = 0
+                            }
+                        },
+                    ) { Text("Remove") }
+                }
+            } else {
+                OutlinedButton(onClick = { WhisperCppDownloader.start(context) }) {
+                    Text(
+                        if (saved > 0) {
+                            "Resume download (${saved / MEGABYTE} MB saved)"
+                        } else {
+                            "Download whisper.cpp small.en (${WhisperCppDownloader.TOTAL_BYTES / MEGABYTE} MB)"
+                        },
+                    )
+                }
+            }
+            (state as? WhisperCppDownloader.State.Failed)?.let { failure ->
                 Text(
                     text = failure.message,
                     style = MaterialTheme.typography.bodySmall,

@@ -76,6 +76,21 @@ jobs:
           cp android/jniLibs/arm64-v8a/libptts_ffi.so \
             "$GITHUB_WORKSPACE/native-android/app/src/main/jniLibs/arm64-v8a/"
 
+      # whisper.cpp is C++ with no Maven artifact. Build the JNI layer for arm64
+      # here from a pinned tag, so no native binary or vendor source is committed.
+      - name: Build the whisper.cpp native library
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.0.12077973"
+          git clone --depth 1 --branch v1.8.2 \
+            https://github.com/ggml-org/whisper.cpp.git /tmp/whisper.cpp
+          cmake -S native-android/whisper-jni -B /tmp/whisper-build \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 -DANDROID_STL=c++_static \
+            -DCMAKE_BUILD_TYPE=Release -DWHISPER_DIR=/tmp/whisper.cpp
+          cmake --build /tmp/whisper-build --target whisper_jni -j"$(nproc)"
+          mkdir -p native-android/app/src/main/jniLibs/arm64-v8a
+          cp /tmp/whisper-build/libwhisper_jni.so native-android/app/src/main/jniLibs/arm64-v8a/
+
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Find the signing key
