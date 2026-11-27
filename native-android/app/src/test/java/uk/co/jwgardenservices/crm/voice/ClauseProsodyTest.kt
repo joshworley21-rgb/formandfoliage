@@ -26,4 +26,14 @@ class ClauseProsodyTest {
             ClauseProsody.speedMultiplier("the garden needs a tidy before the weekend"),
         )
     }
+
+    @Test
+    fun `the steady voice keeps only a share of each pace swing`() {
+        assertEquals(1f, ClauseProsody.steady(1f), 0f)
+        assertEquals(1f + (ClauseProsody.FIGURES - 1f) * ClauseProsody.STEADY_SHARE, ClauseProsody.steady(ClauseProsody.FIGURES), 1e-6f)
+        // Pitch moves with pace, so the gap between a lead-in and a figure must shrink a lot.
+        val full = ClauseProsody.SHORT_LEAD_IN - ClauseProsody.FIGURES
+        val steady = ClauseProsody.steady(ClauseProsody.SHORT_LEAD_IN) - ClauseProsody.steady(ClauseProsody.FIGURES)
+        assertEquals(true, steady < full * 0.4f)
+    }
 }

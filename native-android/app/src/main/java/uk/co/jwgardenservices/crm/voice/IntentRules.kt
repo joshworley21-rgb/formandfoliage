@@ -149,8 +149,11 @@ object IntentRules {
             ) -> SpokenIntent.Lookup
             text.startsWithAny("what is ", "what's ") &&
                 !text.containsAny(
-                    "on today", "on tomorrow", "booked", "schedule", "diary",
+                    "on today", "on tomorrow", "on tonight", "booked", "schedule", "diary",
                     "next", "my ", "owing", "unpaid", "invoice",
+                    // A day of the week is a diary question, not a web search.
+                    "on monday", "on tuesday", "on wednesday", "on thursday", "on friday",
+                    "on saturday", "on sunday", "this week", "this month",
                 ) -> SpokenIntent.Lookup
 
             // Deliberately narrow: "just wrapping up at the Smiths" is the
@@ -320,6 +323,15 @@ object IntentRules {
                 !text.containsAny("how many", "hours", "hrs") -> SpokenIntent.MarkJobDone
             text.containsAny("hour", "hours", "hrs", "log", "worked", "work for") ->
                 SpokenIntent.LogHours
+            // "Add a new client for Tuesday morning called Larry" and "book the
+            // Smiths in for Friday" are bookings, which the diary reader cannot do.
+            // Reading the diary back for them is a confident wrong answer.
+            Regex(
+                "^(?:(?:can|could|would|will) you |please |i (?:need|want) to |i'd like to |let's |lets )*" +
+                    "(?:add|create|book|schedule|set up|put|make)\\b",
+            ).containsMatchIn(text) &&
+                (text.containsAny(" client", " customer", " job", " visit", "appointment", "booking") ||
+                    text.contains(" for ")) -> SpokenIntent.Other
             // Live data is never a diary lookup, even when it mentions a day.
             text.containsAny("weather", "forecast", "traffic") -> SpokenIntent.Other
             text.containsAny(

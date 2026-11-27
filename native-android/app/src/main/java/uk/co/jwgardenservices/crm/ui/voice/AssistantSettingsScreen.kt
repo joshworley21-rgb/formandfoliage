@@ -156,6 +156,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = LlmModel.Small)
     val toolRouterOn by AssistantPreferences.toolRouterFlow(context)
         .collectAsStateWithLifecycle(initialValue = false)
+    val steadyVoice by AssistantPreferences.steadyVoiceFlow(context)
+        .collectAsStateWithLifecycle(initialValue = true)
     var localLlmSaved by remember { mutableLongStateOf(LocalLlm.savedBytes(context)) }
     val pickupGreeting by AssistantPreferences.pickupFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
@@ -328,6 +330,15 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         "pickups and replies all use the selected Phonon voice.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                SettingSwitchRow(
+                    title = "Steady voice",
+                    description = "Keeps it sounding like one speaker from sentence to sentence. " +
+                        "Switch off if it sounds flat.",
+                    checked = steadyVoice,
+                    onCheckedChange = { enabled ->
+                        scope.launch { AssistantPreferences.setSteadyVoice(context, enabled) }
+                    },
                 )
 
                 val working = phononState as? PhononDownloader.State.Working

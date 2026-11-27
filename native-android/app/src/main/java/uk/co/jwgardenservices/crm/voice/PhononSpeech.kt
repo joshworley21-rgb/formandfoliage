@@ -83,6 +83,12 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
             try {
                 withContext(Dispatchers.IO) {
                     player.play()
+                    // The model samples with a little randomness, so each clause
+                    // is a fresh take and the timbre can drift between them. The
+                    // same seed for every clause keeps it one speaker.
+                    val steady = runCatching { AssistantPreferences.steadyVoiceFlow(context).first() }
+                        .getOrDefault(true)
+                    if (steady) runCatching { engine.setSeed(STEADY_SEED) }
                     engine.speak(clean) { pcm ->
                         if (stopped || closed) {
                             false
@@ -279,5 +285,8 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
     private companion object {
         const val TAG = "Phonon"
         const val SAMPLE_RATE = 24_000
+
+        /** Any fixed value: it only has to be the same for every clause. */
+        const val STEADY_SEED = 20_261_127L
     }
 }

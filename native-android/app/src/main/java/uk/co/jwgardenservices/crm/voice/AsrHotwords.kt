@@ -140,14 +140,17 @@ object AsrHotwords {
                 val heard = slice(tokens, index, end).uppercase()
                 val lengthGap = abs(heard.length - name.length)
                 val distance = distance(heard, name)
-                val fuzzy = distance in 1..allowed
+                // An everyday word is never rewritten into a name, by spelling or sound.
+                val everyday = heard.split(' ').any { it in COMMON_WORDS }
+                val fuzzy = !everyday && distance in 1..allowed
                 // The sound-alike rule is for a headset that drops a name's first
-                // letter, so it needs a long name and a word of some length, and
-                // must never rewrite an everyday word: "today" must not become
-                // "GTA" or "hours" "BARK".
-                val phonetic = !fuzzy && heard.length >= 4 && name.length >= 6 &&
+                // letter. It matches any word with the same consonant skeleton, so
+                // in free speech it rewrote "backtrack" into SECATEURS and "make"
+                // into LOUISA. It only runs when a client name was just asked for,
+                // when the next words are expected to be a name.
+                val phonetic = aggressive && !fuzzy && heard.length >= 4 && name.length >= 6 &&
                     lengthGap <= (if (aggressive) 4 else 2) &&
-                    heard.split(' ').none { it in COMMON_WORDS } &&
+                    !everyday &&
                     phoneticMatch(heard, name)
                 if (!fuzzy && !phonetic) continue
                 val score = if (fuzzy) distance else allowed + 1 + lengthGap

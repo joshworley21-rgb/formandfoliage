@@ -60,7 +60,7 @@ class AsrHotwordsTest {
         // share the same Soundex tail, so the first-name index recovers it.
         assertEquals(
             "MARK LOUISA TODAY",
-            AsrHotwords.correct("MARK WEAS TODAY", listOf("LOUISA")),
+            AsrHotwords.correct("MARK WEAS TODAY", listOf("LOUISA"), aggressive = true),
         )
     }
 
@@ -97,16 +97,53 @@ class AsrHotwordsTest {
     }
 
     @Test
-    fun `a dropped first letter still works for a long name when the word is not common`() {
+    fun `a dropped first letter only works when a client name was just asked for`() {
+        assertEquals("MARK WEAS TODAY", AsrHotwords.correct("MARK WEAS TODAY", listOf("LOUISA")))
         assertEquals(
             "MARK LOUISA TODAY",
-            AsrHotwords.correct("MARK WEAS TODAY", listOf("LOUISA")),
+            AsrHotwords.correct("MARK WEAS TODAY", listOf("LOUISA"), aggressive = true),
+        )
+    }
+
+    // From the second real call, after the first fix: "backtrack" became SECATEURS
+    // and "make" LOUISA, because any word with the same consonant skeleton matched.
+    private val secondCallNames = callNames + listOf("SECATEURS", "TUESDAY", "STIHL", "WENDOVER")
+
+    @Test
+    fun `free speech is not rewritten by sound alike matches`() {
+        val said = "Uh, can we backtrack backdate all of Louisa and George's visits for this month " +
+            "and make sure they've been marked eight hours"
+        val fixed = AsrHotwords.correct(said, secondCallNames)
+        assertTrue("was: $fixed", fixed.contains("can we backtrack backdate"))
+        assertTrue("was: $fixed", fixed.contains("this month and make sure they've been marked eight hours"))
+        listOf("SUNNY", "SECATEURS", "GTA", "TEST", "BARK").forEach {
+            assertTrue("$it appeared in: $fixed", !fixed.contains(it))
+        }
+    }
+
+    @Test
+    fun `adding a client for a day is left alone`() {
+        val said = "Can you add a new client for Tuesday morning called Larry"
+        val fixed = AsrHotwords.correct(said, secondCallNames)
+        assertTrue("was: $fixed", fixed.startsWith("Can you add a new client for"))
+        assertTrue("was: $fixed", fixed.endsWith("morning called Larry"))
+        assertTrue("was: $fixed", !fixed.contains("SUNNY") && !fixed.contains("GTA"))
+    }
+
+    @Test
+    fun `a near miss spelling is still fixed without the sound alike rule`() {
+        assertEquals(
+            "log 3 hours at LOUISA today",
+            AsrHotwords.correct("log 3 hours at LOUISE today", listOf("LOUISA")),
         )
     }
 
     @Test
-    fun `common words survive even against a long sound alike name`() {
-        // TODAY and TODAYS share a Soundex tail with plenty of names.
-        assertEquals("WHAT IS ON TODAY", AsrHotwords.correct("WHAT IS ON TODAY", listOf("GATESIA", "KODAYA")))
+    fun `common words survive even when a name was just asked for`() {
+        // TODAY shares a Soundex tail with plenty of names.
+        assertEquals(
+            "WHAT IS ON TODAY",
+            AsrHotwords.correct("WHAT IS ON TODAY", listOf("GATESIA", "KODAYA"), aggressive = true),
+        )
     }
 }

@@ -215,9 +215,12 @@ class KokoroTts(private val context: Context) : AutoCloseable {
         val base = speed * ClauseProsody.BASE_SPEED
         stopRequested = false
         var spokenAny = false
+        val steady = runCatching { AssistantPreferences.steadyVoiceFlow(context).first() }
+            .getOrDefault(true)
         chunks.forEachIndexed { index, chunk ->
             if (closed || stopRequested) return
-            val clauseSpeed = (base * ClauseProsody.speedMultiplier(chunk))
+            val pace = ClauseProsody.speedMultiplier(chunk)
+            val clauseSpeed = (base * (if (steady) ClauseProsody.steady(pace) else pace))
                 .coerceIn(0.5f, 1.6f)
             val spoken = runCatching { phononSpeech().speak(chunk, clauseSpeed) }
                 .getOrDefault(false)

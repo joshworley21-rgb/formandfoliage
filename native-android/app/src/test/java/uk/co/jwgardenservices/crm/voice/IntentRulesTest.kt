@@ -136,4 +136,35 @@ class IntentRulesTest {
         assertTrue(IntentRules.classify("add 40 for green waste").intent == SpokenIntent.AdjustCharge)
         assertTrue(IntentRules.classify("change the rate to £45 an hour").intent == SpokenIntent.AdjustCharge)
     }
+
+    @Test
+    fun `a booking is not a diary question`() {
+        listOf(
+            "can you add a new client for tuesday morning called larry",
+            "book the smiths in for friday",
+            "schedule smith for tuesday",
+            "please create a job for rose cottage next week",
+            "i need to set up a visit for the hendersons tomorrow",
+        ).forEach {
+            assertTrue("'$it' was ${IntentRules.classify(it).intent}", IntentRules.classify(it).intent == SpokenIntent.Other)
+        }
+    }
+
+    @Test
+    fun `real diary questions still read the diary`() {
+        listOf(
+            "what's on tuesday",
+            "what's my schedule tomorrow",
+            "have i got anything on friday",
+            "what am i doing next week",
+        ).forEach {
+            assertTrue("'$it' was ${IntentRules.classify(it).intent}", IntentRules.classify(it).intent == SpokenIntent.CheckSchedule)
+        }
+    }
+
+    @Test
+    fun `other add and put commands keep their own meaning`() {
+        assertTrue(IntentRules.classify("make a note for the smiths that the gate sticks").intent == SpokenIntent.AddNote)
+        assertTrue(IntentRules.classify("put two hours on the johnsons").intent == SpokenIntent.LogHours)
+    }
 }
