@@ -52,6 +52,16 @@ android {
             "\"" + (providers.gradleProperty("SENTRY_DSN").orNull?.takeIf { it.isNotBlank() }
                 ?: "https://2db5e3b800989fa06211896264228199@o4512413257826304.ingest.de.sentry.io/4512413289087056") + "\"",
         )
+        // Which commit this APK was built from, so an assistant log can be matched
+        // to a build. GitHub's runner provides it; locally it is asked of git.
+        val gitSha = (
+            System.getenv("GITHUB_SHA")?.take(7)
+                ?: runCatching {
+                    providers.exec { commandLine("git", "rev-parse", "--short=7", "HEAD") }
+                        .standardOutput.asText.get().trim()
+                }.getOrNull()
+            )?.takeIf { it.isNotBlank() } ?: "dev"
+        buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
         // Voice input runs entirely on the phone with sherpa-onnx, so there is
         // no server URL or token to inject here any more.
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")

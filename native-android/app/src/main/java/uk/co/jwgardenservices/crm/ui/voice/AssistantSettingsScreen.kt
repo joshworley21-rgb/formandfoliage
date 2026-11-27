@@ -50,6 +50,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -67,6 +68,8 @@ import uk.co.jwgardenservices.crm.voice.KokoroCustomVoices
 import uk.co.jwgardenservices.crm.voice.KokoroHqDownloader
 import uk.co.jwgardenservices.crm.voice.KokoroEngine
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
+import uk.co.jwgardenservices.crm.voice.CallAudio
+import uk.co.jwgardenservices.crm.voice.FinalPass
 import uk.co.jwgardenservices.crm.voice.LlmModel
 import uk.co.jwgardenservices.crm.voice.LocalLlm
 import uk.co.jwgardenservices.crm.voice.MicSource
@@ -84,6 +87,7 @@ import uk.co.jwgardenservices.crm.voice.PersonaLength
 import uk.co.jwgardenservices.crm.voice.PersonaTone
 import uk.co.jwgardenservices.crm.voice.PronunciationDictionary
 import uk.co.jwgardenservices.crm.voice.SpeechDenoiser
+import uk.co.jwgardenservices.crm.voice.WhisperDownloader
 import uk.co.jwgardenservices.crm.voice.SpeechEngine
 import uk.co.jwgardenservices.crm.ui.common.CompactScreenHeader
 import uk.co.jwgardenservices.crm.ui.common.SegmentedPillTabs
@@ -594,6 +598,9 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 }
             }
         }
+
+        WhisperPassCard()
+        AudioCaptureCard()
 
         SectionCard(
             title = "Online voice (OpenAI)",
@@ -1493,6 +1500,171 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
 
         }
         Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun WhisperPassCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val pass by AssistantPreferences.finalPassFlow(context)
+        .collectAsStateWithLifecycle(initialValue = FinalPass.Moonshine)
+    val state by WhisperDownloader.state.collectAsStateWithLifecycle()
+    var installed by remember { mutableStateOf(WhisperDownloader.isInstalled(context)) }
+    var saved by remember { mutableLongStateOf(WhisperDownloader.savedBytes(context)) }
+    LaunchedEffect(state) {
+        when (state) {
+            is WhisperDownloader.State.Done -> {
+                installed = true
+                saved = 0
+                WhisperDownloader.clearResult()
+            }
+            is WhisperDownloader.State.Working -> Unit
+            else -> saved = WhisperDownloader.savedBytes(context)
+        }
+    }
+    SectionCard(
+        title = "Second look: Whisper (experimental)",
+        subtitle = "Built for noisy speech.",
+        leadingIcon = Icons.Outlined.GraphicEq,
+    ) {
+        Column(
+            modifier = Modifier.padding(JwTokens.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Every sentence is heard twice: live, and again as a whole once you stop. " +
+                    "Moonshine does the second look by default. Whisper was trained on a lot of " +
+                    "noisy speech, so it may follow you better in the van, but it is slower " +
+                    "(a second or more a sentence) and needs about 375 MB and spare memory. If " +
+                    "memory is short it quietly uses Moonshine. Each sentence's time is in the " +
+                    "assistant log.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SettingSwitchRow(
+                title = "Use Whisper for the second look",
+                description = "Switch off to go back to Moonshine.",
+                checked = pass == FinalPass.Whisper && installed,
+                enabled = installed,
+                onCheckedChange = { on ->
+                    scope.launch {
+                        AssistantPreferences.setFinalPass(context, if (on) FinalPass.Whisper else FinalPass.Moonshine)
+                    }
+                },
+            )
+            val working = state as? WhisperDownloader.State.Working
+            if (working != null) {
+                LinearProgressIndicator(progress = { working.progress }, modifier = Modifier.fillMaxWidth())
+                Text(
+                    text = "Downloading ${working.done / MEGABYTE} of ${working.total / MEGABYTE} MB",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(onClick = { WhisperDownloader.cancel() }) { Text("Cancel") }
+            } else if (installed) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Installed", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                AssistantPreferences.setFinalPass(context, FinalPass.Moonshine)
+                                WhisperDownloader.remove(context)
+                                installed = false
+                                saved = 0
+                            }
+                        },
+                    ) { Text("Remove") }
+                }
+            } else {
+                OutlinedButton(onClick = { WhisperDownloader.start(context) }) {
+                    Text(
+                        if (saved > 0) {
+                            "Resume download (${saved / MEGABYTE} MB saved)"
+                        } else {
+                            "Download Whisper small.en (${WhisperDownloader.TOTAL_BYTES / MEGABYTE} MB)"
+                        },
+                    )
+                }
+            }
+            (state as? WhisperDownloader.State.Failed)?.let { failure ->
+                Text(
+                    text = failure.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AudioCaptureCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val save by AssistantPreferences.saveAudioFlow(context).collectAsStateWithLifecycle(initialValue = false)
+    var count by remember { mutableIntStateOf(CallAudio.count(context)) }
+    LaunchedEffect(save) { count = CallAudio.count(context) }
+    SectionCard(
+        title = "Save call audio (for tuning)",
+        subtitle = "Stays on this phone.",
+        leadingIcon = Icons.Outlined.Mic,
+    ) {
+        Column(
+            modifier = Modifier.padding(JwTokens.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Keeps a copy of each sentence the assistant hears, with what each recogniser " +
+                    "made of it, so the recognisers can be compared on your own voice in the van. " +
+                    "It stays on this phone (the newest 60 sentences) and nothing is sent anywhere " +
+                    "unless you tap Share. Switch it off when you are done.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SettingSwitchRow(
+                title = "Save call audio",
+                description = "Takes effect from the next call.",
+                checked = save,
+                onCheckedChange = { on -> scope.launch { AssistantPreferences.setSaveAudio(context, on) } },
+            )
+            Text(
+                text = "Saved: $count ${if (count == 1) "sentence" else "sentences"}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    enabled = count > 0,
+                    onClick = {
+                        scope.launch {
+                            val zip = withContext(kotlinx.coroutines.Dispatchers.IO) { CallAudio.zipForShare(context) }
+                            if (zip != null) {
+                                val uri = androidx.core.content.FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    zip,
+                                )
+                                val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                    type = "application/zip"
+                                    putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(
+                                    android.content.Intent.createChooser(send, "Share call audio")
+                                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                                )
+                            }
+                        }
+                    },
+                ) { Text("Share saved audio") }
+                TextButton(
+                    enabled = count > 0,
+                    onClick = {
+                        CallAudio.clear(context)
+                        count = 0
+                    },
+                ) { Text("Delete") }
+            }
         }
     }
 }

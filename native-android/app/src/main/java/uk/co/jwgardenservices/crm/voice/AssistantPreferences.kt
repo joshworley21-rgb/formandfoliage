@@ -92,6 +92,8 @@ private val LOCAL_MODEL_KEY = stringPreferencesKey("local_model")
 private val TOOL_ROUTER_KEY = booleanPreferencesKey("tool_router")
 private val STEADY_VOICE_KEY = booleanPreferencesKey("steady_voice")
 private val CONFIRM_CHANGES_KEY = booleanPreferencesKey("confirm_changes")
+private val SAVE_AUDIO_KEY = booleanPreferencesKey("save_call_audio")
+private val FINAL_PASS_KEY = stringPreferencesKey("final_pass")
 private val PRONUNCIATION_KEY = stringPreferencesKey("pronunciation")
 private val DRIVING_KEY = booleanPreferencesKey("driving_mode")
 private val AUTO_DRIVING_KEY = booleanPreferencesKey("auto_driving_mode")
@@ -311,6 +313,22 @@ object AssistantPreferences {
     suspend fun setLocalModel(context: Context, model: LlmModel) {
         context.assistantDataStore.edit { it[LOCAL_MODEL_KEY] = model.id }
         LocalLlm.preferred = model
+    }
+
+    /** Keep a local copy of each utterance and what was heard, for tuning. Off unless switched on. */
+    fun saveAudioFlow(context: Context): Flow<Boolean> =
+        context.assistantDataStore.data.map { it[SAVE_AUDIO_KEY] ?: false }
+
+    suspend fun setSaveAudio(context: Context, enabled: Boolean) {
+        context.assistantDataStore.edit { it[SAVE_AUDIO_KEY] = enabled }
+    }
+
+    /** Which offline recogniser takes the second look at each sentence. */
+    fun finalPassFlow(context: Context): Flow<FinalPass> =
+        context.assistantDataStore.data.map { FinalPass.fromId(it[FINAL_PASS_KEY]) }
+
+    suspend fun setFinalPass(context: Context, pass: FinalPass) {
+        context.assistantDataStore.edit { it[FINAL_PASS_KEY] = pass.id }
     }
 
     /** Read every change back and wait for a yes before saving it. On unless switched off. */

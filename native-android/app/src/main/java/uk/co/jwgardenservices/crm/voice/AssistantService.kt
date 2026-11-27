@@ -58,6 +58,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import uk.co.jwgardenservices.crm.MainActivity
 import uk.co.jwgardenservices.crm.R
 import uk.co.jwgardenservices.crm.core.CrashLog
+import uk.co.jwgardenservices.crm.BuildConfig
 import uk.co.jwgardenservices.crm.data.remote.SupabaseProvider
 import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
 import uk.co.jwgardenservices.crm.data.repository.invoiceItems
@@ -435,6 +436,7 @@ class AssistantService : Service() {
         // only a call that was not already connected gets the pickup greeting.
         val fresh = !_callActive.value
         CrashLog.note(this, TAG, if (fresh) "call starting" else "call resuming")
+        CrashLog.note(this, TAG, "build ${BuildConfig.VERSION_NAME} (${BuildConfig.GIT_SHA})")
         if (fresh) {
             heardInCall = false
             // The summary card is about this call only.
@@ -650,6 +652,7 @@ class AssistantService : Service() {
             if (toolRouterOn && LocalLlm.isInstalled(this@AssistantService, LlmModel.Router)) {
                 LocalLlm.warmRouter(this@AssistantService)
             }
+            runCatching { speech.warmFinalPass() }
         }
     }
 
@@ -2151,7 +2154,12 @@ class AssistantService : Service() {
                             "Battery's running low, so I'm on the local answers only."
                         cloudConversation ->
                             "I couldn't reach the online service. Try again when you have signal."
-                        else -> HELP_TEXT
+                        // The full list of what it can do takes about 19 seconds to
+                        // say; a sentence it did not follow gets one short line.
+                        else -> VoiceLines.pick(
+                            "Sorry, I didn't catch that one. Say it again, or say help for what I can do.",
+                            "Sorry, I didn't follow that. Try it again, or say help.",
+                        )
                     },
                 )
             }
