@@ -50,6 +50,45 @@ class RouterTools : ToolSet {
         @ToolParam(description = "Cost in pounds, for example 30") amount: Double,
         @ToolParam(description = "What was bought") item: String,
     ): String = ""
+
+    // The tools below only choose the action. The day, time, length and amounts
+    // are read from the sentence itself, so the model has nothing to get wrong.
+
+    @Tool(description = "Add a new client, and book them in if a day was mentioned.")
+    fun addClient(@ToolParam(description = "The new client's name") name: String): String = ""
+
+    @Tool(description = "Book a client in for a day and time.")
+    fun bookJob(@ToolParam(description = "The client's name as spoken") client: String): String = ""
+
+    @Tool(description = "Move a client's booking to another day or time.")
+    fun moveJob(@ToolParam(description = "The client's name as spoken") client: String): String = ""
+
+    @Tool(description = "Cancel a client's booking.")
+    fun cancelJob(@ToolParam(description = "The client's name as spoken") client: String): String = ""
+
+    @Tool(description = "Fill in or backdate a client's past visits and their hours.")
+    fun backfillVisits(@ToolParam(description = "The client's name as spoken") client: String): String = ""
+
+    @Tool(description = "A client has paid: mark their invoices as paid.")
+    fun markPaid(@ToolParam(description = "The client's name as spoken") client: String): String = ""
+
+    @Tool(description = "Change a client's phone number or hourly rate.")
+    fun updateClient(@ToolParam(description = "The client's name as spoken") client: String): String = ""
+
+    @Tool(description = "A quote was accepted or declined.")
+    fun quoteStatus(@ToolParam(description = "The client's name as spoken") client: String): String = ""
+
+    @Tool(description = "Update an enquiry: contacted, closed, or make them a client.")
+    fun enquiryStatus(@ToolParam(description = "The enquirer's name") name: String): String = ""
+
+    @Tool(description = "Read out the new enquiries.")
+    fun enquiries(): String = ""
+
+    @Tool(description = "Read out the quotes waiting on a reply.")
+    fun quotesWaiting(): String = ""
+
+    @Tool(description = "Read out the past jobs that have not been logged.")
+    fun unloggedJobs(): String = ""
 }
 
 object ToolRoute {
@@ -109,6 +148,29 @@ object ToolRoute {
                     (if (who.isNotEmpty()) " for $who" else "")
                 routed(SpokenIntent.AddExpense, text, who)
             }
+            "add_client" -> {
+                val name = said("name")
+                // "Add Larry as a client": give the runner the name it looks for.
+                val text = if (VoiceSlots.newClientName(utterance) == null &&
+                    name.isNotBlank() && heard.contains(name.lowercase())
+                ) {
+                    "$utterance called $name"
+                } else {
+                    utterance
+                }
+                routed(SpokenIntent.AddClient, text, "")
+            }
+            "book_job" -> routed(SpokenIntent.BookJob, utterance, client())
+            "move_job" -> routed(SpokenIntent.MoveJob, utterance, client())
+            "cancel_job" -> routed(SpokenIntent.CancelJob, utterance, client())
+            "backfill_visits" -> routed(SpokenIntent.BackfillVisits, utterance, client())
+            "mark_paid" -> routed(SpokenIntent.MarkPaid, utterance, client())
+            "update_client" -> routed(SpokenIntent.UpdateClient, utterance, client())
+            "quote_status" -> routed(SpokenIntent.QuoteStatus, utterance, client())
+            "enquiry_status" -> routed(SpokenIntent.EnquiryStatus, utterance, "")
+            "enquiries" -> routed(SpokenIntent.Enquiries, utterance, "")
+            "quotes_waiting" -> routed(SpokenIntent.QuotesWaiting, utterance, "")
+            "unlogged_jobs" -> routed(SpokenIntent.UnloggedJobs, utterance, "")
             else -> null
         }
     }

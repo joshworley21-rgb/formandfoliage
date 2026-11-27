@@ -157,19 +157,22 @@ object LocalBrain {
         val said = candidate.trim()
         if (said.isEmpty()) return ""
         val heard = utterance.lowercase()
-        val heardWords = words(heard.replace("'s", "")).toSet()
-        val want = words(said)
+        // "The Smiths" is a client called Smith: compare without a trailing s.
+        val heardWords = words(heard.replace("'s", "")).map(::stem).toSet()
+        val want = words(said).map(::stem)
         val known = clientNames.map { it.trim() }.filter { it.isNotEmpty() }
 
         known.firstOrNull { it.equals(said, ignoreCase = true) }?.let { exact ->
-            return if (words(exact).any { it in heardWords }) exact else ""
+            return if (words(exact).any { stem(it) in heardWords }) exact else ""
         }
         if (want.isNotEmpty() && want.all { it in heardWords }) {
-            val fits = known.filter { name -> words(name).toSet().containsAll(want) }
+            val fits = known.filter { name -> words(name).map(::stem).toSet().containsAll(want) }
             if (fits.size == 1) return fits.first()
         }
         return if (heard.contains(said.lowercase())) said else ""
     }
+
+    private fun stem(word: String): String = if (word.length > 3 && word.endsWith("s")) word.dropLast(1) else word
 
     private fun words(text: String): List<String> = text.lowercase()
         .split(Regex("[^a-z0-9]+"))
@@ -194,7 +197,9 @@ object LocalBrain {
             SpokenIntent.MarkPaid -> PAID_EVIDENCE
             SpokenIntent.UpdateClient -> UPDATE_EVIDENCE
             SpokenIntent.QuoteStatus -> QUOTE_EVIDENCE
-            SpokenIntent.EnquiryStatus -> ENQUIRY_EVIDENCE
+            SpokenIntent.EnquiryStatus, SpokenIntent.Enquiries -> ENQUIRY_EVIDENCE
+            SpokenIntent.QuotesWaiting -> QUOTE_EVIDENCE
+            SpokenIntent.UnloggedJobs -> UNLOGGED_EVIDENCE
             else -> return true
         }
         return evidence.containsMatchIn(lower)
@@ -220,6 +225,7 @@ object LocalBrain {
     private val PAID_EVIDENCE = Regex("\\b(?:paid|settled|pay|payment)\\b")
     private val UPDATE_EVIDENCE = Regex("\\b(?:change|update|set|new|rate|number|phone|mobile)\\b")
     private val QUOTE_EVIDENCE = Regex("quote")
+    private val UNLOGGED_EVIDENCE = Regex("\\b(?:log|logged|record|recorded|entered)\\b")
     private val ENQUIRY_EVIDENCE = Regex("enquir|inquir")
     private val WEATHER_EVIDENCE = Regex(
         "\\b(weather|rain\\w*|forecast|sun\\w*|cold|warm|wind\\w*|hot|snow\\w*|frost\\w*|" +

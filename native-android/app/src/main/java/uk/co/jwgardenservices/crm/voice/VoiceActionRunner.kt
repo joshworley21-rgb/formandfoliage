@@ -3,6 +3,8 @@ package uk.co.jwgardenservices.crm.voice
 import kotlinx.coroutines.flow.first
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.data.model.ClientDraft
+import uk.co.jwgardenservices.crm.data.model.JobDraft
+import uk.co.jwgardenservices.crm.data.model.Visit
 import uk.co.jwgardenservices.crm.data.model.NewInvoiceInput
 import uk.co.jwgardenservices.crm.data.model.RunningCost
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
@@ -12,9 +14,13 @@ import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
 import uk.co.jwgardenservices.crm.data.repository.createInvoice
 import uk.co.jwgardenservices.crm.data.repository.createLocalInvoice
 import uk.co.jwgardenservices.crm.data.repository.deleteInvoice
+import uk.co.jwgardenservices.crm.data.repository.convertEnquiryToClient
 import uk.co.jwgardenservices.crm.data.repository.markInvoicePaid
+import uk.co.jwgardenservices.crm.data.repository.setQuoteStatus
+import uk.co.jwgardenservices.crm.data.repository.updateEnquiryStatus
 import uk.co.jwgardenservices.crm.data.repository.updateInvoiceDraft
 import uk.co.jwgardenservices.crm.domain.BillingSource
+import uk.co.jwgardenservices.crm.domain.atTime
 import uk.co.jwgardenservices.crm.domain.BusinessSnapshot
 import uk.co.jwgardenservices.crm.domain.buildBusinessSnapshot
 import uk.co.jwgardenservices.crm.domain.coachInsights
@@ -102,6 +108,14 @@ class VoiceActionRunner(
         ) : Undo
 
         data class Note(val clientId: String, val previous: String?, val clientName: String) : Undo
+
+        data class AddedClient(val clientId: String, val name: String) : Undo
+
+        data class BookedJob(val jobId: String?, val clientName: String) : Undo
+
+        data class MovedJob(val before: JobDraft, val clientName: String) : Undo
+
+        data class CancelledJob(val before: JobDraft, val clientName: String) : Undo
     }
 
     private var lastUndo: Undo? = null
@@ -275,7 +289,7 @@ class VoiceActionRunner(
 
     private fun slow(text: String): String = "${TtsProsody.SLOW}$text"
 
-    fun hasPending(): Boolean = pending != null
+    fun hasPending(): Boolean = pending != null || pendingSlot != null
 
     /**
      * True while the assistant has asked "Which client was that for?" or
@@ -287,6 +301,7 @@ class VoiceActionRunner(
 
     fun clearPending() {
         pending = null
+        pendingSlot = null
         gate.clear()
     }
 
@@ -348,6 +363,18 @@ class VoiceActionRunner(
             SpokenIntent.AdjustCharge -> adjustCharge(text)
             SpokenIntent.AddExpense -> addExpense(text)
             SpokenIntent.NextVisitNote -> nextVisitNote(text)
+            SpokenIntent.AddClient -> addClient(text)
+            SpokenIntent.BookJob -> bookJob(text)
+            SpokenIntent.MoveJob -> moveJob(text)
+            SpokenIntent.CancelJob -> cancelJob(text)
+            SpokenIntent.BackfillVisits -> backfillVisits(text)
+            SpokenIntent.MarkPaid -> markPaid(text)
+            SpokenIntent.UpdateClient -> changeClientDetails(text)
+            SpokenIntent.QuoteStatus -> quoteStatus(text)
+            SpokenIntent.EnquiryStatus -> enquiryStatus(text)
+            SpokenIntent.Enquiries -> enquiriesRead()
+            SpokenIntent.QuotesWaiting -> quotesWaiting()
+            SpokenIntent.UnloggedJobs -> unloggedJobs(text)
             else -> null
         }
     }
@@ -361,6 +388,7 @@ class VoiceActionRunner(
         pivot(continuePendingImpl(transcript))
 
     private suspend fun continuePendingImpl(transcript: String): String? {
+        pendingSlot?.let { return continueSlot(it, transcript) }
         val pending = pending ?: return null
         val text = transcript.lowercase()
         if (
@@ -1098,6 +1126,501 @@ class VoiceActionRunner(
         }
     }
 
+    // ---------------------------------------------------------------------
+    // Changes to the client list, the diary and the books. Each is read back in
+    // full and waits for a yes (see commit). The day, time and length come from
+    // the words actually spoken, through the tested parsers in VoiceCalendar and
+    // VoiceSlots, never from a model's guess.
+    // ---------------------------------------------------------------------
+
+    /** A change that needs one more detail: the next sentence supplies it. */
+    private data class PendingSlot(val intent: SpokenIntent, val text: String, val join: String)
+
+    private var pendingSlot: PendingSlot? = null
+
+    /** True while a sentence is being tried as the answer to a pending question. */
+    private var answeringSlot = false
+
+    /** Set when that sentence did not supply the detail, so it is a new command instead. */
+    private var slotMissed = false
+
+    private val localZone: ZoneId get() = ZoneId.systemDefault()
+
+    private fun askFor(intent: SpokenIntent, text: String, join: String, question: String): String {
+        if (answeringSlot) {
+            slotMissed = true
+            return question
+        }
+        pendingSlot = PendingSlot(intent, text, join)
+        return question
+    }
+
+    private suspend fun continueSlot(slot: PendingSlot, transcript: String): String? {
+        pendingSlot = null
+        val lower = transcript.lowercase()
+        if (
+            lower.contains("cancel") || lower.contains("forget it") ||
+            lower.contains("never mind") || lower.trim() == "stop"
+        ) {
+            return "Right, dropped that one."
+        }
+        answeringSlot = true
+        slotMissed = false
+        val reply = try {
+            execute(slot.text + slot.join + transcript, IntentResult(slot.intent, "", false))
+        } finally {
+            answeringSlot = false
+        }
+        if (slotMissed) {
+            slotMissed = false
+            return null
+        }
+        return reply
+    }
+
+    private fun hhmm(time: LocalTime): String = "%02d:%02d".format(time.hour, time.minute)
+
+    private fun done(): String = VoiceLines.pick("Done —", "Sorted —", "Right —", "Lovely —")
+
+    private fun plural(count: Int, word: String): String = if (count == 1) "1 $word" else "$count ${word}s"
+
+    private suspend fun bookedJob(clientId: String, date: LocalDate, time: LocalTime): ScheduledJob? {
+        val startsAt = atTime(date, hhmm(time)).toString()
+        return repository.observeJobs().first().firstOrNull { it.clientId == clientId && it.startsAt == startsAt }
+    }
+
+    private fun slotDescription(date: LocalDate, time: LocalTime, today: LocalDate): String =
+        "${VoiceCalendar.describeDate(date, today)} at ${VoiceCalendar.describeTime(time)}"
+
+    /** "Add a new client for Tuesday morning called Larry": the client, and the booking if a day was named. */
+    private suspend fun addClient(text: String): String {
+        val name = VoiceSlots.newClientName(text)
+            ?: return askFor(SpokenIntent.AddClient, text, " called ", "What's the new client called?")
+        val clients = repository.observeClients().first()
+        clients.firstOrNull { normalizeMatchText(it.name) == normalizeMatchText(name) }?.let {
+            return "You already have a client called ${it.name}."
+        }
+        val today = LocalDate.now()
+        val date = VoiceCalendar.dateIn(text, today)
+        if (date != null && date.isBefore(today)) return "That day has already gone. When should I book them?"
+        val time = VoiceCalendar.timeIn(text) ?: LocalTime.of(9, 0)
+        val minutes = (VoiceCalendar.durationMinutesIn(text) ?: 60).coerceIn(15, 24 * 60)
+        val phone = VoiceSlots.phone(text)
+        val booking = date?.let {
+            "${slotDescription(it, time, today)} for ${VoiceCalendar.describeDuration(minutes)}"
+        }
+        val summary = buildString {
+            append("Add a new client called $name")
+            if (phone != null) append(", number ${VoiceSlots.spokenDigits(phone)}")
+            if (booking != null) append(", and book them in for $booking")
+        }
+        return commit(summary) {
+            repository.createClient(ClientDraft(name = name, phone = phone))
+            val created = repository.observeClients().first()
+                .firstOrNull { it.name.equals(name, ignoreCase = true) }
+                ?: return@commit "I couldn't save $name. Try again from the Clients tab?"
+            lastMentionedClientId = created.id
+            if (date != null) {
+                repository.saveJob(
+                    JobDraft(
+                        clientId = created.id,
+                        date = date.toString(),
+                        time = hhmm(time),
+                        durationMinutes = minutes,
+                    ),
+                )
+            }
+            lastUndo = Undo.AddedClient(created.id, name)
+            CallLedger.record("Added client $name") {
+                runCatching { repository.deleteClient(created.id) }
+                "Removed $name."
+            }
+            fast("${done()} $name is added" + (if (booking != null) " and booked for $booking." else "."))
+        }
+    }
+
+    private suspend fun bookJob(text: String): String {
+        val clients = repository.observeClients().first()
+        val client = clientFor(clients, text)
+            ?: return askFor(SpokenIntent.BookJob, text, " for ", "Which client shall I book?")
+        val today = LocalDate.now()
+        val date = VoiceCalendar.dateIn(text, today)
+            ?: return askFor(SpokenIntent.BookJob, text, " on ", "Which day for ${client.name}?")
+        if (date.isBefore(today)) return "That day has already gone. Which day should I book ${client.name} for?"
+        val time = VoiceCalendar.timeIn(text) ?: LocalTime.of(9, 0)
+        val minutes = (VoiceCalendar.durationMinutesIn(text) ?: 60).coerceIn(15, 24 * 60)
+        val clash = VoicePlans.clashes(repository.observeJobs().first(), date, time, minutes, zone = localZone)
+            .firstOrNull()
+            ?.let { job -> clients.firstOrNull { it.id == job.clientId }?.name }
+        val whenText = "${slotDescription(date, time, today)} for ${VoiceCalendar.describeDuration(minutes)}"
+        val summary = "Book ${client.name} for $whenText" + (clash?.let { ", though you already have $it then" } ?: "")
+        return commit(summary) {
+            repository.saveJob(
+                JobDraft(clientId = client.id, date = date.toString(), time = hhmm(time), durationMinutes = minutes),
+            )
+            val job = bookedJob(client.id, date, time)
+            lastUndo = Undo.BookedJob(job?.id, client.name)
+            CallLedger.record("Booked ${client.name} for ${VoiceCalendar.describeDate(date, today)}") {
+                job?.let { runCatching { repository.deleteJob(it.id) } }
+                "Took that booking back out."
+            }
+            fast("${done()} ${client.name} is booked for $whenText.")
+        }
+    }
+
+    private suspend fun moveJob(text: String): String {
+        val clients = repository.observeClients().first()
+        val client = clientFor(clients, text)
+            ?: return askFor(SpokenIntent.MoveJob, text, " for ", "Whose booking shall I move?")
+        val today = LocalDate.now()
+        val move = VoiceSlots.moveTargets(text, today)
+        val jobs = repository.observeJobs().first()
+        val job = VoicePlans.findJob(jobs, client.id, move.from, today, localZone)
+            ?: return "I can't see a booking for ${client.name}" +
+                (move.from?.let { " on ${VoiceCalendar.describeDate(it, today)}" } ?: "") + "."
+        val start = VoicePlans.startOf(job, localZone) ?: return "I couldn't read that booking's time."
+        val toDate = move.to
+            ?: if (move.time != null) {
+                start.toLocalDate()
+            } else {
+                return askFor(SpokenIntent.MoveJob, text, " to ", "Move ${client.name} to when?")
+            }
+        if (toDate.isBefore(today)) return "That day has already gone. Move ${client.name} to when?"
+        val toTime = move.time ?: start.toLocalTime()
+        val clash = VoicePlans.clashes(jobs, toDate, toTime, job.durationMinutes, job.id, localZone)
+            .firstOrNull()
+            ?.let { other -> clients.firstOrNull { it.id == other.clientId }?.name }
+        val from = slotDescription(start.toLocalDate(), start.toLocalTime(), today)
+        val to = slotDescription(toDate, toTime, today)
+        val summary = "Move ${client.name} from $from to $to" + (clash?.let { ", though you already have $it then" } ?: "")
+        return commit(summary) {
+            val before = JobDraft(
+                id = job.id,
+                clientId = job.clientId,
+                date = start.toLocalDate().toString(),
+                time = hhmm(start.toLocalTime()),
+                durationMinutes = job.durationMinutes,
+                notes = job.notes,
+            )
+            repository.saveJob(before.copy(date = toDate.toString(), time = hhmm(toTime)))
+            lastUndo = Undo.MovedJob(before, client.name)
+            CallLedger.record("Moved ${client.name} to ${VoiceCalendar.describeDate(toDate, today)}") {
+                repository.saveJob(before)
+                "Put that booking back."
+            }
+            fast("${done()} ${client.name} is now $to.")
+        }
+    }
+
+    private suspend fun cancelJob(text: String): String {
+        val clients = repository.observeClients().first()
+        val client = clientFor(clients, text)
+            ?: return askFor(SpokenIntent.CancelJob, text, " for ", "Whose booking shall I cancel?")
+        val today = LocalDate.now()
+        val on = VoiceCalendar.dateIn(text, today)
+        val job = VoicePlans.findJob(repository.observeJobs().first(), client.id, on, today, localZone)
+            ?: return "I can't see a booking for ${client.name}" +
+                (on?.let { " on ${VoiceCalendar.describeDate(it, today)}" } ?: "") + "."
+        val start = VoicePlans.startOf(job, localZone) ?: return "I couldn't read that booking's time."
+        val repeats = if (job.seriesId != null) ", just that one visit and not the whole run" else ""
+        val whenText = slotDescription(start.toLocalDate(), start.toLocalTime(), today)
+        return commit("Cancel ${client.name}'s booking on $whenText$repeats") {
+            val before = JobDraft(
+                id = job.id,
+                clientId = job.clientId,
+                date = start.toLocalDate().toString(),
+                time = hhmm(start.toLocalTime()),
+                durationMinutes = job.durationMinutes,
+                notes = job.notes,
+            )
+            repository.deleteJob(job.id)
+            lastUndo = Undo.CancelledJob(before, client.name)
+            CallLedger.record("Cancelled ${client.name} on ${VoiceCalendar.describeDate(start.toLocalDate(), today)}") {
+                repository.saveJob(before.copy(id = null))
+                "Put that booking back."
+            }
+            fast("${done()} ${client.name}'s booking on $whenText is cancelled.")
+        }
+    }
+
+    /** "Backdate Louisa and George's visits this month, eight hours each": log, link and correct in one go. */
+    private suspend fun backfillVisits(text: String): String {
+        val clients = repository.observeClients().first()
+        val client = clientFor(clients, text)
+            ?: return askFor(SpokenIntent.BackfillVisits, text, " for ", "Whose visits shall I fill in?")
+        val today = LocalDate.now()
+        val period = VoiceCalendar.periodIn(text, today)
+            ?: VoiceCalendar.periodIn("so far this month", today)!!
+        val hours = VoiceCalendar.durationMinutesIn(text)?.let { it / 60.0 }
+        val plan = VoicePlans.backfill(
+            repository.observeJobs().first(),
+            repository.observeVisits().first(),
+            client.id,
+            period,
+            Instant.now(),
+            hours,
+            localZone,
+        )
+        if (plan.isEmpty) return "There's nothing to fill in for ${client.name} ${period.label}."
+        val count = plan.toLog.size + plan.toLink.size + plan.toFix.size
+        if (count > 60) return "That's $count visits, so let's do it a month at a time."
+        val source = BillingSource(client.billingMode, client.hourlyRate, client.fixedPrice)
+        fun hoursFor(job: ScheduledJob) = round2(hours ?: (job.durationMinutes / 60.0).coerceAtLeast(0.5))
+        val parts = mutableListOf<String>()
+        if (plan.toLog.isNotEmpty()) {
+            val total = plan.toLog.sumOf { round2(priceVisit(source, hoursFor(it), 0.0)) }
+            val each = hours?.let { " at ${hoursLabel(it)} each" } ?: ""
+            parts += "log ${plural(plan.toLog.size, "job")} that never got a visit$each, ${money(total)} in all"
+        }
+        if (plan.toLink.isNotEmpty()) {
+            parts += "mark ${plural(plan.toLink.size, "job")} done against visits you already have"
+        }
+        if (plan.toFix.isNotEmpty() && hours != null) {
+            parts += "change ${plural(plan.toFix.size, "visit")} to ${hoursLabel(hours)}"
+        }
+        return commit("For ${client.name} ${period.label}: ${spokenJoin(parts)}") {
+            val created = mutableListOf<String>()
+            val relinked = mutableListOf<ScheduledJob>()
+            val originals = mutableListOf<Visit>()
+            for (job in plan.toLog) {
+                val day = VoicePlans.startOf(job, localZone)?.toLocalDate() ?: continue
+                val logged = hoursFor(job)
+                created += repository.saveVisit(
+                    VisitDraft(
+                        clientId = client.id,
+                        visitDate = day.toString(),
+                        hours = logged,
+                        materialsCost = 0.0,
+                        description = "Filled in by voice",
+                        amount = round2(priceVisit(source, logged, 0.0)),
+                        completesJobId = job.id,
+                        jobOutcome = "done",
+                    ),
+                )
+            }
+            for ((job, visit) in plan.toLink) {
+                repository.completeJobWithVisit(job.id, visit.id)
+                relinked += job
+            }
+            if (hours != null) {
+                for (visit in plan.toFix) {
+                    originals += visit
+                    repository.saveVisit(
+                        VisitDraft(
+                            id = visit.id,
+                            clientId = visit.clientId,
+                            visitDate = visit.visitDate,
+                            hours = round2(hours),
+                            materialsCost = visit.materialsCost,
+                            materialsNote = visit.materialsNote,
+                            description = visit.description,
+                            amount = round2(priceVisit(source, hours, visit.materialsCost)),
+                            missed = visit.missed,
+                        ),
+                    )
+                }
+            }
+            CallLedger.record("Filled in ${client.name}'s visits ${period.label}") {
+                created.forEach { runCatching { repository.deleteVoiceVisit(it) } }
+                relinked.forEach { runCatching { repository.reopenJob(it.id) } }
+                originals.forEach { visit ->
+                    runCatching {
+                        repository.saveVisit(
+                            VisitDraft(
+                                id = visit.id,
+                                clientId = visit.clientId,
+                                visitDate = visit.visitDate,
+                                hours = visit.hours,
+                                materialsCost = visit.materialsCost,
+                                materialsNote = visit.materialsNote,
+                                description = visit.description,
+                                amount = visit.amount,
+                                missed = visit.missed,
+                            ),
+                        )
+                    }
+                }
+                "Put ${client.name}'s visits back as they were."
+            }
+            val did = mutableListOf<String>()
+            if (created.isNotEmpty()) did += "${plural(created.size, "visit")} logged"
+            if (relinked.isNotEmpty()) did += "${plural(relinked.size, "job")} closed off"
+            if (originals.isNotEmpty()) did += "${plural(originals.size, "visit")} corrected"
+            fast("${done()} ${client.name} ${period.label}: ${spokenJoin(did)}.")
+        }
+    }
+
+    private suspend fun markPaid(text: String): String {
+        val clients = repository.observeClients().first()
+        val client = clientFor(clients, text)
+            ?: return askFor(SpokenIntent.MarkPaid, text, " for ", "Whose invoice has been paid?")
+        val unpaid = VoicePlans.unpaid(repository.observeInvoices().first(), client.id)
+        if (unpaid.isEmpty()) return "${client.name} has nothing outstanding."
+        val summary = if (unpaid.size == 1) {
+            "Mark ${client.name}'s invoice ${unpaid[0].number} for ${money(unpaid[0].total)} as paid"
+        } else {
+            "Mark all ${unpaid.size} of ${client.name}'s unpaid invoices, ${money(unpaid.sumOf { it.total })} in all, as paid"
+        }
+        return commit(summary) {
+            unpaid.forEach { repository.markInvoicePaid(it.id) }
+            CallLedger.record("${client.name}'s ${if (unpaid.size == 1) "invoice" else "invoices"} marked paid")
+            fast("${done()} ${client.name} is paid up.")
+        }
+    }
+
+    private suspend fun changeClientDetails(text: String): String {
+        val clients = repository.observeClients().first()
+        val client = clientFor(clients, text)
+            ?: return askFor(SpokenIntent.UpdateClient, text, " for ", "Which client's details?")
+        val phone = VoiceSlots.phone(text)
+        val rate = VoiceSlots.rateIn(text)?.takeIf { it > 0.0 && it <= 1000.0 }
+        val hourly = client.billingMode == "hourly"
+        if (phone == null && rate == null) {
+            return "What should I change for ${client.name}, the phone number or the hourly rate?"
+        }
+        if (phone == null && !hourly) {
+            return "${client.name} is billed at a fixed price, so there's no hourly rate to change."
+        }
+        val changes = mutableListOf<String>()
+        if (phone != null) changes += "number to ${VoiceSlots.spokenDigits(phone)}"
+        if (rate != null && hourly) changes += "hourly rate from ${money(client.hourlyRate)} to ${money(rate)}"
+        return commit("Change ${client.name}'s ${spokenJoin(changes)}") {
+            val before = ClientDraft(
+                name = client.name,
+                address = client.address,
+                phone = client.phone,
+                email = client.email,
+                notes = client.notes,
+                billingMode = client.billingMode,
+                hourlyRate = client.hourlyRate,
+                fixedPrice = client.fixedPrice,
+                paymentReminders = client.paymentReminders,
+            )
+            repository.updateClient(
+                client,
+                before.copy(
+                    phone = phone ?: client.phone,
+                    hourlyRate = if (rate != null && hourly) rate else client.hourlyRate,
+                ),
+            )
+            CallLedger.record("Changed ${client.name}'s details") {
+                val current = repository.client(client.id)
+                if (current != null) {
+                    repository.updateClient(current, before)
+                    "Put ${client.name}'s details back."
+                } else {
+                    "That client is already gone."
+                }
+            }
+            fast("${done()} ${client.name}'s details are updated.")
+        }
+    }
+
+    private suspend fun quoteStatus(text: String): String {
+        val lower = text.lowercase()
+        val status = when {
+            listOf("declined", "turned down", "said no", "not going ahead", "rejected", "doesn't want", "doesnt want")
+                .any { it in lower } -> "declined"
+            listOf("accepted", "approved", "said yes", "agreed", "gone ahead", "going ahead")
+                .any { it in lower } -> "accepted"
+            else -> return "Was the quote accepted or declined?"
+        }
+        val clients = repository.observeClients().first().associateBy { it.id }
+        val open = repository.observeQuotes().first().filter { it.status == "sent" || it.status == "draft" }
+        val scored = open.map { quote ->
+            val linked = quote.clientId?.let { clients[it]?.name }?.let { matchScore(it, lower) } ?: 0.0
+            quote to maxOf(matchScore(quote.contactName, lower), linked)
+        }.filter { (_, score) -> score > 0.0 }
+        val best = scored.maxOfOrNull { (_, score) -> score }
+        // Of the quotes that match best, the most recent is the one meant; its
+        // total is read back, so a wrong guess is caught before anything saves.
+        val quote = scored.filter { (_, score) -> score == best }
+            .map { (quote, _) -> quote }
+            .maxByOrNull { it.issueDate }
+            ?: return "I can't find an open quote for that."
+        val before = quote.status
+        return commit("Mark the quote for ${quote.contactName}, ${money(quote.total)}, as $status") {
+            repository.setQuoteStatus(quote.id, status)
+            CallLedger.record("Quote for ${quote.contactName} marked $status") {
+                repository.setQuoteStatus(quote.id, before)
+                "Put that quote back."
+            }
+            fast("${done()} the ${quote.contactName} quote is $status.")
+        }
+    }
+
+    private suspend fun enquiryStatus(text: String): String {
+        val lower = text.lowercase()
+        val open = repository.observeEnquiries().first().filter { it.status == "new" || it.status == "contacted" }
+        val enquiry = open
+            .map { it to matchScore(it.name, lower) }
+            .filter { (_, score) -> score > 0.0 }
+            .maxByOrNull { (_, score) -> score }
+            ?.first
+            ?: return "I can't find an open enquiry for that."
+        val action = when {
+            lower.contains("client") && listOf("make", "add", "convert", "turn").any { it in lower } -> "convert"
+            listOf("not interested", "close", "dismiss", "no longer", "spam").any { it in lower } -> "closed"
+            listOf("called", "rang", "spoke", "contacted", "texted", "emailed", "replied", "got back")
+                .any { it in lower } -> "contacted"
+            else -> return "What's happened with ${enquiry.name}'s enquiry: contacted, closed, or make them a client?"
+        }
+        val summary = when (action) {
+            "convert" -> "Turn ${enquiry.name}'s enquiry into a client"
+            "closed" -> "Close ${enquiry.name}'s enquiry"
+            else -> "Mark ${enquiry.name}'s enquiry as contacted"
+        }
+        val before = enquiry.status
+        return commit(summary) {
+            if (action == "convert") {
+                repository.convertEnquiryToClient(enquiry)
+                CallLedger.record("${enquiry.name} made a client")
+                fast("${done()} ${enquiry.name} is now a client.")
+            } else {
+                repository.updateEnquiryStatus(enquiry.id, action)
+                CallLedger.record("${enquiry.name}'s enquiry marked $action") {
+                    repository.updateEnquiryStatus(enquiry.id, before)
+                    "Put that enquiry back."
+                }
+                fast("${done()} ${enquiry.name}'s enquiry is $action.")
+            }
+        }
+    }
+
+    private suspend fun enquiriesRead(): String {
+        val open = repository.observeEnquiries().first()
+            .filter { it.status == "new" }
+            .sortedByDescending { it.createdAt ?: "" }
+        if (open.isEmpty()) return "No new enquiries."
+        val names = spokenJoin(open.take(3).map { it.name })
+        val more = if (open.size > 3) " and ${open.size - 3} more" else ""
+        return "You've got ${plural(open.size, "new enquiry").replace("enquirys", "enquiries")}: $names$more."
+    }
+
+    private suspend fun quotesWaiting(): String {
+        val sent = repository.observeQuotes().first().filter { it.status == "sent" }
+            .sortedBy { it.sentAt ?: it.issueDate }
+        if (sent.isEmpty()) return "No quotes waiting on a reply."
+        val total = money(sent.sumOf { it.total })
+        val oldest = sent.take(3).joinToString(", ") { "${it.contactName} ${money(it.total)}" }
+        return "${plural(sent.size, "quote")} waiting on a reply, $total in all. Oldest first: $oldest."
+    }
+
+    private suspend fun unloggedJobs(text: String): String {
+        val today = LocalDate.now()
+        val period = VoiceCalendar.periodIn(text, today)
+        val jobs = VoicePlans.unlogged(repository.observeJobs().first(), Instant.now(), period, localZone)
+        if (jobs.isEmpty()) return "Everything's logged ${period?.label ?: "so far"}."
+        val names = repository.observeClients().first().associate { it.id to it.name }
+        val byClient = jobs.groupBy { it.clientId }
+            .map { (id, list) -> (names[id] ?: "someone") to list.size }
+            .sortedByDescending { it.second }
+        val spoken = spokenJoin(byClient.take(4).map { (name, n) -> "$n for $name" })
+        val more = if (byClient.size > 4) " and ${byClient.size - 4} more clients" else ""
+        return "${plural(jobs.size, "job")} not logged yet: $spoken$more. " +
+            "Say fill in, with a client's name, and I'll do them."
+    }
+
     /** Reverse the last reversible action: a logged visit or a client note. */
     suspend fun undoLast(): String = pivot(undoLastImpl()) ?: "Nothing to undo."
 
@@ -1141,6 +1664,29 @@ class VoiceActionRunner(
                     ?: return "That client is gone."
                 repository.updateClient(client, clientDraft(client, action.previous))
                 "${undoBanter()} That note on ${action.clientName} is gone."
+            }
+
+            is Undo.AddedClient -> {
+                runCatching { repository.deleteClient(action.clientId) }
+                    .getOrElse { return "I couldn't remove ${action.name}." }
+                "${undoBanter()} ${action.name} is gone again."
+            }
+
+            is Undo.BookedJob -> {
+                action.jobId?.let { runCatching { repository.deleteJob(it) } }
+                "${undoBanter()} That booking for ${action.clientName} is gone."
+            }
+
+            is Undo.MovedJob -> {
+                runCatching { repository.saveJob(action.before) }
+                    .getOrElse { return "I couldn't move that back." }
+                "${undoBanter()} ${action.clientName}'s booking is back where it was."
+            }
+
+            is Undo.CancelledJob -> {
+                runCatching { repository.saveJob(action.before.copy(id = null)) }
+                    .getOrElse { return "I couldn't put that booking back." }
+                "${undoBanter()} ${action.clientName}'s booking is back on."
             }
         }
     }

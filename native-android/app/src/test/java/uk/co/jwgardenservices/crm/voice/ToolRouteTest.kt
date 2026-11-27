@@ -169,4 +169,58 @@ class ToolRouteTest {
         assertEquals(emptyMap<String, Any?>(), ToolRoute.parseRawCall("call:who_owes_me{}")?.arguments)
         assertNull(ToolRoute.parseRawCall("I am not sure what you mean."))
     }
+
+    @Test
+    fun `the new actions are chosen by the model but read from the sentence`() {
+        fun routed(tool: String, said: String, vararg args: Pair<String, Any?>) = route(tool, said, *args)
+        val book = routed("book_job", "book the Smiths in for Tuesday at 10", "client" to "Smith")
+        assertEquals(SpokenIntent.BookJob, book?.intent)
+        // The day and time are the owner's own words, never the model's.
+        assertEquals("book the Smiths in for Tuesday at 10", book?.text)
+        assertEquals("Smith", book?.client)
+
+        assertEquals(SpokenIntent.MoveJob, routed("move_job", "move Smith to Thursday", "client" to "Smith")?.intent)
+        assertEquals(SpokenIntent.CancelJob, routed("cancel_job", "cancel Smith on Friday", "client" to "Smith")?.intent)
+        assertEquals(SpokenIntent.MarkPaid, routed("mark_paid", "Smith has paid", "client" to "Smith")?.intent)
+        assertEquals(SpokenIntent.UpdateClient, routed("update_client", "change Smith's number to 07123 456789", "client" to "Smith")?.intent)
+        assertEquals(SpokenIntent.QuoteStatus, routed("quote_status", "Smith accepted the quote", "client" to "Smith")?.intent)
+        assertEquals(SpokenIntent.EnquiryStatus, routed("enquiry_status", "I called the enquiry from Sarah", "name" to "Sarah")?.intent)
+        assertEquals(
+            SpokenIntent.BackfillVisits,
+            routed("backfill_visits", "backdate Smith's visits this month", "client" to "Smith")?.intent,
+        )
+        assertEquals(SpokenIntent.Enquiries, routed("enquiries", "any new enquiries")?.intent)
+        assertEquals(SpokenIntent.QuotesWaiting, routed("quotes_waiting", "any quotes waiting")?.intent)
+        assertEquals(SpokenIntent.UnloggedJobs, routed("unlogged_jobs", "what haven't I logged")?.intent)
+    }
+
+    @Test
+    fun `a tool the sentence gives no support for is refused`() {
+        assertNull(route("book_job", "what's the weather like", "client" to "Smith"))
+        assertNull(route("cancel_job", "when is Smith next in", "client" to "Smith"))
+        assertNull(route("mark_paid", "how are you getting on", "client" to "Smith"))
+        assertNull(route("quote_status", "what's on tomorrow", "client" to "Smith"))
+        assertNull(route("enquiries", "what's on tomorrow"))
+        assertNull(route("quotes_waiting", "what's on tomorrow"))
+        assertNull(route("unlogged_jobs", "what's on tomorrow"))
+        assertNull(route("move_job", "lovely day", "client" to "Smith"))
+    }
+
+    @Test
+    fun `a client the model invented is dropped from the new actions too`() {
+        val command = route("book_job", "book someone in for Tuesday", "client" to "Smith")
+        assertEquals(SpokenIntent.BookJob, command?.intent)
+        assertEquals("", command?.client)
+    }
+
+    @Test
+    fun `a new client's name is passed on when the sentence did not use called`() {
+        val said = "add Larry as a client"
+        assertEquals("add Larry as a client called Larry", route("add_client", said, "name" to "Larry")?.text)
+        // Already said with "called": left exactly as spoken.
+        val called = "add a new client called Larry for Tuesday"
+        assertEquals(called, route("add_client", called, "name" to "Larry")?.text)
+        // A name nobody said is not invented into the sentence.
+        assertEquals("add a new client", route("add_client", "add a new client", "name" to "Larry")?.text)
+    }
 }

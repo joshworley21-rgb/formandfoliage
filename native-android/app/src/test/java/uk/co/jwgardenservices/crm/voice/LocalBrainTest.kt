@@ -180,4 +180,13 @@ class LocalBrainTest {
         assertEquals("LEAN", prompts.forModel(LlmModel.Gemma))
         assertEquals("LEAN", prompts.forModel(LlmModel.Large))
     }
+
+    @Test
+    fun `the Smiths is a client called Smith`() {
+        assertEquals("Smith", LocalBrain.verifiedClient("Smith", "book the Smiths in for Tuesday", listOf("Smith", "Jones")))
+        assertEquals("Smith", LocalBrain.verifiedClient("Smiths", "book the Smiths in for Tuesday", listOf("Smith", "Jones")))
+        assertEquals("The Hendersons", LocalBrain.verifiedClient("Henderson", "the Henderson job is done", listOf("The Hendersons")))
+        // A client nobody mentioned is still dropped.
+        assertEquals("", LocalBrain.verifiedClient("Smith", "book the Joneses in for Tuesday", listOf("Smith", "Jones")))
+    }
 }
