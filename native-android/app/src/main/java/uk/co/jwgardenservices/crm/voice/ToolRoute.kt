@@ -18,76 +18,76 @@ data class RoutedCommand(val intent: SpokenIntent, val text: String, val client:
  */
 @Suppress("UNUSED_PARAMETER", "unused")
 class RouterTools : ToolSet {
-    @Tool(description = "Log hours worked at a client's property.")
+    @Tool(description = "Log hours worked.")
     fun logHours(
-        @ToolParam(description = "The client's name as spoken") client: String,
-        @ToolParam(description = "Hours worked, for example 3.5") hours: Double,
+        @ToolParam(description = "client name") client: String,
+        @ToolParam(description = "hours") hours: Double,
         @ToolParam(description = "today or yesterday") day: String,
     ): String = ""
 
-    @Tool(description = "Read out the diary for a day.")
+    @Tool(description = "Read the diary.")
     fun checkSchedule(
-        @ToolParam(description = "today, tomorrow, a weekday name, this week or next week") day: String,
+        @ToolParam(description = "day or week") day: String,
     ): String = ""
 
-    @Tool(description = "Save a note on a client's file.")
+    @Tool(description = "Save a note on a client.")
     fun addNote(
-        @ToolParam(description = "The client's name as spoken") client: String,
-        @ToolParam(description = "The note to save") note: String,
+        @ToolParam(description = "client name") client: String,
+        @ToolParam(description = "note") note: String,
     ): String = ""
 
-    @Tool(description = "Mark a client's job as finished.")
+    @Tool(description = "Mark a job done.")
     fun markJobDone(
-        @ToolParam(description = "The client's name as spoken") client: String,
+        @ToolParam(description = "client name") client: String,
     ): String = ""
 
-    @Tool(description = "List the clients who have unpaid invoices.")
+    @Tool(description = "Who has unpaid invoices.")
     fun whoOwesMe(): String = ""
 
-    @Tool(description = "Record the cost of materials bought for a client's job.")
+    @Tool(description = "Record materials bought.")
     fun addExpense(
-        @ToolParam(description = "The client's name as spoken") client: String,
-        @ToolParam(description = "Cost in pounds, for example 30") amount: Double,
-        @ToolParam(description = "What was bought") item: String,
+        @ToolParam(description = "client name") client: String,
+        @ToolParam(description = "pounds") amount: Double,
+        @ToolParam(description = "item") item: String,
     ): String = ""
 
     // The tools below only choose the action. The day, time, length and amounts
     // are read from the sentence itself, so the model has nothing to get wrong.
 
-    @Tool(description = "Add a new client, and book them in if a day was mentioned.")
-    fun addClient(@ToolParam(description = "The new client's name") name: String): String = ""
+    @Tool(description = "Add a new client.")
+    fun addClient(@ToolParam(description = "name") name: String): String = ""
 
-    @Tool(description = "Book a client in for a day and time.")
-    fun bookJob(@ToolParam(description = "The client's name as spoken") client: String): String = ""
+    @Tool(description = "Book a client in.")
+    fun bookJob(@ToolParam(description = "client name") client: String): String = ""
 
-    @Tool(description = "Move a client's booking to another day or time.")
-    fun moveJob(@ToolParam(description = "The client's name as spoken") client: String): String = ""
+    @Tool(description = "Move a booking.")
+    fun moveJob(@ToolParam(description = "client name") client: String): String = ""
 
-    @Tool(description = "Cancel a client's booking.")
-    fun cancelJob(@ToolParam(description = "The client's name as spoken") client: String): String = ""
+    @Tool(description = "Cancel a booking.")
+    fun cancelJob(@ToolParam(description = "client name") client: String): String = ""
 
-    @Tool(description = "Fill in or backdate a client's past visits and their hours.")
-    fun backfillVisits(@ToolParam(description = "The client's name as spoken") client: String): String = ""
+    @Tool(description = "Fill in past visits.")
+    fun backfillVisits(@ToolParam(description = "client name") client: String): String = ""
 
-    @Tool(description = "A client has paid: mark their invoices as paid.")
-    fun markPaid(@ToolParam(description = "The client's name as spoken") client: String): String = ""
+    @Tool(description = "Client has paid.")
+    fun markPaid(@ToolParam(description = "client name") client: String): String = ""
 
-    @Tool(description = "Change a client's phone number or hourly rate.")
-    fun updateClient(@ToolParam(description = "The client's name as spoken") client: String): String = ""
+    @Tool(description = "Change a client's phone or rate.")
+    fun updateClient(@ToolParam(description = "client name") client: String): String = ""
 
-    @Tool(description = "A quote was accepted or declined.")
-    fun quoteStatus(@ToolParam(description = "The client's name as spoken") client: String): String = ""
+    @Tool(description = "Quote accepted or declined.")
+    fun quoteStatus(@ToolParam(description = "client name") client: String): String = ""
 
-    @Tool(description = "Update an enquiry: contacted, closed, or make them a client.")
-    fun enquiryStatus(@ToolParam(description = "The enquirer's name") name: String): String = ""
+    @Tool(description = "Update an enquiry.")
+    fun enquiryStatus(@ToolParam(description = "name") name: String): String = ""
 
-    @Tool(description = "Read out the new enquiries.")
+    @Tool(description = "Read new enquiries.")
     fun enquiries(): String = ""
 
-    @Tool(description = "Read out the quotes waiting on a reply.")
+    @Tool(description = "Read quotes waiting.")
     fun quotesWaiting(): String = ""
 
-    @Tool(description = "Read out the past jobs that have not been logged.")
+    @Tool(description = "Read unlogged jobs.")
     fun unloggedJobs(): String = ""
 }
 

@@ -1196,17 +1196,18 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     // Nemotron gives the live partials; Moonshine, decoding the
                     // same buffered audio, gives the final sentence. That is the
                     // hybrid: streaming feel without the NeMo low-energy misses.
-                    val refined = refineOffline(utterance)
+                    val heard = TranscriptCleanup.clean(text)
+                    val refined = TranscriptCleanup.clean(refineOffline(utterance, heard))
                     // Neither recogniser is always right, so the one that reads as
                     // something the owner could have said wins (a command the rules
                     // know, a client, a day, a time, a length); a tie keeps the
                     // streaming one, and a blank one always yields.
-                    val finalText = TranscriptChooser.choose(text, refined, clientNames)
+                    val finalText = TranscriptChooser.choose(heard, refined, clientNames)
                     CrashLog.note(
                         context,
                         TAG,
                         "endpoint: nemotron=${text.take(120)} offline=${refined.take(120)} " +
-                            "chosen=${if (finalText == text.trim()) "streaming" else "offline"}",
+                            "chosen=${if (finalText == heard.trim()) "streaming" else "offline"}",
                     )
                     if (captureWanted) {
                         CallAudio.save(
@@ -1517,7 +1518,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                             silentFrames = 0
                             silentPeak = 0f
                         } else {
-                            val text = decodeOffline(speech.samples)
+                            val text = decodeOffline(speech.samples, useWhisper = finalPass == FinalPass.Whisper && whisper != null)
                             if (captureWanted) {
                                 CallAudio.save(context, speech.samples.toFloatArray(), "${routeNote(record)}\nheard=$text\n")
                             }
@@ -1567,11 +1568,15 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
      * partials. Returns "" when Moonshine is not installed or the clip is too
      * short to be a turn.
      */
-    private fun refineOffline(samples: List<Float>): String {
+    private fun refineOffline(samples: List<Float>, streaming: String = ""): String {
         if (samples.size < SAMPLE_RATE / 3) return ""
-        if (finalPass == FinalPass.Whisper && WhisperDownloader.isInstalled(context)) {
+        // Whisper takes about three seconds a sentence, so it only looks again
+        // when the live recogniser gave next to nothing; otherwise Moonshine
+        // does the quick second look.
+        val streamingMissed = streaming.split(' ').count { it.isNotBlank() } < WHISPER_MIN_WORDS
+        if (finalPass == FinalPass.Whisper && streamingMissed && WhisperDownloader.isInstalled(context)) {
             if (whisper == null) runCatching { kotlinx.coroutines.runBlocking { ensureWhisper() } }
-            if (whisper != null) return decodeOffline(samples)
+            if (whisper != null) return decodeOffline(samples, useWhisper = true)
         }
         if (!MoonshineDownloader.isInstalled(context)) return ""
         if (moonshine == null) {
@@ -1580,8 +1585,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         return decodeOffline(samples)
     }
 
-    private fun decodeOffline(samples: List<Float>): String {
-        val useWhisper = finalPass == FinalPass.Whisper && whisper != null
+    private fun decodeOffline(samples: List<Float>, useWhisper: Boolean = false): String {
         val engine = (if (useWhisper) whisper else moonshine) ?: return ""
         val label = if (useWhisper) "whisper" else "moonshine"
         if (samples.isEmpty()) return ""
@@ -1810,7 +1814,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         }
     }
 
-    private fun publish(text: String) {
+    private fun publish(spoken: String) {
+        val text = TranscriptCleanup.clean(spoken)
+        if (text.isEmpty()) return
         val corrected = AsrHotwords.correct(text, hotwordNames, aggressive = expectClientName)
         if (expectClientName) {
             CrashLog.note(context, TAG, "client-name correction aggressive: $corrected")
@@ -1947,6 +1953,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
         /** Free memory needed before Whisper is loaded; below this Moonshine is used instead. */
         const val WHISPER_MIN_FREE_MB = 900L
+        private const val WHISPER_MIN_WORDS = 3
 
         /** 250 ms kept before VAD reports speech, so the first word is not clipped. */
         const val PRE_ROLL_SAMPLES = SAMPLE_RATE * 25 / 100
