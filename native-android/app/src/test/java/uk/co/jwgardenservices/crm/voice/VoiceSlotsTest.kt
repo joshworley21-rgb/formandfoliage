@@ -70,4 +70,10 @@ class VoiceSlotsTest {
         assertNull(move.to)
         assertNull(move.time)
     }
+
+    @Test
+    fun `a phone number is read back digit by digit`() {
+        assertEquals("0 7 1 2 3, 4 5 6 7 8 9", VoiceSlots.spokenDigits("07123456789"))
+        assertEquals("1 2 3 4, 5 6 7 8", VoiceSlots.spokenDigits("12345678"))
+    }
 }

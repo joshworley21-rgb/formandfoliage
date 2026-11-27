@@ -45,6 +45,16 @@ object VoiceSlots {
         return Regex("""(\d+(?:\.\d{1,2})?)\s*(?:pounds|quid)\b""").find(text)?.groupValues?.get(1)?.toDoubleOrNull()
     }
 
+    /** Digits read back so a number can be checked by ear: "07123 456789" as "0 7 1 2 3, 4 5 6 7 8 9". */
+    fun spokenDigits(digits: String): String {
+        val groups = if (digits.length == 11 && digits.startsWith("0")) {
+            listOf(digits.take(5), digits.drop(5))
+        } else {
+            digits.chunked(4)
+        }
+        return groups.joinToString(", ") { group -> group.toList().joinToString(" ") }
+    }
+
     data class Move(val from: LocalDate?, val to: LocalDate?, val time: LocalTime?)
 
     /** "move the Smiths from Tuesday to Thursday at 10": the last marker with a day or time after it wins. */
