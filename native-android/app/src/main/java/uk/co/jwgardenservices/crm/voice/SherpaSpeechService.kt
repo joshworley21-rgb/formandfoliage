@@ -110,69 +110,6 @@ private class InputAgc {
         get() = (20.0 * log10(gain.coerceAtLeast(0.001f).toDouble())).toFloat()
 }
 
-/**
- * Wind and handling-noise control for a Bluetooth HFP/SCO headset.
- *
- * Hardware AGC is usually unavailable on that route, so a 100 Hz single-pole
- * high-pass removes the low rumble first, then a light AGC lifts the voice
- * toward RMS 0.12. The gain is limited to 1.4–2.6x and ramped per 100 ms frame,
- * so it does not pump or suddenly amplify a gust of wind. The result is
- * softly clipped to ±1.0 before it reaches Silero VAD or Moonshine.
- */
-private class HeadsetAudio {
-    private var lastInput = 0f
-    private var lastOutput = 0f
-    private var gain = 2.2f
-
-    fun reset() {
-        lastInput = 0f
-        lastOutput = 0f
-        gain = 2.2f
-    }
-
-    fun process(raw: FloatArray): FloatArray {
-        if (raw.isEmpty()) return raw
-        val filtered = FloatArray(raw.size)
-        var energy = 0.0
-        for (index in raw.indices) {
-            val sample = raw[index]
-            val out = HPF_ALPHA * (lastOutput + sample - lastInput)
-            lastInput = sample
-            lastOutput = out
-            filtered[index] = out
-            energy += out * out
-        }
-        val rms = sqrt(energy / raw.size).toFloat()
-        val desired = if (rms < 0.0025f) {
-            1.4f
-        } else {
-            (TARGET_RMS / rms).coerceIn(MIN_GAIN, MAX_GAIN).toFloat()
-        }
-        // ~100 ms frame smoothing: a gust cannot jump the gain to maximum.
-        gain += (desired - gain) * 0.25f
-        return FloatArray(raw.size) { index ->
-            softClip(filtered[index] * gain)
-        }
-    }
-
-    private fun softClip(value: Float): Float {
-        val magnitude = kotlin.math.abs(value)
-        if (magnitude <= 0.9f) return value
-        val over = (magnitude - 0.9f) / 0.1f
-        val shaped = 0.9f + 0.1f * kotlin.math.tanh(over.toDouble()).toFloat()
-        return if (value < 0f) -shaped else shaped
-    }
-
-    private companion object {
-        const val TARGET_RMS = 0.12f
-        const val MIN_GAIN = 1.4f
-        const val MAX_GAIN = 2.6f
-
-        /** 100 Hz one-pole high-pass at 16 kHz. */
-        const val HPF_ALPHA = 0.9622f
-    }
-}
-
 class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     enum class Phase {
