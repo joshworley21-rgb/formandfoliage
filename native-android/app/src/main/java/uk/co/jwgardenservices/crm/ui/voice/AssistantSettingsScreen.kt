@@ -74,7 +74,7 @@ import uk.co.jwgardenservices.crm.voice.LlmModel
 import uk.co.jwgardenservices.crm.voice.LocalLlm
 import uk.co.jwgardenservices.crm.voice.MicSource
 import uk.co.jwgardenservices.crm.voice.MicTest
-import uk.co.jwgardenservices.crm.voice.MoonshineDownloader
+import uk.co.jwgardenservices.crm.voice.ParakeetDownloader
 import uk.co.jwgardenservices.crm.voice.NemotronDownloader
 import uk.co.jwgardenservices.crm.voice.OpenAiVoice
 import uk.co.jwgardenservices.crm.voice.PhononDownloader
@@ -191,9 +191,6 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     var customVoices by remember { mutableStateOf(PhononDownloader.customVoices(context)) }
     var voiceDownloading by remember { mutableStateOf(false) }
     var voiceError by remember { mutableStateOf<String?>(null) }
-    val moonshineState by MoonshineDownloader.state.collectAsStateWithLifecycle()
-    var moonshineInstalled by remember { mutableStateOf(MoonshineDownloader.isInstalled(context)) }
-    var moonshineSaved by remember { mutableLongStateOf(MoonshineDownloader.savedBytes(context)) }
     val nemotronState by NemotronDownloader.state.collectAsStateWithLifecycle()
     var nemotronInstalled by remember { mutableStateOf(NemotronDownloader.isInstalled(context)) }
     var nemotronSaved by remember { mutableLongStateOf(NemotronDownloader.savedBytes(context)) }
@@ -205,7 +202,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         mutableLongStateOf(PunctuationDownloader.savedBytes(context))
     }
     val asrEngine by AssistantPreferences.asrEngineFlow(context)
-        .collectAsStateWithLifecycle(initialValue = AsrEngine.Moonshine)
+        .collectAsStateWithLifecycle(initialValue = AsrEngine.Nemotron)
 
     LaunchedEffect(localLlmState) {
         when (val snapshot = localLlmState) {
@@ -244,17 +241,6 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
             is PhononDownloader.State.Working -> Unit
             else -> phononSaved = PhononDownloader.savedBytes(context)
-        }
-    }
-    LaunchedEffect(moonshineState) {
-        when (val snapshot = moonshineState) {
-            is MoonshineDownloader.State.Done -> {
-                moonshineInstalled = true
-                moonshineSaved = 0
-                MoonshineDownloader.clearResult()
-            }
-            is MoonshineDownloader.State.Working -> Unit
-            else -> moonshineSaved = MoonshineDownloader.savedBytes(context)
         }
     }
     LaunchedEffect(nemotronState) {
@@ -600,6 +586,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
+        ParakeetCard()
         WhisperPassCard()
         WhisperCppCard()
         AudioCaptureCard()
@@ -745,10 +732,10 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         "NVIDIA Open Model License (commercial use permitted). About 662 MB, " +
                         "April 2026 560 ms export. True streaming: live partial words. " +
                         "While Nemotron streams the partials, the finished sentence is " +
-                        "re-decoded with Moonshine when it is installed, so a quiet word " +
+                        "re-decoded by the offline recogniser you pick below, so a quiet word " +
                         "missed by NeMo still comes through in the final transcript. If a " +
                         "call produces no words at all the saved engine also switches to " +
-                        "Moonshine. While selected it holds about 650 MB in memory.",
+                        "it. While selected it holds about 650 MB in memory.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -779,7 +766,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                             scope.launch {
                                 NemotronDownloader.remove(context)
                                 if (asrEngine == AsrEngine.Nemotron) {
-                                    AssistantPreferences.setAsrEngine(context, AsrEngine.Moonshine)
+                                    AssistantPreferences.setAsrEngine(context, AsrEngine.Offline)
                                 }
                                 SpeechEngine.get(context).releaseNemotron()
                                 nemotronInstalled = false
@@ -819,104 +806,32 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         }
 
         SectionCard(
-            title = "Moonshine ASR (experimental)",
-            subtitle = "Default offline recogniser.",
+            title = "Speech engine",
+            subtitle = "What listens on a call.",
             leadingIcon = Icons.Outlined.Mic,
         ) {
             Column(
                 modifier = Modifier.padding(JwTokens.cardPadding),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                SegmentedPillTabs(
+                    options = AsrEngine.entries,
+                    selected = asrEngine,
+                    onSelect = { engine ->
+                        scope.launch {
+                            AssistantPreferences.setAsrEngine(context, engine)
+                            if (engine != AsrEngine.Nemotron) SpeechEngine.get(context).releaseNemotron()
+                        }
+                    },
+                    label = { it.label },
+                )
                 Text(
-                    text = "Moonshine v2 base English, MIT licence. About 135 MB. It is an " +
-                        "offline model: there are no live partial words, just a transcript when " +
-                        "you stop speaking. In testing it transcribed quiet phone audio that " +
-                        "Nemotron missed entirely, so it is the recommended engine day to day. " +
-                        "Client names are corrected after recognition on either engine.",
-                    style = MaterialTheme.typography.bodySmall,
+                    text = "Takes effect on the next call. Nemotron streams live words. Offline " +
+                        "waits until you stop and then uses the Parakeet or Whisper you choose " +
+                        "below. If Nemotron fails, the call carries on with that choice.",
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-
-                val working = moonshineState as? MoonshineDownloader.State.Working
-                val failure = moonshineState as? MoonshineDownloader.State.Failed
-                if (working != null) {
-                    LinearProgressIndicator(
-                        progress = { working.progress },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = "Downloading… ${working.done / MEGABYTE} of " +
-                            "${working.total / MEGABYTE} MB",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    TextButton(onClick = { MoonshineDownloader.cancel() }) { Text("Cancel") }
-                }
-
-                if (moonshineInstalled) {
-                    Text(
-                        text = "Speech engine",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    SegmentedPillTabs(
-                        options = AsrEngine.entries,
-                        selected = asrEngine,
-                        onSelect = { engine ->
-                            scope.launch {
-                                AssistantPreferences.setAsrEngine(context, engine)
-                                val speechEngine = SpeechEngine.get(context)
-                                if (engine != AsrEngine.Moonshine) speechEngine.releaseMoonshine()
-                                if (engine != AsrEngine.Nemotron) speechEngine.releaseNemotron()
-                            }
-                        },
-                        label = { it.label },
-                    )
-                    Text(
-                        text = "Takes effect on the next call. Recommended: Moonshine — it " +
-                            "copes far better with this phone's quiet microphone. Nemotron is " +
-                            "worth using only when you want live partial words.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    TextButton(
-                        onClick = {
-                            scope.launch {
-                                MoonshineDownloader.remove(context)
-                                AssistantPreferences.setAsrEngine(context, AsrEngine.Moonshine)
-                                SpeechEngine.get(context).releaseMoonshine()
-                                moonshineInstalled = false
-                                moonshineSaved = 0
-                            }
-                        },
-                    ) { Text("Remove Moonshine model") }
-                } else if (working == null) {
-                    OutlinedButton(
-                        onClick = { MoonshineDownloader.start(context) },
-                    ) {
-                        Text(
-                            if (moonshineSaved > 0) {
-                                "Resume Moonshine download (${moonshineSaved / MEGABYTE} MB saved)"
-                            } else {
-                                "Download Moonshine v2 (135 MB)"
-                            },
-                        )
-                    }
-                }
-
-                if (working == null && !moonshineInstalled) {
-                    Text(
-                        text = "Downloads on Wi-Fi or mobile data. About 135 MB.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                failure?.let { error ->
-                    Text(
-                        text = error.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
             }
         }
 
@@ -1507,11 +1422,105 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
 }
 
 @Composable
+private fun ParakeetCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val pass by AssistantPreferences.finalPassFlow(context)
+        .collectAsStateWithLifecycle(initialValue = FinalPass.Off)
+    val state by ParakeetDownloader.state.collectAsStateWithLifecycle()
+    var installed by remember { mutableStateOf(ParakeetDownloader.isInstalled(context)) }
+    var saved by remember { mutableLongStateOf(ParakeetDownloader.savedBytes(context)) }
+    LaunchedEffect(state) {
+        when (state) {
+            is ParakeetDownloader.State.Done -> {
+                installed = true
+                saved = 0
+                ParakeetDownloader.clearResult()
+            }
+            is ParakeetDownloader.State.Working -> Unit
+            else -> saved = ParakeetDownloader.savedBytes(context)
+        }
+    }
+    SectionCard(
+        title = "Second look: Parakeet (experimental)",
+        subtitle = "NVIDIA's accurate English recogniser.",
+        leadingIcon = Icons.Outlined.GraphicEq,
+    ) {
+        Column(
+            modifier = Modifier.padding(JwTokens.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Every sentence is heard twice: live, and again as a whole once you stop. " +
+                    "NVIDIA Parakeet TDT 0.6B v2 has some of the lowest word error rates of any " +
+                    "open English model and writes its own punctuation. It is the heaviest " +
+                    "option: about 660 MB on disk and over a gigabyte of spare memory to run, " +
+                    "next to Nemotron and the local models. If memory is short it quietly " +
+                    "skips the second look. Each sentence's time is in the assistant log.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SettingSwitchRow(
+                title = "Use Parakeet for the second look",
+                description = "Switch off to turn the second look off.",
+                checked = pass == FinalPass.Parakeet && installed,
+                enabled = installed,
+                onCheckedChange = { on ->
+                    scope.launch {
+                        AssistantPreferences.setFinalPass(context, if (on) FinalPass.Parakeet else FinalPass.Off)
+                    }
+                },
+            )
+            val working = state as? ParakeetDownloader.State.Working
+            if (working != null) {
+                LinearProgressIndicator(progress = { working.progress }, modifier = Modifier.fillMaxWidth())
+                Text(
+                    text = "Downloading ${working.done / MEGABYTE} of ${working.total / MEGABYTE} MB",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(onClick = { ParakeetDownloader.cancel() }) { Text("Cancel") }
+            } else if (installed) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Installed", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                AssistantPreferences.setFinalPass(context, FinalPass.Off)
+                                ParakeetDownloader.remove(context)
+                                installed = false
+                                saved = 0
+                            }
+                        },
+                    ) { Text("Remove") }
+                }
+            } else {
+                OutlinedButton(onClick = { ParakeetDownloader.start(context) }) {
+                    Text(
+                        if (saved > 0) {
+                            "Resume download (${saved / MEGABYTE} MB saved)"
+                        } else {
+                            "Download Parakeet (${ParakeetDownloader.TOTAL_BYTES / MEGABYTE} MB)"
+                        },
+                    )
+                }
+            }
+            (state as? ParakeetDownloader.State.Failed)?.let { failure ->
+                Text(
+                    text = failure.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun WhisperPassCard() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val pass by AssistantPreferences.finalPassFlow(context)
-        .collectAsStateWithLifecycle(initialValue = FinalPass.Moonshine)
+        .collectAsStateWithLifecycle(initialValue = FinalPass.Off)
     val state by WhisperDownloader.state.collectAsStateWithLifecycle()
     var installed by remember { mutableStateOf(WhisperDownloader.isInstalled(context)) }
     var saved by remember { mutableLongStateOf(WhisperDownloader.savedBytes(context)) }
@@ -1537,22 +1546,22 @@ private fun WhisperPassCard() {
         ) {
             Text(
                 text = "Every sentence is heard twice: live, and again as a whole once you stop. " +
-                    "Moonshine does the second look by default. Whisper was trained on a lot of " +
+                    "Whisper was trained on a lot of " +
                     "noisy speech, so it may follow you better in the van, but it is slower " +
                     "(a second or more a sentence) and needs about 375 MB and spare memory. If " +
-                    "memory is short it quietly uses Moonshine. Each sentence's time is in the " +
+                    "memory is short it quietly skips the second look. Each sentence's time is in the " +
                     "assistant log.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             SettingSwitchRow(
                 title = "Use Whisper for the second look",
-                description = "Switch off to go back to Moonshine.",
+                description = "Switch off to turn the second look off.",
                 checked = pass == FinalPass.Whisper && installed,
                 enabled = installed,
                 onCheckedChange = { on ->
                     scope.launch {
-                        AssistantPreferences.setFinalPass(context, if (on) FinalPass.Whisper else FinalPass.Moonshine)
+                        AssistantPreferences.setFinalPass(context, if (on) FinalPass.Whisper else FinalPass.Off)
                     }
                 },
             )
@@ -1570,7 +1579,7 @@ private fun WhisperPassCard() {
                     TextButton(
                         onClick = {
                             scope.launch {
-                                AssistantPreferences.setFinalPass(context, FinalPass.Moonshine)
+                                AssistantPreferences.setFinalPass(context, FinalPass.Off)
                                 WhisperDownloader.remove(context)
                                 installed = false
                                 saved = 0
@@ -1605,7 +1614,7 @@ private fun WhisperCppCard() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val pass by AssistantPreferences.finalPassFlow(context)
-        .collectAsStateWithLifecycle(initialValue = FinalPass.Moonshine)
+        .collectAsStateWithLifecycle(initialValue = FinalPass.Off)
     val state by WhisperCppDownloader.state.collectAsStateWithLifecycle()
     var installed by remember { mutableStateOf(WhisperCppDownloader.isInstalled(context)) }
     var saved by remember { mutableLongStateOf(WhisperCppDownloader.savedBytes(context)) }
@@ -1633,19 +1642,19 @@ private fun WhisperCppCard() {
                 text = "The same Whisper small.en model, run by whisper.cpp instead. It only looks at " +
                     "as much audio as the sentence needs rather than a fixed 30 seconds, and a " +
                     "voice detector skips silence so a pause is not written up as words. It needs " +
-                    "about 190 MB and spare memory; if memory is short it quietly uses Moonshine. " +
+                    "about 190 MB and spare memory; if memory is short it quietly skips the second look. " +
                     "Each sentence's time is in the assistant log, so you can compare.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             SettingSwitchRow(
                 title = "Use whisper.cpp for the second look",
-                description = "Switch off to go back to Moonshine.",
+                description = "Switch off to turn the second look off.",
                 checked = pass == FinalPass.WhisperCpp && installed,
                 enabled = installed,
                 onCheckedChange = { on ->
                     scope.launch {
-                        AssistantPreferences.setFinalPass(context, if (on) FinalPass.WhisperCpp else FinalPass.Moonshine)
+                        AssistantPreferences.setFinalPass(context, if (on) FinalPass.WhisperCpp else FinalPass.Off)
                     }
                 },
             )
@@ -1663,7 +1672,7 @@ private fun WhisperCppCard() {
                     TextButton(
                         onClick = {
                             scope.launch {
-                                AssistantPreferences.setFinalPass(context, FinalPass.Moonshine)
+                                AssistantPreferences.setFinalPass(context, FinalPass.Off)
                                 WhisperCppDownloader.remove(context)
                                 installed = false
                                 saved = 0

@@ -106,9 +106,9 @@ private val FOLLOW_UP_KEY = booleanPreferencesKey("follow_up")
 private val OWNER_NAME_KEY = stringPreferencesKey("owner_name")
 private val CUSTOM_VOICE_KEY = stringPreferencesKey("kokoro_custom_voice")
 
-/** The on-device speech recogniser. Streaming is the default; Moonshine is a test. */
+/** The on-device speech recogniser. Streaming is the default; Offline uses Parakeet or Whisper alone. */
 enum class AsrEngine(val label: String) {
-    Moonshine("Moonshine v2 — offline, English (en)"),
+    Offline("Offline — Parakeet or Whisper, English (en)"),
     Nemotron("Nemotron — streaming, live words, English (en)"),
 }
 
@@ -182,7 +182,7 @@ object AssistantPreferences {
 
     fun asrEngineFlow(context: Context): Flow<AsrEngine> = context.assistantDataStore.data.map { preferences ->
         // Nemotron is the default: it streams live words and is more accurate
-        // on a Bluetooth headset. Moonshine remains the automatic fallback.
+        // on a Bluetooth headset. The offline recogniser is the automatic fallback.
         AsrEngine.entries.firstOrNull { it.name == preferences[ASR_ENGINE_KEY] } ?: AsrEngine.Nemotron
     }
 

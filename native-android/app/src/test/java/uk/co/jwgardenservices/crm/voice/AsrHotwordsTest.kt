@@ -70,7 +70,7 @@ class AsrHotwordsTest {
         assertEquals("SMITH", AsrHotwords.correct("SMITH", listOf("SMITHS", "SMITH")))
     }
 
-    // From a real call: Moonshine heard this correctly, then the corrector turned
+    // From a real call: the offline recogniser heard this correctly, then the corrector turned
     // "can" into SUNNY, "add" into GTA, "eight" and "visit" into TEST, "hours"
     // into BARK and "today" into GTA, because the common-word guard compared
     // lower case with upper case and so never protected anything.

@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Optional Whisper small.en (MIT), used as the offline second look at each
- * sentence in place of Moonshine.
+ * sentence.
  *
  * Whisper was trained on a great deal of noisy speech, which is why it is the
  * candidate for a van. It is slower: it always processes a 30 second window, so

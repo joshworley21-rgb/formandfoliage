@@ -24,32 +24,27 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
- * Optional Moonshine v2 base English ASR (MIT).
- *
- * This is an experiment, not the default: Moonshine is an **offline** model
- * (about 135 MB), so it cannot emit partial words as you speak. The call
- * records one utterance, then transcribes it after the VAD endpoint. The
- * streaming Zipformer stays the default because it gives live words and is
- * already loaded.
- *
- * Files come from the sherpa-onnx export on Hugging Face. The download is
- * resumable and is deliberately not bundled in the APK.
+ * Optional NVIDIA Parakeet TDT 0.6B v2 (CC-BY-4.0), int8, as run by sherpa-onnx.
+ * An English offline recogniser with good word error rates and its own
+ * punctuation. About 660 MB on disk and noticeably more in memory, so it is
+ * only loaded when there is room. Resumable, and not bundled in the APK.
  */
-object MoonshineDownloader {
-    private const val TAG = "MoonshineDownload"
+object ParakeetDownloader {
+    private const val TAG = "ParakeetDownload"
 
-    const val MODEL_DIR = "moonshine-base-en-2026-02-27"
+    const val MODEL_DIR = "parakeet-tdt-0.6b-v2-int8"
     private const val BASE =
-        "https://huggingface.co/csukuangfj2/sherpa-onnx-moonshine-base-en-quantized-2026-02-27/resolve/main/"
+        "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/resolve/main/"
 
     /** Exact sizes let a half file be detected and resumed without a HEAD request. */
     private val FILES: Map<String, Long> = linkedMapOf(
-        "encoder_model.ort" to 31_326_816L,
-        "decoder_model_merged.ort" to 109_424_400L,
-        "tokens.txt" to 549_350L,
-    )
+        "encoder.int8.onnx" to 652_282_309L,
+        "decoder.int8.onnx" to 7_257_753L,
+        "joiner.int8.onnx" to 1_739_080L,
+        "tokens.txt" to 9_384L,
+)
 
-    const val TOTAL_BYTES = 141_300_566L
+    const val TOTAL_BYTES = 661_288_526L
 
     private const val STALL_TIMEOUT_MS = 60_000L
     private const val FREE_SPACE_MARGIN = 80L * 1024 * 1024
@@ -95,14 +90,14 @@ object MoonshineDownloader {
         job = scope.launch {
             try {
                 download(appContext)
-                if (!isInstalled(appContext)) throw IOException("The Moonshine files are incomplete.")
+                if (!isInstalled(appContext)) throw IOException("The Parakeet files are incomplete.")
                 _state.value = State.Done
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
                 if (!isActive) return@launch
                 CrashLog.note(appContext, TAG, "download failed: ${error.message}")
-                Log.w(TAG, "Moonshine download failed", error)
+                Log.w(TAG, "Parakeet download failed", error)
                 _state.value = State.Failed(error.message ?: "The download failed.")
             }
         }

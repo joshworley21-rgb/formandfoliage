@@ -12,7 +12,7 @@ package uk.co.jwgardenservices.crm.voice
  *  - Bluetooth adds 100 ms for the car kit's slower, noisier path
  *  - a noisy background (engine, road) adds 150 ms
  *
- * Moonshine has no streaming partials, so its loop uses the patient wait.
+ * The offline recogniser has no streaming partials, so its loop uses the patient wait.
  */
 object SmartEndpointing {
     const val FAST_MS = 350L

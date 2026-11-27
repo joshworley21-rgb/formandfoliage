@@ -258,11 +258,14 @@ deliberately left on the web for now. The smaller known gaps:
   only when a turn actually goes to the cloud. The local commands — diary,
   hours, notes, invoices, takings — answer without it. A cloud turn still
   covers its wait with the cached "Let me check." after 300 ms.
-- **Speech models**: none are bundled. The default is **Moonshine v2 base**
-  (135 MB, offline, English), downloaded from Settings; **Nemotron 3.5
-  streaming** (662 MB, true streaming with live words) is the optional
-  alternative. Only the selected engine is held in memory, and it is released
-  30 s after the app goes to the background so the process stays small.
+- **Speech models**: none are bundled. **Nemotron 3.5 streaming** (662 MB,
+  true streaming with live words) listens on a call. Each finished sentence can
+  be heard a second time by one offline recogniser chosen in Settings:
+  **Parakeet TDT 0.6B v2** (about 660 MB), **Whisper small.en** (sherpa-onnx,
+  375 MB) or **whisper.cpp small.en** (190 MB, with Silero VAD), all optional
+  downloads. With none chosen, the live transcript is used. Only the selected
+  models are held in memory, released 30 s after the app goes to the
+  background so the process stays small.
 - **Client-name biasing**: two layers. First, each call builds a `bpe.vocab`
   from the model's `tokens.txt` (equal scores, so ssentencepiece segments by
   longest match — the pattern sherpa's own CI uses) and passes the names to
@@ -270,7 +273,7 @@ deliberately left on the web for now. The smaller known gaps:
   listening. Longest match does not always equal the model's true merges, so
   a second layer replaces near misses in the final transcript with the
   canonical name (one edit for five-letter names, two for nine or more). The
-  correction also applies to Moonshine. Both layers are logged.
+  correction also applies to the offline recognisers. Both layers are logged.
 - **Nemotron 3.5 (experimental)**: Settings → Secretary settings → Nemotron
   ASR downloads NVIDIA Nemotron 3.5 Speech Streaming 0.6B int8 (English/en
   only, about 662 MB) over Wi-Fi or mobile data. It is a **true streaming**
@@ -281,12 +284,14 @@ deliberately left on the web for now. The smaller known gaps:
 - **Quick resume**: a new call checks whether the selected recogniser and the
   voice are already loaded. If they are, it skips the dial tone and connects
   straight to the pickup; only a cold call rings out while the models load.
-- **Moonshine v2 (experimental)**: Settings → Secretary settings →
-  Moonshine ASR downloads the 135 MB base English model (MIT) over Wi-Fi or
-  mobile data. It is
-  offline, so it has no live partial words; the call buffers one utterance
-  and decodes it after the VAD endpoint. It is the default engine, loaded
-  during the ringback, and can be removed from the same card.
+- **Offline recognisers (experimental)**: Settings → Secretary settings has a
+  card each for Parakeet, Whisper and whisper.cpp; the switch on a card makes
+  it the second look at each sentence and, if Nemotron fails or the engine is
+  set to Offline, the recogniser for the whole call (no live partial words;
+  the call buffers one utterance and decodes it after the VAD endpoint). Each
+  skips itself when free memory is short. whisper.cpp is compiled for arm64 by
+  the APK workflow from a pinned tag (JNI layer in `whisper-jni/`). Every
+  sentence's decode time is in the assistant log.
 - **Not in git**: the sherpa AAR and the Kokoro fallback model are binaries;
   the 640 KB Silero VAD model is checked in. The Phonon runtime is compiled by
   the APK workflow from the pinned xn-ptts tag. `:app:downloadSherpa` fetches
@@ -435,8 +440,8 @@ deliberately left on the web for now. The smaller known gaps:
 - Known limits: the recognisers are English-only, punctuation and casing are
   not restored, and the first call after a cold start waits for the selected
   model to load behind the ringback.
-- sherpa-onnx is Apache 2.0; Moonshine is MIT; Nemotron follows the NVIDIA
-  Open Model License; Phonon is Apache 2.0; Kokoro-82M is Apache 2.0.
+- sherpa-onnx is Apache 2.0; Whisper and whisper.cpp are MIT; Parakeet is CC-BY-4.0; Nemotron follows the
+  NVIDIA Open Model License; Phonon is Apache 2.0; Kokoro-82M is Apache 2.0.
 
 ## Code layout
 

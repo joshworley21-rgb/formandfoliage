@@ -14,11 +14,11 @@ class WhisperCppTest {
     }
 
     @Test
-    fun `the final pass choice round trips and defaults to Moonshine`() {
+    fun `the final pass choice round trips and defaults to off`() {
         assertEquals(FinalPass.WhisperCpp, FinalPass.fromId("whisper_cpp"))
         assertEquals(FinalPass.Whisper, FinalPass.fromId("whisper"))
-        assertEquals(FinalPass.Moonshine, FinalPass.fromId(null))
-        assertEquals(FinalPass.Moonshine, FinalPass.fromId("nonsense"))
+        assertEquals(FinalPass.Off, FinalPass.fromId(null))
+        assertEquals(FinalPass.Off, FinalPass.fromId("nonsense"))
     }
 
     @Test
