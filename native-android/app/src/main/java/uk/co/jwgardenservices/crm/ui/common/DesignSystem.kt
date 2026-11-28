@@ -41,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -364,9 +365,9 @@ fun <T> SegmentedPillTabs(
                 Surface(
                     onClick = { onSelect(option) },
                     shape = RoundedCornerShape(JwTokens.chipRadius),
-                    color = if (active) palette.forest else Color.Transparent,
+                    color = if (active) selectedFill() else Color.Transparent,
                     contentColor = if (active) {
-                        palette.onForestMuted
+                        selectedInk()
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
@@ -389,6 +390,22 @@ fun <T> SegmentedPillTabs(
     }
 }
 
+/**
+ * The "on" colour for tabs and pills. Forest reads well on the light page, but
+ * vanishes on the dark one, so dark mode uses the light sage primary instead.
+ */
+@Composable
+private fun selectedFill(): Color {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    return if (dark) MaterialTheme.colorScheme.primary else JwTheme.colors.forest
+}
+
+@Composable
+private fun selectedInk(): Color {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    return if (dark) MaterialTheme.colorScheme.onPrimary else JwTheme.colors.onForestMuted
+}
+
 /** One filter pill: forest when on, white with a hairline when off. */
 @Composable
 fun FilterPill(
@@ -402,9 +419,9 @@ fun FilterPill(
         onClick = onClick,
         modifier = modifier,
         shape = RoundedCornerShape(JwTokens.chipRadius),
-        color = if (selected) palette.forest else glassFill(0.72f),
+        color = if (selected) selectedFill() else glassFill(0.72f),
         contentColor = if (selected) {
-            palette.onForestMuted
+            selectedInk()
         } else {
             MaterialTheme.colorScheme.onSurfaceVariant
         },

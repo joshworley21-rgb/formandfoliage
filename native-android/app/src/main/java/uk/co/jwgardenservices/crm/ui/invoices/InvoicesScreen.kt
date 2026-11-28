@@ -1024,6 +1024,10 @@ internal fun BillPreviewDialog(
         onDismissRequest = onDismiss,
         title = { Text("Draft invoice for ${client.name}") },
         text = {
+            // Dialog text defaults to the muted colour; the figures are the point, so full strength.
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.material3.LocalContentColor provides MaterialTheme.colorScheme.onSurface,
+            ) {
             Column(
                 modifier = Modifier
                     .heightIn(max = 420.dp)
@@ -1073,6 +1077,7 @@ internal fun BillPreviewDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
             }
         },
         confirmButton = { TextButton(onClick = onConfirm) { Text("Create draft") } },
