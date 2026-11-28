@@ -104,12 +104,7 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
     } else {
         AppDestination.primaryItems
     }
-    // Secretary is a tab inside Business, so More does not repeat it.
-    val moreItems = if (isStaff) {
-        emptyList()
-    } else {
-        AppDestination.moreItems.filter { it != AppDestination.Secretary }
-    }
+    val moreItems = if (isStaff) emptyList() else AppDestination.moreItems
 
     SystemBarAppearance(darkStatusBar = true)
 
@@ -180,7 +175,7 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                 startDestination = if (isStaff) {
                     AppDestination.Schedule.route
                 } else {
-                    AppDestination.Dashboard.route
+                    AppDestination.Secretary.route
                 },
                 modifier = Modifier.weight(1f),
             ) {
@@ -227,7 +222,9 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                         QuotesScreen(viewModel = crmViewModel)
                     }
                     composable(AppDestination.Secretary.route) {
-                        AssistantScreen()
+                        AssistantScreen(
+                            onOpenSettings = { navController.navigate("assistant-settings") },
+                        )
                     }
                     composable(AppDestination.Settings.route) {
                         SettingsScreen(

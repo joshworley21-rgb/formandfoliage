@@ -44,12 +44,14 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Undo
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -82,6 +84,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.widget.Toast
+import uk.co.jwgardenservices.crm.ui.common.glass
+import uk.co.jwgardenservices.crm.ui.common.glassBackdrop
 import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 import uk.co.jwgardenservices.crm.ui.theme.JwTheme
 import uk.co.jwgardenservices.crm.voice.AssistantService
@@ -103,7 +107,7 @@ import uk.co.jwgardenservices.crm.voice.SherpaSpeechService
  * the next call is quick.
  */
 @Composable
-fun AssistantScreen() {
+fun AssistantScreen(onOpenSettings: (() -> Unit)? = null) {
     val context = LocalContext.current
     var service by remember { mutableStateOf<AssistantService?>(null) }
     var state by remember { mutableStateOf(SherpaSpeechService.UiState()) }
@@ -206,7 +210,7 @@ fun AssistantScreen() {
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
+            .glassBackdrop(),
     ) {
         // Short screens (small phones, split screen) get a smaller orb and
         // tighter spacing so the controls and transcript always fit.
@@ -250,7 +254,7 @@ fun AssistantScreen() {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "Secretary",
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onBackground,
                 )
@@ -276,6 +280,15 @@ fun AssistantScreen() {
                     Icon(
                         imageVector = Icons.Outlined.Delete,
                         contentDescription = "Clear conversation",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (onOpenSettings != null) {
+                IconButton(onClick = onOpenSettings) {
+                    Icon(
+                        imageVector = Icons.Outlined.Settings,
+                        contentDescription = "Secretary settings",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -351,33 +364,43 @@ fun AssistantScreen() {
             }
         }
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .glass(RoundedCornerShape(28.dp), strength = 0.78f)
+                .padding(start = 6.dp, end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            OutlinedTextField(
+            TextField(
                 value = draft,
                 onValueChange = { draft = it },
                 placeholder = { Text("Message Secretary…") },
                 maxLines = 4,
-                shape = RoundedCornerShape(JwTokens.controlRadius),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    disabledContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    disabledIndicatorColor = Color.Transparent,
+                ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { send() }),
                 modifier = Modifier.weight(1f),
             )
-            IconButton(
-                onClick = { send() },
-                enabled = draft.isNotBlank() && service != null,
+            val canSend = draft.isNotBlank() && service != null
+            Surface(
+                shape = CircleShape,
+                color = if (canSend) JwTheme.colors.forest else Color.Transparent,
+                contentColor = if (canSend) JwTheme.colors.brass else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(42.dp),
             ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Send",
-                    tint = if (draft.isNotBlank()) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
+                IconButton(onClick = { send() }, enabled = canSend) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Send",
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
         }
 
@@ -511,10 +534,8 @@ private fun Transcript(
     modifier: Modifier = Modifier,
     thinkingText: String? = null,
 ) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(JwTokens.cardRadius),
-        color = MaterialTheme.colorScheme.surfaceVariant,
+    Box(
+        modifier = modifier.glass(RoundedCornerShape(JwTokens.sheetRadius), strength = 0.46f),
     ) {
         val listState = rememberLazyListState()
         val itemCount = turns.size + (if (partial.isNotBlank()) 1 else 0) + (if (thinkingText != null) 1 else 0)
@@ -622,24 +643,31 @@ private fun PostCallSummary(
 @Composable
 private fun Bubble(text: String, fromUser: Boolean, pending: Boolean = false) {
     val container = if (fromUser) {
-        MaterialTheme.colorScheme.primaryContainer
+        JwTheme.colors.forest
     } else {
-        MaterialTheme.colorScheme.surfaceVariant
+        MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
     }
     // A streaming partial is a rumour, not a fact: dimmed grey and italic
     // until the turn finalises, so live Nemotron feedback reads as provisional.
     val content = when {
-        fromUser && pending -> MaterialTheme.colorScheme.onSurfaceVariant
-        fromUser -> MaterialTheme.colorScheme.onPrimaryContainer
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
+        fromUser && pending -> JwTheme.colors.onForestMuted.copy(alpha = 0.7f)
+        fromUser -> JwTheme.colors.onForestMuted
+        pending -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> MaterialTheme.colorScheme.onSurface
     }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (fromUser) Arrangement.End else Arrangement.Start,
     ) {
         Surface(
-            shape = RoundedCornerShape(JwTokens.cardRadius),
-            color = container,
+            // A chat bubble: rounded, with the corner nearest its speaker squared off.
+            shape = RoundedCornerShape(
+                topStart = 20.dp,
+                topEnd = 20.dp,
+                bottomStart = if (fromUser) 20.dp else 6.dp,
+                bottomEnd = if (fromUser) 6.dp else 20.dp,
+            ),
+            color = if (fromUser && pending) container.copy(alpha = 0.55f) else container,
             contentColor = content,
             modifier = Modifier.widthIn(max = 300.dp),
         ) {
