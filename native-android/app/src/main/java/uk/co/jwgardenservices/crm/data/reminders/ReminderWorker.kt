@@ -30,6 +30,8 @@ import uk.co.jwgardenservices.crm.domain.money
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
 import uk.co.jwgardenservices.crm.domain.BillingSource
 import uk.co.jwgardenservices.crm.domain.priceVisit
+import uk.co.jwgardenservices.crm.domain.RainPlan
+import uk.co.jwgardenservices.crm.data.weather.RainForecast
 import uk.co.jwgardenservices.crm.ui.dashboard.jobsNeedingMarking
 
 /**
@@ -52,6 +54,10 @@ class ReminderWorker(
         )
         val allJobs = database.scheduledJobDao().observeAll().first()
         val marking = jobsNeedingMarking(allJobs)
+        // Rain tomorrow only matters when there is work booked for it.
+        val tomorrow = java.time.LocalDate.now().plusDays(1)
+        val wetTomorrow = summary.tomorrowJobs.isNotEmpty() &&
+            RainPlan.isWet(runCatching { RainForecast.refresh(context) }.getOrDefault(emptyMap())[tomorrow])
         if (summary.isEmpty && marking.isEmpty()) return Result.success()
 
         val clientRows = database.clientDao().observeAll().first()
@@ -73,7 +79,10 @@ class ReminderWorker(
             }
             val jobs = summary.tomorrowJobs
             if (jobs.isNotEmpty()) {
-                add("${jobs.size} ${if (jobs.size == 1) "job" else "jobs"} tomorrow")
+                add(
+                    "${jobs.size} ${if (jobs.size == 1) "job" else "jobs"} tomorrow" +
+                        if (wetTomorrow) " — rain forecast, check the Rota" else "",
+                )
                 jobs.take(4).forEach { job ->
                     val time = parseTimestamp(job.startsAt)?.formatTime().orEmpty()
                     add("$time  ${clients[job.clientId] ?: "Client"}")

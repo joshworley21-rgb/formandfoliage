@@ -1,5 +1,9 @@
 package uk.co.jwgardenservices.crm.ui.schedule
 
+import androidx.compose.material.icons.outlined.WaterDrop
+import uk.co.jwgardenservices.crm.domain.RainPlan
+import uk.co.jwgardenservices.crm.domain.DayRain
+import uk.co.jwgardenservices.crm.data.weather.RainForecast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -106,6 +110,8 @@ import uk.co.jwgardenservices.crm.ui.common.ForestCard
 import uk.co.jwgardenservices.crm.ui.common.ForestFigure
 import uk.co.jwgardenservices.crm.ui.common.HeaderStepper
 import uk.co.jwgardenservices.crm.ui.common.JwCard
+import uk.co.jwgardenservices.crm.ui.common.PillStyle
+import uk.co.jwgardenservices.crm.ui.common.PillButton
 import uk.co.jwgardenservices.crm.ui.common.SectionLabel
 import uk.co.jwgardenservices.crm.ui.common.SegmentedPillTabs
 
@@ -173,6 +179,10 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
 
     val weekStart = weekCursor.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
     val weekDays = (0..6).map { weekStart.plusDays(it.toLong()) }
+    val rainContext = androidx.compose.ui.platform.LocalContext.current
+    val rain by RainForecast.days.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { RainForecast.refresh(rainContext) }
+    var rainMove by remember { mutableStateOf<Pair<LocalDate, LocalDate>?>(null) }
     val weekJobs = state.jobs.filter { job ->
         job.status != "cancelled" &&
             parseTimestamp(job.startsAt)?.localDate()?.let {
@@ -398,10 +408,32 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
                     hideMoney = hideMoney,
                 )
             }
+            if (!isStaff) {
+                // The first wet day this week (from today) with work booked, and the
+                // first dry day after it in the forecast.
+                val wet = weekDays.firstOrNull { day ->
+                    !day.isBefore(today) && RainPlan.isWet(rain[day]) &&
+                        jobsByDay[day].orEmpty().any { it.status == "scheduled" }
+                }
+                val dry = wet?.let { RainPlan.nextDryDay(it, rain) }
+                if (wet != null) {
+                    item {
+                        RainBanner(
+                            day = wet,
+                            rain = rain.getValue(wet),
+                            jobCount = jobsByDay[wet].orEmpty().count { it.status == "scheduled" },
+                            moveTo = dry,
+                            today = today,
+                            onMove = { if (dry != null) rainMove = wet to dry },
+                        )
+                    }
+                }
+            }
             item {
                 WeekBoard(
                     days = weekDays,
                     jobsByDay = jobsByDay,
+                    rain = rain,
                     today = today,
                     clients = state.clients,
                     clientNames = clientNames,
@@ -735,6 +767,55 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
         )
     }
 
+    rainMove?.let { (from, to) ->
+        val moving = jobsByDay[from].orEmpty().filter { it.status == "scheduled" }
+        JwAlertDialog(
+            onDismissRequest = { if (!state.saving) rainMove = null },
+            title = { Text("Move ${moving.size} ${if (moving.size == 1) "job" else "jobs"} to ${to.format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM", java.util.Locale.UK))}?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    moving.forEach { job ->
+                        Text("${parseTimestamp(job.startsAt)?.formatTime() ?: ""}  ${clientNames[job.clientId] ?: "Client"}")
+                    }
+                    Text(
+                        text = "Same times, on the next dry day in the forecast. Clients are not told automatically.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !state.saving,
+                    onClick = {
+                        scope.launch {
+                            saveError = null
+                            try {
+                                moving.forEach { job ->
+                                    val start = parseTimestamp(job.startsAt) ?: return@forEach
+                                    viewModel.saveJob(
+                                        JobDraft(
+                                            id = job.id,
+                                            clientId = job.clientId,
+                                            date = to.toString(),
+                                            time = start.formatTime(),
+                                            durationMinutes = job.durationMinutes,
+                                            notes = job.notes,
+                                        ),
+                                    )
+                                }
+                                rainMove = null
+                            } catch (error: Exception) {
+                                saveError = error.message ?: "Could not move those jobs"
+                            }
+                        }
+                    },
+                ) { Text("Move them") }
+            },
+            dismissButton = { TextButton(onClick = { rainMove = null }) { Text("Cancel") } },
+        )
+    }
+
     sheetJob?.let { job ->
         JobSheetDialog(
             job = job,
@@ -967,11 +1048,47 @@ private fun WeekTotals(
     }
 }
 
+/** "Rain on Tue 1 Dec: 80% chance, about 6 mm. 3 jobs booked." with a one-tap move. */
+@Composable
+private fun RainBanner(
+    day: LocalDate,
+    rain: DayRain,
+    jobCount: Int,
+    moveTo: LocalDate?,
+    today: LocalDate,
+    onMove: () -> Unit,
+) {
+    val fmt = java.time.format.DateTimeFormatter.ofPattern("EEE d MMM", java.util.Locale.UK)
+    val label = when (day) {
+        today -> "today"
+        today.plusDays(1) -> "tomorrow"
+        else -> day.format(fmt)
+    }
+    JwCard(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.WaterDrop, contentDescription = null, tint = JwTheme.colors.info)
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Rain $label", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = "${RainPlan.describe(rain)}. $jobCount ${if (jobCount == 1) "job" else "jobs"} booked.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (moveTo != null) {
+                PillButton(label = "Move to ${moveTo.format(java.time.format.DateTimeFormatter.ofPattern("EEE d", java.util.Locale.UK))}", onClick = onMove, style = PillStyle.Forest)
+            }
+        }
+    }
+}
+
 @Composable
 private fun WeekBoard(
     days: List<LocalDate>,
     jobsByDay: Map<LocalDate, List<ScheduledJob>>,
     today: LocalDate,
+    rain: Map<LocalDate, DayRain> = emptyMap(),
     clients: List<Client>,
     clientNames: Map<String, String>,
     isStaff: Boolean,
@@ -1025,6 +1142,14 @@ private fun WeekBoard(
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                         )
+                        if (RainPlan.isWet(rain[day])) {
+                            Icon(
+                                imageVector = Icons.Outlined.WaterDrop,
+                                contentDescription = "Rain likely",
+                                tint = JwTheme.colors.info,
+                                modifier = Modifier.size(12.dp),
+                            )
+                        }
                     }
                 }
                 jobs.forEach { job ->

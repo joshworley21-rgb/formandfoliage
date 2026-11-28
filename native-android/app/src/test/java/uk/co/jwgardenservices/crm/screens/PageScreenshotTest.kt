@@ -76,6 +76,7 @@ class PageScreenshotTest {
             Client(id = "c2", userId = "u", name = "Hazel (Badgers oak)", hourlyRate = 35.0, address = "Badgers Oak, Wendover"),
             Client(id = "c3", userId = "u", name = "Rose Cottage", billingMode = "fixed", fixedPrice = 120.0, address = "Rose Cottage, Weedon"),
             Client(id = "c4", userId = "u", name = "Louisa and George", hourlyRate = 30.0),
+            Client(id = "c5", userId = "u", name = "Oak Lodge", hourlyRate = 32.0),
         )
         val jobs = listOf(
             ScheduledJob(id = "j1", userId = "u", clientId = "c1", startsAt = at(today, 9), durationMinutes = 180),
@@ -90,7 +91,10 @@ class PageScreenshotTest {
             Visit(id = "v1", userId = "u", clientId = "c1", visitDate = today.minusDays(1).toString(), hours = 4.0, amount = 120.0, description = "Hedge cut"),
             Visit(id = "v2", userId = "u", clientId = "c3", visitDate = today.minusDays(4).toString(), hours = 2.0, amount = 120.0, billed = true),
             Visit(id = "v3", userId = "u", clientId = "c2", visitDate = today.minusDays(8).toString(), hours = 5.0, amount = 175.0),
-        )
+        ) + listOf(30L, 44L, 58L, 72L).mapIndexed { i, ago ->
+            // A fortnightly client gone a month with nothing booked: "Due again".
+            Visit(id = "o$i", userId = "u", clientId = "c5", visitDate = today.minusDays(ago).toString(), hours = 2.0, amount = 64.0, billed = true)
+        }
         val invoices = listOf(
             Invoice(id = "i1", userId = "u", clientId = "c3", number = "JW-0007", issueDate = today.minusDays(40).toString(),
                 dueDate = today.minusDays(10).toString(), total = 240.0, status = "sent"),
@@ -102,6 +106,11 @@ class PageScreenshotTest {
             database.visitDao().upsertAll(visits)
             database.invoiceDao().upsertAll(invoices)
         }
+        // Rain tomorrow, dry the day after: the Rota should offer to move tomorrow's work.
+        uk.co.jwgardenservices.crm.data.weather.RainForecast.showForTest(
+            (0..6L).associate { today.plusDays(it) to uk.co.jwgardenservices.crm.domain.DayRain(10, 0.0) } +
+                (today.plusDays(1) to uk.co.jwgardenservices.crm.domain.DayRain(85, 7.0)),
+        )
         viewModel = CrmViewModel(
             repository = CrmRepository(database, client = offline),
             syncEngine = SyncEngine(database, client = offline),

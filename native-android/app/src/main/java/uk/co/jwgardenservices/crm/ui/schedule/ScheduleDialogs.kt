@@ -121,10 +121,12 @@ internal fun JobEditorDialog(
     onBookSeries: (SeriesDraft) -> Unit,
     onDelete: ((wholeSeries: Boolean) -> Unit)?,
     onEditSeries: (() -> Unit)? = null,
+    /** For a new booking started from a client, e.g. Home's "due again" list. */
+    initialClientId: String? = null,
 ) {
     val starts = parseTimestamp(existing?.startsAt)
     var clientId by remember(existing?.id) {
-        mutableStateOf(existing?.clientId ?: clients.firstOrNull()?.id.orEmpty())
+        mutableStateOf(existing?.clientId ?: initialClientId ?: clients.firstOrNull()?.id.orEmpty())
     }
     var date by remember(existing?.id, defaultDate) {
         mutableStateOf(starts?.localDate()?.toString() ?: defaultDate?.toString() ?: todayIso())

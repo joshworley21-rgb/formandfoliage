@@ -269,6 +269,10 @@ fun DashboardScreen(
             NeedsMarkingCard(state = state, viewModel = viewModel)
         }
 
+        item {
+            DueAgainCard(state = state, viewModel = viewModel)
+        }
+
         if (state.error != null) {
             item {
                 ErrorState(state.error!!, viewModel::refresh)
