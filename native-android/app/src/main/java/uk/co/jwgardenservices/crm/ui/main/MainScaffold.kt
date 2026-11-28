@@ -175,7 +175,7 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                 startDestination = if (isStaff) {
                     AppDestination.Schedule.route
                 } else {
-                    AppDestination.Secretary.route
+                    AppDestination.Dashboard.route
                 },
                 modifier = Modifier.weight(1f),
             ) {
