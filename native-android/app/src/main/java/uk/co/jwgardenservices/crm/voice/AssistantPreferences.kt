@@ -100,6 +100,7 @@ private val PERSONA_HUMOUR_KEY = stringPreferencesKey("persona_humour")
 private val PERSONA_LENGTH_KEY = stringPreferencesKey("persona_length")
 private val PHONON_VOICE_KEY = stringPreferencesKey("phonon_voice")
 private val PHONON_MODEL_KEY = stringPreferencesKey("phonon_model")
+private val HF_TOKEN_KEY = stringPreferencesKey("hf_token")
 private val ASR_ENGINE_KEY = stringPreferencesKey("asr_engine")
 private val FOLLOW_UP_KEY = booleanPreferencesKey("follow_up")
 private val OWNER_NAME_KEY = stringPreferencesKey("owner_name")
@@ -248,6 +249,14 @@ object AssistantPreferences {
      * The selected Phonon voice name. Catalogue voices use their enum name;
      * imported custom voices use the file name without `.safetensors`.
      */
+    /** A Hugging Face read token, kept on this phone only, for models that need a login to download. */
+    fun hfTokenFlow(context: Context): Flow<String> =
+        context.assistantDataStore.data.map { it[HF_TOKEN_KEY].orEmpty() }
+
+    suspend fun setHfToken(context: Context, token: String) {
+        context.assistantDataStore.edit { it[HF_TOKEN_KEY] = token.trim() }
+    }
+
     /** Which Phonon checkpoint speaks. 31m unless the optional 40m was chosen. */
     fun phononModelFlow(context: Context): Flow<PhononModel> =
         context.assistantDataStore.data.map { PhononModel.fromId(it[PHONON_MODEL_KEY]) }

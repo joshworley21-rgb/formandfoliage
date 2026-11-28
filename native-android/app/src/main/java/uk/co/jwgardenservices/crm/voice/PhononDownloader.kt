@@ -61,6 +61,9 @@ enum class PhononModel(
     val base: String,
     val files: Map<String, Long>,
     val licence: String,
+    /** Hugging Face asks for a login and an accepted licence before it serves these files. */
+    val gated: Boolean = false,
+    val pageUrl: String = "",
 ) {
     Phonon31(
         id = "31m",
@@ -87,6 +90,8 @@ enum class PhononModel(
             "default-voice.safetensors" to 256_136L,
         ),
         licence = "CC BY-NC 4.0 — non-commercial use only.",
+        gated = true,
+        pageUrl = "https://huggingface.co/gradium/phonon-40m-en",
     ),
     ;
 
@@ -281,8 +286,19 @@ object PhononDownloader {
             copied
         }
 
-    fun start(context: Context, model: PhononModel = PhononModel.Phonon31) {
+    /** The model the current or last download was for, so a card shows only its own progress and errors. */
+    @Volatile
+    var activeModel: PhononModel = PhononModel.Phonon31
+        private set
+
+    @Volatile
+    private var accessToken: String? = null
+
+    /** [token] is a Hugging Face read token, needed only for a gated model such as 40m. */
+    fun start(context: Context, model: PhononModel = PhononModel.Phonon31, token: String? = null) {
         if (job?.isActive == true) return
+        activeModel = model
+        accessToken = token?.trim()?.takeIf { it.isNotEmpty() }
         val appContext = context.applicationContext
         job = scope.launch {
             try {
@@ -359,6 +375,9 @@ object PhononDownloader {
             .build()
         val request = Request.Builder().url(model.base + name).apply {
             if (have > 0) header("Range", "bytes=$have-")
+            // OkHttp drops this header when a redirect leaves huggingface.co, so
+            // the token never reaches the file host.
+            if (model.gated) accessToken?.let { header("Authorization", "Bearer $it") }
         }.build()
 
         _state.value = State.Working(completed + have, model.totalBytes)
@@ -383,6 +402,17 @@ object PhononDownloader {
             call.execute().use { response ->
                 val appending = response.code == 206 && have > 0
                 if (!response.isSuccessful) {
+                    if (model.gated && (response.code == 401 || response.code == 403)) {
+                        throw IOException(
+                            if (accessToken == null) {
+                                "Hugging Face needs a login for this model. Accept its licence on the " +
+                                    "model page, then paste a read token below."
+                            } else {
+                                "Hugging Face refused that token. Check you accepted the licence on the " +
+                                    "model page and that the token can read."
+                            },
+                        )
+                    }
                     throw IOException("Download failed: HTTP ${response.code}")
                 }
                 val body = response.body ?: throw IOException("The download returned no body")

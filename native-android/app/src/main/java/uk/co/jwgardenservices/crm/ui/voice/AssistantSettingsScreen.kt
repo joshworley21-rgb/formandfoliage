@@ -312,8 +312,10 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     },
                 )
 
-                val working = phononState as? PhononDownloader.State.Working
-                val failure = phononState as? PhononDownloader.State.Failed
+                val working = (phononState as? PhononDownloader.State.Working)
+                    ?.takeIf { PhononDownloader.activeModel == PhononModel.Phonon31 }
+                val failure = (phononState as? PhononDownloader.State.Failed)
+                    ?.takeIf { PhononDownloader.activeModel == PhononModel.Phonon31 }
                 if (working != null) {
                     LinearProgressIndicator(
                         progress = { working.progress },
@@ -1273,6 +1275,9 @@ private fun Phonon40Card() {
     var installed by remember { mutableStateOf(PhononDownloader.isInstalled(context, model)) }
     var saved by remember { mutableLongStateOf(PhononDownloader.savedBytes(context, model)) }
     var switching by remember { mutableStateOf(false) }
+    val savedToken by AssistantPreferences.hfTokenFlow(context).collectAsStateWithLifecycle(initialValue = "")
+    var tokenDraft by remember { mutableStateOf("") }
+    LaunchedEffect(savedToken) { if (tokenDraft.isEmpty()) tokenDraft = savedToken }
     LaunchedEffect(state) {
         when (state) {
             is PhononDownloader.State.Done -> {
@@ -1327,7 +1332,34 @@ private fun Phonon40Card() {
                     }
                 },
             )
-            val working = state as? PhononDownloader.State.Working
+            val working = (state as? PhononDownloader.State.Working)
+                ?.takeIf { PhononDownloader.activeModel == model }
+            if (!installed && working == null) {
+                Text(
+                    text = "Hugging Face keeps this model behind a free login. Three steps: " +
+                        "1) open the model page and accept the licence; 2) create a Read token at " +
+                        "huggingface.co/settings/tokens; 3) paste it here. The token stays on this phone " +
+                        "and is only sent to Hugging Face.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedButton(
+                    onClick = {
+                        context.startActivity(
+                            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(model.pageUrl))
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    },
+                ) { Text("Open the model page") }
+                OutlinedTextField(
+                    value = tokenDraft,
+                    onValueChange = { tokenDraft = it.trim() },
+                    label = { Text("Hugging Face read token") },
+                    singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             if (working != null) {
                 LinearProgressIndicator(progress = { working.progress }, modifier = Modifier.fillMaxWidth())
                 Text(
@@ -1348,7 +1380,13 @@ private fun Phonon40Card() {
                     },
                 ) { Text("Remove Phonon 40m") }
             } else {
-                OutlinedButton(onClick = { PhononDownloader.start(context, model) }) {
+                OutlinedButton(
+                    enabled = tokenDraft.isNotBlank(),
+                    onClick = {
+                        scope.launch { AssistantPreferences.setHfToken(context, tokenDraft) }
+                        PhononDownloader.start(context, model, tokenDraft)
+                    },
+                ) {
                     Text(
                         if (saved > 0) {
                             "Resume download (${saved / MEGABYTE} MB saved)"
@@ -1358,7 +1396,9 @@ private fun Phonon40Card() {
                     )
                 }
             }
-            (state as? PhononDownloader.State.Failed)?.let { failure ->
+            (state as? PhononDownloader.State.Failed)
+                ?.takeIf { PhononDownloader.activeModel == model }
+                ?.let { failure ->
                 Text(
                     text = failure.message,
                     style = MaterialTheme.typography.bodySmall,
