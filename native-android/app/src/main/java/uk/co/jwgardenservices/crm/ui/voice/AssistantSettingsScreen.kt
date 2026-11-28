@@ -34,6 +34,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -112,6 +114,9 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = AssistantPreferences.DEFAULT_SPEED)
     var draftSpeed by remember(savedSpeed) { mutableFloatStateOf(savedSpeed) }
     var previewingVoice by remember { mutableStateOf(false) }
+    /** The voice whose sample is playing, so only one plays at a time. */
+    var previewingName by remember { mutableStateOf<String?>(null) }
+    var section by rememberSaveable { mutableStateOf(SettingsSection.Voice) }
     var previewingOnline by remember { mutableStateOf(false) }
     var previewingOnlineVoice by remember { mutableStateOf<OpenAiVoice?>(null) }
     var onlinePreviewError by remember { mutableStateOf<String?>(null) }
@@ -276,15 +281,30 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             onBack = onBack,
             backLabel = "Settings",
         )
+        // One section at a time instead of one very long page.
+        SegmentedPillTabs(
+            options = SettingsSection.entries,
+            selected = section,
+            onSelect = { section = it },
+            label = { it.label },
+            modifier = Modifier.padding(
+                start = JwTokens.screenPadding,
+                end = JwTokens.screenPadding,
+                top = 12.dp,
+            ),
+        )
+        val pageScroll = rememberScrollState()
+        LaunchedEffect(section) { pageScroll.scrollTo(0) }
         Column(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(pageScroll)
                 .padding(JwTokens.screenPadding),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
 
+        if (section == SettingsSection.Voice) {
         SettingsGroupHeader("Voice", "How the assistant sounds.")
         SectionCard(
             title = "Phonon 31m (call voice)",
@@ -331,34 +351,110 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
 
                 if (phononInstalled) {
                     Text(
-                        text = "Voice",
+                        text = "Voice — tap play to hear one, Use to choose it",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    OptionPicker(
-                        options = PhononVoice.entries,
-                        selected = PhononVoice.entries.firstOrNull { it.name == phononVoice },
-                        label = { it?.label ?: "Custom — $phononVoice" },
-                        enabled = !voiceDownloading,
-                        onSelect = { selected ->
-                            scope.launch {
-                                voiceDownloading = true
-                                voiceError = null
-                                // Every installed checkpoint keeps its own copy of the voice.
-                                val ok = PhononModel.entries
-                                    .filter { PhononDownloader.isInstalled(context, it) }
-                                    .map { PhononDownloader.installVoice(context, selected, it) }
-                                    .all { it }
-                                if (ok) {
-                                    AssistantPreferences.setPhononVoice(context, selected)
-                                    KokoroEngine.get(context).reload()
-                                } else {
-                                    voiceError = "Could not download that voice. Check your connection."
+                    // Listen before choosing: the play button downloads the voice if
+                    // needed, says a sample in it, then puts the current voice back.
+                    fun previewVoice(name: String, catalog: PhononVoice?) {
+                        if (previewingName != null) return
+                        previewingName = name
+                        voiceError = null
+                        scope.launch {
+                            try {
+                                if (catalog != null) {
+                                    val ok = PhononModel.entries
+                                        .filter { PhononDownloader.isInstalled(context, it) }
+                                        .map { PhononDownloader.installVoice(context, catalog, it) }
+                                        .all { it }
+                                    if (!ok) {
+                                        voiceError = "Could not download that voice. Check your connection."
+                                        return@launch
+                                    }
                                 }
-                                voiceDownloading = false
+                                val previous = phononVoice
+                                val engine = KokoroEngine.get(context)
+                                if (name != previous) {
+                                    AssistantPreferences.setPhononVoice(context, name)
+                                    engine.reload()
+                                }
+                                try {
+                                    engine.speak(PREVIEW_TEXT, voice.speakerId, draftSpeed)
+                                } finally {
+                                    if (name != previous) {
+                                        AssistantPreferences.setPhononVoice(context, previous)
+                                        engine.reload()
+                                    }
+                                }
+                            } catch (_: Exception) {
+                                // The speech path logs its own errors.
+                            } finally {
+                                previewingName = null
                             }
-                        },
-                    )
+                        }
+                    }
+
+                    fun useVoice(selected: PhononVoice) {
+                        scope.launch {
+                            voiceDownloading = true
+                            voiceError = null
+                            // Every installed checkpoint keeps its own copy of the voice.
+                            val ok = PhononModel.entries
+                                .filter { PhononDownloader.isInstalled(context, it) }
+                                .map { PhononDownloader.installVoice(context, selected, it) }
+                                .all { it }
+                            if (ok) {
+                                AssistantPreferences.setPhononVoice(context, selected)
+                                KokoroEngine.get(context).reload()
+                            } else {
+                                voiceError = "Could not download that voice. Check your connection."
+                            }
+                            voiceDownloading = false
+                        }
+                    }
+
+                    PhononVoice.entries.forEach { option ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = option.label.substringBefore(" —"),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                )
+                                Text(
+                                    text = option.label.substringAfter("— ", ""),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            IconButton(
+                                enabled = previewingName == null && !voiceDownloading,
+                                onClick = { previewVoice(option.name, option) },
+                            ) {
+                                Icon(
+                                    imageVector = if (previewingName == option.name) {
+                                        Icons.Outlined.GraphicEq
+                                    } else {
+                                        Icons.Outlined.PlayArrow
+                                    },
+                                    contentDescription = "Hear ${option.name}",
+                                )
+                            }
+                            if (phononVoice == option.name) {
+                                Text(
+                                    text = "In use",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 12.dp),
+                                )
+                            } else {
+                                OutlinedButton(
+                                    enabled = !voiceDownloading && previewingName == null,
+                                    onClick = { useVoice(option) },
+                                ) { Text("Use") }
+                            }
+                        }
+                    }
                     if (voiceDownloading) {
                         Text(
                             text = "Downloading voice…",
@@ -390,6 +486,19 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                                     text = "Imported voice file, works offline",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            IconButton(
+                                enabled = previewingName == null && !voiceDownloading,
+                                onClick = { previewVoice(name, null) },
+                            ) {
+                                Icon(
+                                    imageVector = if (previewingName == name) {
+                                        Icons.Outlined.GraphicEq
+                                    } else {
+                                        Icons.Outlined.PlayArrow
+                                    },
+                                    contentDescription = "Hear $name",
                                 )
                             }
                             if (phononVoice == name) {
@@ -459,33 +568,6 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
 
-                    TextButton(
-                        enabled = !voiceDownloading,
-                        onClick = {
-                            previewingVoice = true
-                            scope.launch {
-                                try {
-                                    KokoroEngine.get(context).speak(
-                                        PREVIEW_TEXT,
-                                        voice.speakerId,
-                                        draftSpeed,
-                                    )
-                                } catch (_: Exception) {
-                                    // The reply path reports its own errors.
-                                } finally {
-                                    previewingVoice = false
-                                }
-                            }
-                        },
-                    ) {
-                        Text(if (previewingVoice) "Playing sample…" else "Preview Phonon voice")
-                    }
-                    Text(
-                        text = "Gradium's website demos use catalog voices; the checkpoint also " +
-                            "ships its own default. Pick a voice and preview it here.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                     TextButton(
                         onClick = {
                             scope.launch {
@@ -730,6 +812,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         }
 
 
+        }
+        if (section == SettingsSection.Listening) {
         SettingsGroupHeader("Listening", "How the assistant hears you.")
         SectionCard(
             title = "Speech engine",
@@ -1042,6 +1126,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
+        }
+        if (section == SettingsSection.Brain) {
         SettingsGroupHeader("Assistant brain", "How it thinks and what it remembers.")
         LocalModelsCard()
 
@@ -1216,6 +1302,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         }
 
 
+        }
+        if (section == SettingsSection.Testing) {
         SettingsGroupHeader("Testing and tuning", "Diagnostics, and audio for tuning.")
         AudioCaptureCard()
 
@@ -1259,6 +1347,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         }
 
 
+        }
         Spacer(Modifier.height(8.dp))
         }
     }
@@ -1764,6 +1853,14 @@ private fun AudioCaptureCard() {
             }
         }
     }
+}
+
+/** The tabs across the top of Secretary settings. */
+private enum class SettingsSection(val label: String) {
+    Voice("Voice"),
+    Listening("Listening"),
+    Brain("Brain"),
+    Testing("Testing"),
 }
 
 @Composable

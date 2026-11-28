@@ -2127,7 +2127,11 @@ class AssistantService : Service() {
             }
             // Typed chat has no wait to protect: anything the rules and the
             // labeller did not take goes to the clever model, with the figures.
-            if (chatTurn && !_callActive.value && quick.intent == SpokenIntent.Other) {
+            // A factual question ("what is a cherry laurel?") is better answered by the
+            // free Wikipedia lookup further down than by a model guessing offline.
+            if (chatTurn && !_callActive.value && quick.intent == SpokenIntent.Other &&
+                !looksLikeFactualQuestion(text)
+            ) {
                 if (answerSmart(text)) {
                     CrashLog.note(
                         this,
