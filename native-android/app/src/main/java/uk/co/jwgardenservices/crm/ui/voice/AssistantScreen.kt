@@ -99,6 +99,7 @@ fun AssistantScreen() {
     var state by remember { mutableStateOf(SherpaSpeechService.UiState()) }
     var speaking by remember { mutableStateOf(false) }
     var thinking by remember { mutableStateOf(false) }
+    var thinkingStatus by remember { mutableStateOf("Thinking…") }
     val scope = rememberCoroutineScope()
     var callActive by remember { mutableStateOf(false) }
     var dialling by remember { mutableStateOf(false) }
@@ -163,6 +164,7 @@ fun AssistantScreen() {
         launch { bound.speechState.collect { state = it } }
         launch { bound.speaking.collect { speaking = it } }
         launch { bound.thinking.collect { thinking = it } }
+        launch { bound.thinkingStatus.collect { thinkingStatus = it } }
         launch { bound.callActive.collect { callActive = it } }
         launch { bound.dialling.collect { dialling = it } }
         launch { bound.muted.collect { muted = it } }
@@ -179,7 +181,7 @@ fun AssistantScreen() {
         !granted -> "Microphone permission needed"
         !callActive -> "Ready to call"
         dialling -> "Dialling…"
-        thinking -> "Thinking…"
+        thinking -> thinkingStatus
         speaking -> "Speaking…"
         state.phase == SherpaSpeechService.Phase.Listening -> "Connected"
         state.phase == SherpaSpeechService.Phase.Error -> "Unavailable"

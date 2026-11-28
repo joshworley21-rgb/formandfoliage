@@ -116,6 +116,15 @@ class AssistantService : Service() {
     val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
 
     /** True while a heard sentence is being classified and acted on. */
+    private val _thinkingStatus = MutableStateFlow("Thinking…")
+
+    /** What the assistant is doing while it thinks, for the call screen. */
+    val thinkingStatus: StateFlow<String> = _thinkingStatus.asStateFlow()
+
+    /** True once the real reply for the current turn has started speaking. */
+    @Volatile
+    private var replyStarted = false
+
     private val _thinking = MutableStateFlow(false)
     val thinking: StateFlow<Boolean> = _thinking.asStateFlow()
 
@@ -521,6 +530,23 @@ class AssistantService : Service() {
      * fails the process aborts and no crash report can be written, so the
      * only defence is not to attempt it on a tight phone.
      */
+    /**
+     * The system is asking for memory back. Let go of the optional models in
+     * order, never the live recogniser or the voice, so the call carries on
+     * instead of the whole app being killed.
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        val shed = MemoryBudget.shedFor(level)
+        if (shed == MemoryBudget.Shed.Nothing || !_callActive.value) return
+        CrashLog.note(this, TAG, "trim memory level=$level: shedding $shed")
+        speech.dropSecondLook()
+        if (shed == MemoryBudget.Shed.Router || shed == MemoryBudget.Shed.AllOptional) {
+            LocalLlm.dropRouter(this)
+        }
+        if (shed == MemoryBudget.Shed.AllOptional) LocalLlm.release()
+    }
+
     private fun applyMemoryGuard() {
         val manager = getSystemService(ActivityManager::class.java)
         val info = ActivityManager.MemoryInfo().also { manager?.getMemoryInfo(it) }
@@ -934,6 +960,7 @@ class AssistantService : Service() {
             val spokenOnline = onlineVoice && !lowBattery &&
                 runCatching { onlineSpeaker().speak(stripped, openAiVoice.id) }
                     .getOrDefault(false)
+            replyStarted = true
             CrashLog.note(this, TAG, "reply speech starting: ${stripped.take(80)}")
             if (!spokenOnline) {
                 val drivingPace = if (drivingMode) 0.94f else 1f
@@ -1846,7 +1873,7 @@ class AssistantService : Service() {
                     CrashLog.note(this, TAG, "pending reply: ${followUp.take(120)}")
                     sayAnswer(followUp, ReplyEnding.TaskComplete)
                 } else {
-                    answerTurn(heard)
+                    answerWithWatch(heard)
                 }
             } catch (error: Exception) {
                 Log.w(TAG, "Kokoro playback failed", error)
@@ -1862,6 +1889,82 @@ class AssistantService : Service() {
                     speech.startListening()
                 }
             }
+        }
+    }
+
+    /**
+     * Run a turn with a watchdog: if nothing has started speaking after a few
+     * seconds, say what is going on, and after a longer wait give up out loud
+     * instead of leaving the line quiet.
+     */
+    private suspend fun answerWithWatch(heard: String) {
+        val startedAt = android.os.SystemClock.elapsedRealtime()
+        replyStarted = false
+        _thinkingStatus.value = "Working out what you meant…"
+        val finished = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val gaveUp = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val work = scope.launch {
+            try {
+                answerTurn(heard)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w(TAG, "Turn failed", error)
+                CrashLog.note(this@AssistantService, TAG, "turn failed: ${error.message}")
+            } finally {
+                finished.complete(Unit)
+            }
+        }
+        val watch = scope.launch {
+            var statusSpoken = false
+            while (work.isActive) {
+                delay(500)
+                val elapsed = android.os.SystemClock.elapsedRealtime() - startedAt
+                when (TurnWatch.next(elapsed, replyStarted, statusSpoken)) {
+                    TurnWatch.Step.Wait -> Unit
+                    TurnWatch.Step.Status -> {
+                        statusSpoken = true
+                        val line = if (_thinkingStatus.value.startsWith("Working out")) {
+                            "Still working out what you meant — one moment."
+                        } else {
+                            "Still looking that up — nearly there."
+                        }
+                        CrashLog.note(this@AssistantService, TAG, "turn slow at ${elapsed}ms: $line")
+                        speakStatus(line)
+                    }
+                    TurnWatch.Step.GiveUp -> {
+                        CrashLog.note(this@AssistantService, TAG, "turn gave up at ${elapsed}ms")
+                        work.cancel()
+                        gaveUp.complete(Unit)
+                        return@launch
+                    }
+                }
+            }
+        }
+        try {
+            kotlinx.coroutines.selects.select<Unit> {
+                finished.onAwait { }
+                gaveUp.onAwait { }
+            }
+        } finally {
+            watch.cancel()
+        }
+        if (gaveUp.isCompleted && !finished.isCompleted) {
+            _thinking.value = false
+            say("Sorry, that's taking too long. Could you say it again?")
+        }
+    }
+
+    /** A short spoken update that is not the reply: it does not end the wait. */
+    private suspend fun speakStatus(text: String) {
+        if (!_callActive.value) return
+        val focused = requestAudioFocus()
+        try {
+            holdMicForSpeech()
+            runCatching { speaker.speakStreaming(text, voice.speakerId, speed) }
+        } finally {
+            if (focused) abandonAudioFocus()
+            releaseMicAfterSpeech()
         }
     }
 
@@ -2183,6 +2286,7 @@ class AssistantService : Service() {
 
     /** Carry out a local intent and speak its result. */
     private suspend fun runIntent(text: String, intent: IntentResult) {
+        _thinkingStatus.value = "Looking that up…"
         if (intent.intent == SpokenIntent.Weather || intent.intent == SpokenIntent.Lookup) {
             val lookedUp = freeWeb.answer(text, intent.intent)
             if (lookedUp != null) {

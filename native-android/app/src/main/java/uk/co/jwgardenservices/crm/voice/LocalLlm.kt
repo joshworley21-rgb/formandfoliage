@@ -374,7 +374,7 @@ object LocalLlm {
         routerEngine?.let { return@synchronized it }
         val model = LlmModel.Router
         if (!isInstalled(app, model)) return@synchronized null
-        if (availableMb(app) < model.minFreeMb) {
+        if (!MemoryBudget.canLoad(availableMb(app), model.minFreeMb)) {
             CrashLog.note(app, TAG, "not enough free memory for the action picker")
             return@synchronized null
         }
@@ -484,6 +484,15 @@ object LocalLlm {
             if (engine != null) return@synchronized Loaded(engine, model).also { loaded = it }
         }
         null
+    }
+
+    /** Drop just the action picker, when the system is asking for memory back. */
+    fun dropRouter(context: Context) {
+        synchronized(loadLock) {
+            if (routerEngine != null) CrashLog.note(context.applicationContext, TAG, "memory is short: action picker released")
+            runCatching { routerEngine?.close() }
+            routerEngine = null
+        }
     }
 
     fun release() {

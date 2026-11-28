@@ -381,7 +381,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             val info = android.app.ActivityManager.MemoryInfo()
             manager?.getMemoryInfo(info)
             val availableMb = info.availMem / (1024L * 1024L)
-            if (manager != null && availableMb < PARAKEET_MIN_FREE_MB) {
+            if (manager != null && !MemoryBudget.canLoad(availableMb, PARAKEET_MIN_FREE_MB)) {
                 CrashLog.note(context, TAG, "only $availableMb MB free for Parakeet; not loading it")
                 return@withLock null
             }
@@ -443,7 +443,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             val info = android.app.ActivityManager.MemoryInfo()
             manager?.getMemoryInfo(info)
             val availableMb = info.availMem / (1024L * 1024L)
-            if (manager != null && availableMb < WHISPER_MIN_FREE_MB) {
+            if (manager != null && !MemoryBudget.canLoad(availableMb, WHISPER_MIN_FREE_MB)) {
                 CrashLog.note(context, TAG, "only $availableMb MB free for Whisper; skipping the second look")
                 return@withLock null
             }
@@ -506,7 +506,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             val info = android.app.ActivityManager.MemoryInfo()
             manager?.getMemoryInfo(info)
             val availableMb = info.availMem / (1024L * 1024L)
-            if (manager != null && availableMb < WHISPER_CPP_MIN_FREE_MB) {
+            if (manager != null && !MemoryBudget.canLoad(availableMb, WHISPER_CPP_MIN_FREE_MB)) {
                 CrashLog.note(context, TAG, "only $availableMb MB free for whisper.cpp; skipping the second look")
                 return@withLock null
             }
@@ -528,6 +528,26 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 CrashLog.note(context, TAG, "whisper.cpp ready in ${System.currentTimeMillis() - started}ms")
                 created
             }
+        }
+    }
+
+    /**
+     * Let go of the optional second-look model when the system wants memory
+     * back. Safe mid-call: the live recogniser keeps going, and the next
+     * sentence only reloads it if there is room. Not done when the offline
+     * recogniser is the whole call.
+     */
+    fun dropSecondLook() {
+        if (offlineMode) return
+        synchronized(offlineDecodeLock) {
+            val held = parakeet != null || whisper != null || whisperCpp != null
+            runCatching { parakeet?.release() }
+            parakeet = null
+            runCatching { whisper?.release() }
+            whisper = null
+            runCatching { whisperCpp?.close() }
+            whisperCpp = null
+            if (held) CrashLog.note(context, TAG, "memory is short: second-look model released")
         }
     }
 
