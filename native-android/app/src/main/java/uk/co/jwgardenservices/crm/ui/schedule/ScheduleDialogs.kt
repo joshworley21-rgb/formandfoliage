@@ -364,9 +364,11 @@ internal fun CompleteJobDialog(
         missed: Boolean,
         amount: Double,
     ) -> Unit,
+    /** Start with no hours, so the owner always says how long it really took. */
+    askHours: Boolean = false,
 ) {
     var hours by remember(job.id) {
-        mutableStateOf((job.durationMinutes / 60.0).toString())
+        mutableStateOf(if (askHours) "" else (job.durationMinutes / 60.0).toString())
     }
     var materials by remember(job.id) { mutableStateOf("0") }
     var materialsNote by remember(job.id) { mutableStateOf("") }
@@ -513,7 +515,7 @@ internal fun CompleteJobDialog(
                         TextButton(onClick = onDismiss, enabled = !saving) { Text("Cancel") }
                         Spacer(Modifier.width(6.dp))
                         Button(
-                            enabled = !saving,
+                            enabled = !saving && (missed || !askHours || hoursValue > 0),
                             onClick = {
                                 onComplete(
                                     hoursValue,

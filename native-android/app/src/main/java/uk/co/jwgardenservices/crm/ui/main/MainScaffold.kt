@@ -94,6 +94,9 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
         }
     }
     val unsynced = crmState.pendingWrites + failedWrites.size
+    val markingCount = remember(crmState.jobs) {
+        uk.co.jwgardenservices.crm.ui.dashboard.jobsNeedingMarking(crmState.jobs).size
+    }
     val requestSignOut: () -> Unit = {
         if (unsynced > 0) signOutWarning = true else onSignOut()
     }
@@ -133,6 +136,7 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                     icon = destination.icon,
                     selected = currentRoute == destination.route,
                     onClick = { navigate(destination) },
+                    badge = if (destination == AppDestination.Schedule && !isStaff) markingCount else 0,
                 )
             } + if (moreItems.isNotEmpty()) {
                 listOf(

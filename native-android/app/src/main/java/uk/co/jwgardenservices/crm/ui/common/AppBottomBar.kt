@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,6 +37,8 @@ data class BottomBarEntry(
     val icon: ImageVector,
     val selected: Boolean,
     val onClick: () -> Unit,
+    /** A small count on the icon, e.g. jobs waiting to be marked. */
+    val badge: Int = 0,
 )
 
 /**
@@ -82,12 +85,27 @@ fun AppBottomBar(entries: List<BottomBarEntry>, modifier: Modifier = Modifier) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
                     ) {
-                        Icon(
-                            imageVector = entry.icon,
-                            contentDescription = null,
-                            tint = if (entry.selected) palette.brass else muted,
-                            modifier = Modifier.size(20.dp),
-                        )
+                        androidx.compose.foundation.layout.Box {
+                            Icon(
+                                imageVector = entry.icon,
+                                contentDescription = null,
+                                tint = if (entry.selected) palette.brass else muted,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            if (entry.badge > 0) {
+                                Text(
+                                    text = if (entry.badge > 9) "9+" else entry.badge.toString(),
+                                    color = palette.onBrass,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 10.sp),
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .offset(x = 8.dp, y = (-5).dp)
+                                        .background(palette.brass, androidx.compose.foundation.shape.CircleShape)
+                                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                                )
+                            }
+                        }
                         Text(
                             text = entry.label,
                             style = MaterialTheme.typography.labelMedium.copy(
