@@ -152,6 +152,11 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     private val _transcripts = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val transcripts: SharedFlow<String> = _transcripts.asSharedFlow()
 
+    /** Typed text enters the same pipeline as a spoken sentence. */
+    fun injectTranscript(text: String) {
+        _transcripts.tryEmit(text)
+    }
+
     /** Parakeet TDT 0.6B, an optional offline recogniser; loaded only when chosen and installed. */
     private var parakeet: OfflineRecognizer? = null
 

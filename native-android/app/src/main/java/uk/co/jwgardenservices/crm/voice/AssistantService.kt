@@ -923,7 +923,10 @@ class AssistantService : Service() {
     }
 
     private suspend fun say(text: String) {
-        if (!_callActive.value) return
+        if (!_callActive.value) {
+            if (chatTurn) chatReply(text)
+            return
+        }
         // Wait for a filler that has already started: the online voice does
         // not share Kokoro's audio lock, so it could otherwise talk over it.
         thinkingMask?.cancelAndJoin()
@@ -1675,6 +1678,46 @@ class AssistantService : Service() {
     }
 
     /** Wipe the conversation, not just the last sentence. */
+    /** Typed texts waiting in the pipeline, so the collector can tell them from speech. */
+    private val pendingChat = java.util.concurrent.ConcurrentLinkedQueue<String>()
+
+    /** True while the sentence being handled was typed rather than spoken. */
+    @Volatile
+    private var chatTurn = false
+
+    /** Whether typed-chat replies are also read aloud. */
+    @Volatile
+    private var chatSpeak = false
+
+    fun setChatSpeak(on: Boolean) {
+        chatSpeak = on
+    }
+
+    /**
+     * Send typed text through exactly the same rules, models and confirmations
+     * as a spoken sentence. With no call open the reply appears as text only
+     * (or is read aloud when [setChatSpeak] is on).
+     */
+    fun sendText(typed: String) {
+        val clean = ChatHints.clean(typed)
+        if (clean.isEmpty()) return
+        pendingChat.add(clean)
+        speech.injectTranscript(clean)
+    }
+
+    /** A reply to a typed message: a bubble, and optionally the voice. */
+    private suspend fun chatReply(text: String) {
+        val stripped = TtsProsody.extract(text).second.trim()
+        if (stripped.isEmpty()) return
+        replyStarted = true
+        _thinking.value = false
+        AssistantMemory.lastSpokenReply = stripped
+        addTurn(AssistantTurn(fromUser = false, text = stripped))
+        if (chatSpeak) {
+            runCatching { speaker.speakStreaming(text.trim(), voice.speakerId, speed) }
+        }
+    }
+
     fun clearTranscript() {
         speech.clear()
         _turns.value = emptyList()
@@ -1683,7 +1726,8 @@ class AssistantService : Service() {
 
     private suspend fun handleTranscripts() {
         speech.transcripts.collect { text ->
-            if (!heardInCall) {
+            chatTurn = pendingChat.remove(text)
+            if (!heardInCall && !chatTurn) {
                 heardInCall = true
                 ringback.stop()
                 _dialling.value = false
@@ -1772,7 +1816,7 @@ class AssistantService : Service() {
                 actions.chasePending() || actions.clarificationPending() ||
                 actions.readAllPending() || actions.confirmPending() || actions.hasPending()
             if (!pendingAnswer && endConversationRequested(heard)) {
-                sayAndEnd(VoiceLines.signOff())
+                if (chatTurn && !_callActive.value) say(VoiceLines.signOff()) else sayAndEnd(VoiceLines.signOff())
                 return@collect
             }
             if (!pendingAnswer && SpeechNormalizer.isNoise(heard)) {
@@ -1782,7 +1826,7 @@ class AssistantService : Service() {
             // A short turn should answer immediately; only cover a wait that
             // is actually being felt. The clip plays on the voice thread while
             // the coroutine continues the lookup.
-            if (!speech.fastPath && !pendingAnswer) startThinkingMask()
+            if (!speech.fastPath && !pendingAnswer && !chatTurn) startThinkingMask()
             // Interlock starts before the filler: from here until Kokoro's
             // last sample the microphone frames are discarded, so neither the
             // filler nor the confirmation can feed back into the recognizer.
@@ -1883,6 +1927,8 @@ class AssistantService : Service() {
                 correctionLead = null
                 _thinking.value = false
                 _speaking.value = false
+                // Nothing typed is left in flight; a late voice line stays silent.
+                if (!_callActive.value) chatTurn = false
                 if (wasListening) speech.resumeAfterSpeech()
                 // Open handoff: the line is never left closed after a reply.
                 if (_callActive.value && !_muted.value && !speech.isListening()) {

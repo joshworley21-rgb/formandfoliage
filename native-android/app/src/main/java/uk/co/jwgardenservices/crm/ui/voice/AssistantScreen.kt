@@ -25,7 +25,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -35,6 +38,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.outlined.Delete
@@ -42,6 +48,8 @@ import androidx.compose.material.icons.outlined.Undo
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -62,6 +70,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -78,6 +87,7 @@ import uk.co.jwgardenservices.crm.ui.theme.JwTheme
 import uk.co.jwgardenservices.crm.voice.AssistantService
 import uk.co.jwgardenservices.crm.voice.AssistantTurn
 import uk.co.jwgardenservices.crm.voice.CallLedger
+import uk.co.jwgardenservices.crm.voice.ChatHints
 import uk.co.jwgardenservices.crm.voice.SherpaSpeechService
 
 /**
@@ -108,6 +118,9 @@ fun AssistantScreen() {
     var connectedAt by remember { mutableLongStateOf(0L) }
     var turns by remember { mutableStateOf<List<AssistantTurn>>(emptyList()) }
     var granted by remember { mutableStateOf(micGranted(context)) }
+    var draft by remember { mutableStateOf("") }
+    var speakReplies by remember { mutableStateOf(false) }
+    LaunchedEffect(service, speakReplies) { service?.setChatSpeak(speakReplies) }
 
     val permission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -203,6 +216,7 @@ fun AssistantScreen() {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .imePadding()
             .padding(
                 horizontal = if (compact) 16.dp else 24.dp,
                 vertical = if (compact) 8.dp else 14.dp,
@@ -227,17 +241,36 @@ fun AssistantScreen() {
             )
             return@Column
         }
+        // Chat first: type here, or tap the phone to talk. Both feed the same
+        // assistant, so the conversation is one thread either way.
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = "Form & Foliage",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.weight(1f))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Secretary",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                Text(
+                    text = "Type, or tap the phone to talk",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = { speakReplies = !speakReplies }) {
+                Icon(
+                    imageVector = if (speakReplies) {
+                        Icons.AutoMirrored.Filled.VolumeUp
+                    } else {
+                        Icons.AutoMirrored.Filled.VolumeOff
+                    },
+                    contentDescription = if (speakReplies) "Replies are read aloud" else "Replies are silent",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (turns.isNotEmpty()) {
                 IconButton(onClick = { service?.clearTranscript() }) {
                     Icon(
@@ -247,96 +280,40 @@ fun AssistantScreen() {
                     )
                 }
             }
+            Surface(
+                shape = CircleShape,
+                color = JwTheme.colors.callGreen,
+                contentColor = JwTheme.colors.onCall,
+                modifier = Modifier.size(44.dp),
+            ) {
+                IconButton(
+                    onClick = {
+                        if (granted) startCall(context) else permission.launch(Manifest.permission.RECORD_AUDIO)
+                    },
+                ) {
+                    Icon(
+                        Icons.Filled.Call,
+                        contentDescription = "Call Secretary",
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
         }
 
-        Spacer(Modifier.weight(if (compact) 0.45f else 1.1f))
-
-        CallOrb(
-            active = callActive,
-            speaking = busy,
-            loading = dialling,
-            size = orbSize,
-        )
-
-        Spacer(Modifier.height(if (compact) 10.dp else 18.dp))
-
-        Text(
-            text = "Secretary",
-            style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
-
-        // The familiar ticking call timer; runs while the call is connected.
-        CallTimer(startedAt = connectedAt, running = callActive && connectedAt > 0L)
-
-        Spacer(Modifier.weight(if (compact) 0.3f else 0.7f))
-
-        SpeakingBars(
-            active = callActive,
-            speaking = busy,
-            level = if (connected) state.level else 0f,
-        )
-
-        Spacer(Modifier.height(10.dp))
-
-        Surface(
-            shape = RoundedCornerShape(JwTokens.chipRadius),
-            color = MaterialTheme.colorScheme.surfaceVariant,
-        ) {
-            Text(
-                text = status,
-                style = MaterialTheme.typography.labelLarge,
-                color = if (state.phase == SherpaSpeechService.Phase.Error) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        if (!granted) {
-            Text(
-                text = "Secretary needs the microphone to hear you. Nothing is uploaded.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(8.dp))
-        }
+        Spacer(Modifier.height(8.dp))
 
         Transcript(
             turns = turns,
-            partial = state.partial,
-            listening = connected,
+            partial = "",
+            listening = false,
+            thinkingText = if (thinking) thinkingStatus else null,
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(2.4f),
+                .weight(1f),
         )
 
-        Spacer(Modifier.height(14.dp))
-
-        CallButton(
-            label = if (granted) "Call" else "Allow microphone",
-            container = JwTheme.colors.callGreen,
-            content = JwTheme.colors.onCall,
-            onClick = {
-                if (granted) startCall(context) else permission.launch(Manifest.permission.RECORD_AUDIO)
-            },
-        ) {
-            Icon(
-                Icons.Filled.Call,
-                contentDescription = "Call Secretary",
-                modifier = Modifier.size(28.dp),
-            )
-        }
-
         if (!callActive && ledger.isNotEmpty()) {
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
             PostCallSummary(
                 entries = ledger,
                 onUndo = { entry ->
@@ -349,6 +326,59 @@ fun AssistantScreen() {
                 },
                 onDismiss = { CallLedger.clear() },
             )
+        }
+
+        val quickReplies = ChatHints.quickReplies(turns.lastOrNull()?.takeIf { !it.fromUser }?.text)
+        if (quickReplies.isNotEmpty() && !thinking) {
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                quickReplies.forEach { reply ->
+                    OutlinedButton(onClick = { service?.sendText(reply) }) { Text(reply) }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        val send = {
+            val typed = draft.trim()
+            if (typed.isNotEmpty() && service != null) {
+                service?.sendText(typed)
+                draft = ""
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                placeholder = { Text("Message Secretary…") },
+                maxLines = 4,
+                shape = RoundedCornerShape(JwTokens.controlRadius),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { send() }),
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(
+                onClick = { send() },
+                enabled = draft.isNotBlank() && service != null,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send",
+                    tint = if (draft.isNotBlank()) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
         }
 
         Spacer(Modifier.height(6.dp))
@@ -479,6 +509,7 @@ private fun Transcript(
     partial: String,
     listening: Boolean,
     modifier: Modifier = Modifier,
+    thinkingText: String? = null,
 ) {
     Surface(
         modifier = modifier,
@@ -486,7 +517,7 @@ private fun Transcript(
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
         val listState = rememberLazyListState()
-        val itemCount = turns.size + if (partial.isNotBlank()) 1 else 0
+        val itemCount = turns.size + (if (partial.isNotBlank()) 1 else 0) + (if (thinkingText != null) 1 else 0)
 
         LaunchedEffect(itemCount) {
             if (itemCount > 0) listState.scrollToItem(itemCount - 1)
@@ -498,7 +529,8 @@ private fun Transcript(
                     text = if (listening) {
                         "Say “what’s next”, “who owes me” or “log two hours for Smiths”."
                     } else {
-                        "Everything stays on this phone."
+                        "Ask “what’s next”, “who owes me” or “log two hours for Smiths”. " +
+                            "Everything stays on this phone."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -519,6 +551,11 @@ private fun Transcript(
                 if (partial.isNotBlank()) {
                     item {
                         Bubble(text = partial, fromUser = true, pending = true)
+                    }
+                }
+                if (thinkingText != null) {
+                    item {
+                        Bubble(text = thinkingText, fromUser = false, pending = true)
                     }
                 }
             }
