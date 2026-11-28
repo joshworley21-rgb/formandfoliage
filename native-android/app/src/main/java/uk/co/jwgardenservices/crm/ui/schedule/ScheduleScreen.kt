@@ -1,5 +1,9 @@
 package uk.co.jwgardenservices.crm.ui.schedule
 
+import androidx.compose.material.icons.outlined.WaterDrop
+import uk.co.jwgardenservices.crm.domain.RainPlan
+import uk.co.jwgardenservices.crm.domain.DayRain
+import uk.co.jwgardenservices.crm.data.weather.RainForecast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -56,6 +60,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.widget.Toast
@@ -105,6 +110,8 @@ import uk.co.jwgardenservices.crm.ui.common.ForestCard
 import uk.co.jwgardenservices.crm.ui.common.ForestFigure
 import uk.co.jwgardenservices.crm.ui.common.HeaderStepper
 import uk.co.jwgardenservices.crm.ui.common.JwCard
+import uk.co.jwgardenservices.crm.ui.common.PillStyle
+import uk.co.jwgardenservices.crm.ui.common.PillButton
 import uk.co.jwgardenservices.crm.ui.common.SectionLabel
 import uk.co.jwgardenservices.crm.ui.common.SegmentedPillTabs
 
@@ -172,6 +179,10 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
 
     val weekStart = weekCursor.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
     val weekDays = (0..6).map { weekStart.plusDays(it.toLong()) }
+    val rainContext = androidx.compose.ui.platform.LocalContext.current
+    val rain by RainForecast.days.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { RainForecast.refresh(rainContext) }
+    var rainMove by remember { mutableStateOf<Pair<LocalDate, LocalDate>?>(null) }
     val weekJobs = state.jobs.filter { job ->
         job.status != "cancelled" &&
             parseTimestamp(job.startsAt)?.localDate()?.let {
@@ -397,10 +408,32 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
                     hideMoney = hideMoney,
                 )
             }
+            if (!isStaff) {
+                // The first wet day this week (from today) with work booked, and the
+                // first dry day after it in the forecast.
+                val wet = weekDays.firstOrNull { day ->
+                    !day.isBefore(today) && RainPlan.isWet(rain[day]) &&
+                        jobsByDay[day].orEmpty().any { it.status == "scheduled" }
+                }
+                val dry = wet?.let { RainPlan.nextDryDay(it, rain) }
+                if (wet != null) {
+                    item {
+                        RainBanner(
+                            day = wet,
+                            rain = rain.getValue(wet),
+                            jobCount = jobsByDay[wet].orEmpty().count { it.status == "scheduled" },
+                            moveTo = dry,
+                            today = today,
+                            onMove = { if (dry != null) rainMove = wet to dry },
+                        )
+                    }
+                }
+            }
             item {
                 WeekBoard(
                     days = weekDays,
                     jobsByDay = jobsByDay,
+                    rain = rain,
                     today = today,
                     clients = state.clients,
                     clientNames = clientNames,
@@ -734,6 +767,55 @@ fun ScheduleScreen(viewModel: CrmViewModel, isStaff: Boolean) {
         )
     }
 
+    rainMove?.let { (from, to) ->
+        val moving = jobsByDay[from].orEmpty().filter { it.status == "scheduled" }
+        JwAlertDialog(
+            onDismissRequest = { if (!state.saving) rainMove = null },
+            title = { Text("Move ${moving.size} ${if (moving.size == 1) "job" else "jobs"} to ${to.format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM", java.util.Locale.UK))}?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    moving.forEach { job ->
+                        Text("${parseTimestamp(job.startsAt)?.formatTime() ?: ""}  ${clientNames[job.clientId] ?: "Client"}")
+                    }
+                    Text(
+                        text = "Same times, on the next dry day in the forecast. Clients are not told automatically.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !state.saving,
+                    onClick = {
+                        scope.launch {
+                            saveError = null
+                            try {
+                                moving.forEach { job ->
+                                    val start = parseTimestamp(job.startsAt) ?: return@forEach
+                                    viewModel.saveJob(
+                                        JobDraft(
+                                            id = job.id,
+                                            clientId = job.clientId,
+                                            date = to.toString(),
+                                            time = start.formatTime(),
+                                            durationMinutes = job.durationMinutes,
+                                            notes = job.notes,
+                                        ),
+                                    )
+                                }
+                                rainMove = null
+                            } catch (error: Exception) {
+                                saveError = error.message ?: "Could not move those jobs"
+                            }
+                        }
+                    },
+                ) { Text("Move them") }
+            },
+            dismissButton = { TextButton(onClick = { rainMove = null }) { Text("Cancel") } },
+        )
+    }
+
     sheetJob?.let { job ->
         JobSheetDialog(
             job = job,
@@ -966,11 +1048,47 @@ private fun WeekTotals(
     }
 }
 
+/** "Rain on Tue 1 Dec: 80% chance, about 6 mm. 3 jobs booked." with a one-tap move. */
+@Composable
+private fun RainBanner(
+    day: LocalDate,
+    rain: DayRain,
+    jobCount: Int,
+    moveTo: LocalDate?,
+    today: LocalDate,
+    onMove: () -> Unit,
+) {
+    val fmt = java.time.format.DateTimeFormatter.ofPattern("EEE d MMM", java.util.Locale.UK)
+    val label = when (day) {
+        today -> "today"
+        today.plusDays(1) -> "tomorrow"
+        else -> day.format(fmt)
+    }
+    JwCard(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.WaterDrop, contentDescription = null, tint = JwTheme.colors.info)
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Rain $label", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = "${RainPlan.describe(rain)}. $jobCount ${if (jobCount == 1) "job" else "jobs"} booked.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (moveTo != null) {
+                PillButton(label = "Move to ${moveTo.format(java.time.format.DateTimeFormatter.ofPattern("EEE d", java.util.Locale.UK))}", onClick = onMove, style = PillStyle.Forest)
+            }
+        }
+    }
+}
+
 @Composable
 private fun WeekBoard(
     days: List<LocalDate>,
     jobsByDay: Map<LocalDate, List<ScheduledJob>>,
     today: LocalDate,
+    rain: Map<LocalDate, DayRain> = emptyMap(),
     clients: List<Client>,
     clientNames: Map<String, String>,
     isStaff: Boolean,
@@ -978,21 +1096,24 @@ private fun WeekBoard(
     onOpenJob: (ScheduledJob) -> Unit,
     onAdd: (LocalDate) -> Unit,
 ) {
+    // All seven days across the screen at once: each job is a compact tile
+    // (time and name); tapping it opens the full details.
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         days.forEach { day ->
             val jobs = jobsByDay[day].orEmpty()
                 .filter { !recurringOnly || it.seriesId != null }
                 .sortedBy { it.startsAt }
-            Column(modifier = Modifier.width(150.dp)) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                 val isToday = day == today
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(JwTokens.controlRadius),
+                    shape = RoundedCornerShape(JwTokens.smallRadius),
                     color = if (isToday) JwTheme.colors.forest else JwTheme.colors.track,
                     contentColor = if (isToday) {
                         JwTheme.colors.onForestMuted
@@ -1001,15 +1122,15 @@ private fun WeekBoard(
                     },
                 ) {
                     Column(
-                        modifier = Modifier.padding(vertical = 8.dp),
+                        modifier = Modifier.padding(vertical = 6.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Text(
                             text = day.format(java.time.format.DateTimeFormatter.ofPattern(
                                 "EEE",
                                 java.util.Locale.UK,
-                            )).uppercase(),
-                            style = MaterialTheme.typography.labelSmall,
+                            )).uppercase().take(3),
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                             color = if (isToday) {
                                 JwTheme.colors.brass
                             } else {
@@ -1018,31 +1139,73 @@ private fun WeekBoard(
                         )
                         Text(
                             text = day.dayOfMonth.toString(),
-                            style = MaterialTheme.typography.titleLarge,
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                         )
+                        if (RainPlan.isWet(rain[day])) {
+                            Icon(
+                                imageVector = Icons.Outlined.WaterDrop,
+                                contentDescription = "Rain likely",
+                                tint = JwTheme.colors.info,
+                                modifier = Modifier.size(12.dp),
+                            )
+                        }
                     }
                 }
-                Spacer(Modifier.height(7.dp))
                 jobs.forEach { job ->
-                    WeekJobCard(
+                    WeekJobTile(
                         job = job,
                         clientName = clientNames[job.clientId] ?: "Client",
-                        address = clients.firstOrNull { it.id == job.clientId }?.address,
                         onClick = { onOpenJob(job) },
                     )
-                    Spacer(Modifier.height(6.dp))
                 }
                 if (!isStaff) {
-                    DashedAddSlot(onClick = { onAdd(day) })
+                    DashedAddSlot(onClick = { onAdd(day) }, compact = true)
                 }
             }
         }
     }
 }
 
+/** One booking in the seven-day view: time on top, then the client, two lines at most. */
 @Composable
-private fun DashedAddSlot(onClick: () -> Unit) {
+private fun WeekJobTile(
+    job: ScheduledJob,
+    clientName: String,
+    onClick: () -> Unit,
+) {
+    val starts = parseTimestamp(job.startsAt)
+    val done = job.status == "done"
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(JwTokens.tinyRadius),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            JwTokens.hairline,
+            if (done) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 3.dp, vertical = 4.dp)) {
+            Text(
+                text = starts?.formatTime() ?: "—",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
+            Text(
+                text = clientName,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DashedAddSlot(onClick: () -> Unit, compact: Boolean = false) {
     val dashedColour = JwTheme.colors.dashed
     Box(
         modifier = Modifier
@@ -1059,76 +1222,14 @@ private fun DashedAddSlot(onClick: () -> Unit) {
                     cornerRadius = CornerRadius(JwTokens.controlRadius.toPx()),
                 )
             }
-            .padding(vertical = 12.dp),
+            .padding(vertical = if (compact) 6.dp else 12.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = "+ Add",
+            text = if (compact) "+" else "+ Add",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-    }
-}
-
-@Composable
-private fun WeekJobCard(
-    job: ScheduledJob,
-    clientName: String,
-    address: String?,
-    onClick: () -> Unit,
-) {
-    val starts = parseTimestamp(job.startsAt)
-    val end = starts?.plusSeconds((job.durationMinutes * 60).toLong())
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(JwTokens.controlRadius),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(JwTokens.hairline, JwTheme.colors.cardBorder),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(modifier = Modifier.height(IntrinsicSize.Min)) {
-            Box(
-                modifier = Modifier
-                    .width(4.dp)
-                    .fillMaxHeight()
-                    .background(
-                        if (job.status == "done") {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.tertiary
-                        },
-                    ),
-            )
-            Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp)) {
-                Text(
-                    text = clientName,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                )
-                if (!address.isNullOrBlank()) {
-                    Text(
-                        text = address,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    )
-                }
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    text = "${starts?.formatTime() ?: "—"}–${end?.formatTime() ?: "—"}",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = "${job.durationMinutes} min",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
     }
 }
 

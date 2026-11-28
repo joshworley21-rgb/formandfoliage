@@ -19,7 +19,7 @@ object JwTokens {
     /** Padding inside a card. */
     val cardPadding = 16.dp
     /** White cards, forest hero cards and recessed KPI cards. */
-    val cardRadius = 16.dp
+    val cardRadius = 20.dp
     /** Dialogs and bottom sheets. */
     val sheetRadius = 24.dp
     /** Text fields, dropdowns and square-ish controls. */

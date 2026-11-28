@@ -15,6 +15,15 @@ object ClauseProsody {
     const val STANDARD = 1.00f
     const val BREATH_MS = 140
 
+    /**
+     * Pace is applied by changing the playback rate, which also moves the pitch.
+     * Full swings between clauses (0.90 to 1.06) can sound like two speakers, so
+     * the steady voice keeps only this share of each swing.
+     */
+    const val STEADY_SHARE = 0.35f
+
+    fun steady(multiplier: Float): Float = 1f + (multiplier - 1f) * STEADY_SHARE
+
     private val figure = Regex(
         "[£$€]|\\b\\d+(?:[.,]\\d+)?\\s*(?:pounds?|quid|pence|p|hours?|minutes?|mins?|days?)\\b|" +
             "\\b\\d{1,2}[:.]\\d{2}\\b|" +

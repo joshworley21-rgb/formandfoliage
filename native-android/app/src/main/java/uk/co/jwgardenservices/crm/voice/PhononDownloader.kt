@@ -24,8 +24,9 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
- * Phonon 31m English (Apache 2.0), the highest-quality Phonon that can ship in a
- * business app. The 40m models are CC BY-NC and deliberately not offered.
+ * Phonon 31m English (Apache 2.0), the standard voice and the one safe to use in a
+ * business app. The 40m model is CC BY-NC (non-commercial), so it is only an optional
+ * download the owner must ask for; see [PhononModel].
  *
  * Four files, about 62 MB in total, fetched from the model's Hugging Face repo:
  * config, tokenizer, q8 weights and the default voice. The Rust runtime streams
@@ -48,22 +49,63 @@ enum class PhononVoice(val label: String, val voiceId: String) {
     Hugh("Hugh — British male", "YyKcxPG7iIgS3jsK"),
 }
 
+/**
+ * The Phonon checkpoints the app can use. 31m is the default and is Apache 2.0.
+ * 40m is an optional download under CC BY-NC 4.0 (non-commercial use only), so
+ * it is never fetched unless the owner asks for it in Settings.
+ */
+enum class PhononModel(
+    val id: String,
+    val label: String,
+    val dirName: String,
+    val base: String,
+    val files: Map<String, Long>,
+    val licence: String,
+    /** Hugging Face asks for a login and an accepted licence before it serves these files. */
+    val gated: Boolean = false,
+    val pageUrl: String = "",
+) {
+    Phonon31(
+        id = "31m",
+        label = "Phonon 31m",
+        dirName = "phonon-31m-en",
+        base = "https://huggingface.co/gradium/phonon-31m-en/resolve/main/",
+        files = linkedMapOf(
+            "config.json" to 4_634L,
+            "tokenizer.json" to 277_967L,
+            "model.q8.gguf" to 64_512_352L,
+            "default-voice.safetensors" to 256_136L,
+        ),
+        licence = "Apache 2.0 — free for business use.",
+    ),
+    Phonon40(
+        id = "40m",
+        label = "Phonon 40m",
+        dirName = "phonon-40m-en",
+        base = "https://huggingface.co/gradium/phonon-40m-en/resolve/main/",
+        files = linkedMapOf(
+            "config.json" to 4_634L,
+            "tokenizer.json" to 277_967L,
+            "model.q8.gguf" to 74_553_568L,
+            "default-voice.safetensors" to 256_136L,
+        ),
+        licence = "CC BY-NC 4.0 — non-commercial use only.",
+        gated = true,
+        pageUrl = "https://huggingface.co/gradium/phonon-40m-en",
+    ),
+    ;
+
+    val totalBytes: Long get() = files.values.sum()
+
+    companion object {
+        fun fromId(id: String?): PhononModel = entries.firstOrNull { it.id == id } ?: Phonon31
+    }
+}
+
 object PhononDownloader {
     private const val TAG = "PhononDownload"
     private const val VOICE_BASE = "https://huggingface.co/gradium/phonon-voices/resolve/main/voices/"
 
-    const val MODEL_DIR = "phonon-31m-en"
-    private const val BASE = "https://huggingface.co/gradium/phonon-31m-en/resolve/main/"
-
-    /** Exact sizes let a half file be detected and resumed without a HEAD request. */
-    private val FILES: Map<String, Long> = linkedMapOf(
-        "config.json" to 4_634L,
-        "tokenizer.json" to 277_967L,
-        "model.q8.gguf" to 64_512_352L,
-        "default-voice.safetensors" to 256_136L,
-    )
-
-    const val TOTAL_BYTES = 65_051_089L
 
     private const val STALL_TIMEOUT_MS = 60_000L
     private const val FREE_SPACE_MARGIN = 30L * 1024 * 1024
@@ -87,32 +129,37 @@ object PhononDownloader {
     @Volatile
     private var activeCall: okhttp3.Call? = null
 
-    fun dir(context: Context): File = File(context.filesDir, MODEL_DIR)
+    fun dir(context: Context, model: PhononModel = PhononModel.Phonon31): File =
+        File(context.filesDir, model.dirName)
 
-    fun isInstalled(context: Context): Boolean {
-        val dir = dir(context)
-        return FILES.all { (name, size) ->
+    fun isInstalled(context: Context, model: PhononModel = PhononModel.Phonon31): Boolean {
+        val dir = dir(context, model)
+        return model.files.all { (name, size) ->
             File(dir, name).let { it.isFile && it.length() >= size }
         }
     }
 
     /** Bytes already on disk, complete files included, for a resume label. */
-    fun savedBytes(context: Context): Long {
-        val dir = dir(context)
-        return FILES.keys.sumOf { name ->
+    fun savedBytes(context: Context, model: PhononModel = PhononModel.Phonon31): Long {
+        val dir = dir(context, model)
+        return model.files.keys.sumOf { name ->
             File(dir, name).length().coerceAtLeast(0) + File(dir, "$name.part").length().coerceAtLeast(0)
-        }.coerceAtMost(TOTAL_BYTES)
+        }.coerceAtMost(model.totalBytes)
     }
 
     /**
      * Download one catalog voice into `voices/<name>.safetensors`. The file is
      * small, so this is a plain download rather than a resumable model fetch.
      */
-    suspend fun installVoice(context: Context, voice: PhononVoice): Boolean {
+    suspend fun installVoice(
+        context: Context,
+        voice: PhononVoice,
+        model: PhononModel = PhononModel.Phonon31,
+    ): Boolean {
         return withContext(Dispatchers.IO) {
             runCatching {
-                if (!isInstalled(context)) throw IOException("Download the Phonon model first.")
-                val folder = File(dir(context), "voices").apply { mkdirs() }
+                if (!isInstalled(context, model)) throw IOException("Download the Phonon model first.")
+                val folder = File(dir(context, model), "voices").apply { mkdirs() }
                 val target = File(folder, "${voice.name}.safetensors")
                 if (target.isFile && target.length() > 0) return@runCatching true
                 val client = OkHttpClient.Builder()
@@ -146,9 +193,9 @@ object PhononDownloader {
      * by file name without extension. They are stored beside the catalogue
      * voices, but are not part of [PhononVoice].
      */
-    fun customVoices(context: Context): List<String> {
+    fun customVoices(context: Context, model: PhononModel = PhononModel.Phonon31): List<String> {
         val catalog = PhononVoice.entries.map { it.name }.toSet() + setOf("default", "default-voice")
-        return File(dir(context), "voices")
+        return File(dir(context, model), "voices")
             .listFiles { file -> file.isFile && file.extension == "safetensors" }
             ?.map { it.nameWithoutExtension }
             ?.filter { it !in catalog }
@@ -161,11 +208,15 @@ object PhononDownloader {
      * custom voices are not published on Hugging Face, so they have to be
      * exported once (the studio or `download-voice.py`) and imported here.
      */
-    suspend fun importVoice(context: Context, uri: android.net.Uri): String? =
+    suspend fun importVoice(
+        context: Context,
+        uri: android.net.Uri,
+        model: PhononModel = PhononModel.Phonon31,
+    ): String? =
         withContext(Dispatchers.IO) {
             runCatching {
-                if (!isInstalled(context)) throw IOException("Download the Phonon model first.")
-                val folder = File(dir(context), "voices").apply { mkdirs() }
+                if (!isInstalled(context, model)) throw IOException("Download the Phonon model first.")
+                val folder = File(dir(context, model), "voices").apply { mkdirs() }
                 val suggested = runCatching {
                     context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                         val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
@@ -209,16 +260,50 @@ object PhononDownloader {
             }
         }
 
-    suspend fun removeCustomVoice(context: Context, name: String) = withContext(Dispatchers.IO) {
-        File(dir(context), "voices/$name.safetensors").delete()
+    suspend fun removeCustomVoice(
+        context: Context,
+        name: String,
+        model: PhononModel = PhononModel.Phonon31,
+    ) = withContext(Dispatchers.IO) {
+        File(dir(context, model), "voices/$name.safetensors").delete()
     }
 
-    fun start(context: Context) {        if (job?.isActive == true) return
+    /**
+     * Copy every voice file from one model's folder to another's, skipping any
+     * already there, so a chosen or imported voice survives switching models.
+     */
+    suspend fun copyVoices(context: Context, from: PhononModel, to: PhononModel): Int =
+        withContext(Dispatchers.IO) {
+            val source = File(dir(context, from), "voices")
+            val target = File(dir(context, to), "voices").apply { mkdirs() }
+            var copied = 0
+            source.listFiles { file -> file.isFile && file.extension == "safetensors" }?.forEach { file ->
+                val destination = File(target, file.name)
+                if (!destination.isFile || destination.length() == 0L) {
+                    runCatching { file.copyTo(destination, overwrite = true) }.onSuccess { copied++ }
+                }
+            }
+            copied
+        }
+
+    /** The model the current or last download was for, so a card shows only its own progress and errors. */
+    @Volatile
+    var activeModel: PhononModel = PhononModel.Phonon31
+        private set
+
+    @Volatile
+    private var accessToken: String? = null
+
+    /** [token] is a Hugging Face read token, needed only for a gated model such as 40m. */
+    fun start(context: Context, model: PhononModel = PhononModel.Phonon31, token: String? = null) {
+        if (job?.isActive == true) return
+        activeModel = model
+        accessToken = token?.trim()?.takeIf { it.isNotEmpty() }
         val appContext = context.applicationContext
         job = scope.launch {
             try {
-                download(appContext)
-                if (!isInstalled(appContext)) throw IOException("The Phonon files are incomplete.")
+                download(appContext, model)
+                if (!isInstalled(appContext, model)) throw IOException("The Phonon files are incomplete.")
                 _state.value = State.Done
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
@@ -244,28 +329,29 @@ object PhononDownloader {
         }
     }
 
-    suspend fun remove(context: Context) = withContext(Dispatchers.IO) {
+    suspend fun remove(context: Context, model: PhononModel = PhononModel.Phonon31) = withContext(Dispatchers.IO) {
         job?.cancelAndJoin()
         job = null
-        dir(context).deleteRecursively()
+        dir(context, model).deleteRecursively()
         _state.value = State.Idle
     }
 
-    private suspend fun download(context: Context) {
-        val dir = dir(context)
+    private suspend fun download(context: Context, model: PhononModel) {
+        val dir = dir(context, model)
         dir.mkdirs()
 
         var completed = 0L
-        for ((name, size) in FILES) {
-            completed += downloadFile(context, dir, name, size, completed)
+        for ((name, size) in model.files) {
+            completed += downloadFile(context, model, dir, name, size, completed)
         }
-        if (completed < TOTAL_BYTES) {
+        if (completed < model.totalBytes) {
             throw IOException("The download stopped early. Try again to resume.")
         }
     }
 
     private suspend fun downloadFile(
         context: Context,
+        model: PhononModel,
         dir: File,
         name: String,
         size: Long,
@@ -276,7 +362,7 @@ object PhononDownloader {
 
         val partial = File(dir, "$name.part")
         val have = partial.length().coerceAtMost(size)
-        val stillNeeded = (TOTAL_BYTES - completed - have).coerceAtLeast(0) + FREE_SPACE_MARGIN
+        val stillNeeded = (model.totalBytes - completed - have).coerceAtLeast(0) + FREE_SPACE_MARGIN
         if (context.filesDir.usableSpace in 1 until stillNeeded) {
             throw IOException(
                 "Not enough free space: about ${stillNeeded / 1048576} MB needed.",
@@ -287,11 +373,14 @@ object PhononDownloader {
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(120, TimeUnit.SECONDS)
             .build()
-        val request = Request.Builder().url(BASE + name).apply {
+        val request = Request.Builder().url(model.base + name).apply {
             if (have > 0) header("Range", "bytes=$have-")
+            // OkHttp drops this header when a redirect leaves huggingface.co, so
+            // the token never reaches the file host.
+            if (model.gated) accessToken?.let { header("Authorization", "Bearer $it") }
         }.build()
 
-        _state.value = State.Working(completed + have, TOTAL_BYTES)
+        _state.value = State.Working(completed + have, model.totalBytes)
         val call = client.newCall(request)
         activeCall = call
         var lastByteAt = System.currentTimeMillis()
@@ -313,6 +402,17 @@ object PhononDownloader {
             call.execute().use { response ->
                 val appending = response.code == 206 && have > 0
                 if (!response.isSuccessful) {
+                    if (model.gated && (response.code == 401 || response.code == 403)) {
+                        throw IOException(
+                            if (accessToken == null) {
+                                "Hugging Face needs a login for this model. Accept its licence on the " +
+                                    "model page, then paste a read token below."
+                            } else {
+                                "Hugging Face refused that token. Check you accepted the licence on the " +
+                                    "model page and that the token can read."
+                            },
+                        )
+                    }
                     throw IOException("Download failed: HTTP ${response.code}")
                 }
                 val body = response.body ?: throw IOException("The download returned no body")
@@ -329,8 +429,8 @@ object PhononDownloader {
                             if (now - lastReportAt > 200 || written >= size) {
                                 lastReportAt = now
                                 _state.value = State.Working(
-                                    (completed + written).coerceAtMost(TOTAL_BYTES),
-                                    TOTAL_BYTES,
+                                    (completed + written).coerceAtMost(model.totalBytes),
+                                    model.totalBytes,
                                 )
                             }
                         }

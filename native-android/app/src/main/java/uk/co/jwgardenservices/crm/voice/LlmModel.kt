@@ -1,16 +1,19 @@
 package uk.co.jwgardenservices.crm.voice
 
 /**
- * The on-device models the assistant can think with, all LiteRT-LM files from
- * the litert-community repositories on Hugging Face. The Qwen3 files download
- * directly; Gemma needs a login there, so it is imported from a file instead.
+ * The two on-device models the assistant thinks with, both LiteRT-LM files from
+ * the litert-community repositories on Hugging Face, downloaded directly.
+ *
+ * Each has one job. [Small] answers quickly, so it labels sentences and gives
+ * short replies on a phone call, where a wait is felt. [Large] is the clever
+ * one, used for typed chat, where a slower reply is fine and no listening model
+ * is competing for memory.
  */
 enum class LlmModel(
     val id: String,
     val label: String,
     val fileName: String,
-    /** Null when the file needs a login to download and has to be imported instead. */
-    val url: String?,
+    val url: String,
     val bytes: Long,
     /** Memory the system must report as available before this model is loaded. */
     val minFreeMb: Long,
@@ -18,12 +21,10 @@ enum class LlmModel(
     val reasonsByDefault: Boolean,
     /** Slower models take a short prompt: time to the first word is mostly prefill. */
     val leanPrompts: Boolean,
-    /** A model that only picks app actions (function calling); it never answers or chats. */
-    val routesTools: Boolean = false,
 ) {
     Small(
         id = "qwen3-0.6b",
-        label = "Qwen3 0.6B",
+        label = "Qwen3 0.6B (fast, for calls)",
         fileName = "qwen3-0.6b-int4.litertlm",
         url = "https://huggingface.co/litert-community/Qwen3-0.6B-int4/resolve/main/" +
             "qwen3_0.6b_nothink_q4_block32_ekv1280.litertlm",
@@ -32,53 +33,29 @@ enum class LlmModel(
         reasonsByDefault = false,
         leanPrompts = false,
     ),
-    Gemma(
-        id = "gemma3-1b",
-        label = "Gemma 3 1B",
-        fileName = "gemma3-1b-it-int4.litertlm",
-        url = null,
-        bytes = 584_417_280L,
-        minFreeMb = 1_500L,
-        reasonsByDefault = false,
-        leanPrompts = true,
-    ),
     Large(
         id = "qwen3-1.7b",
-        label = "Qwen3 1.7B",
+        label = "Qwen3 1.7B (clever, for chat)",
         fileName = "qwen3-1.7b-wi4b32.litertlm",
         url = "https://huggingface.co/litert-community/Qwen3-1.7B/resolve/main/" +
             "Qwen3-1.7B_dynamic_wi4b32_afp32.litertlm",
         bytes = 977_184_032L,
-        minFreeMb = 3_000L,
+        minFreeMb = 2_400L,
         reasonsByDefault = true,
         leanPrompts = true,
     ),
-    Router(
-        id = "functiongemma-mobile-actions",
-        label = "FunctionGemma 270M",
-        fileName = "functiongemma-mobile-actions-q8.litertlm",
-        url = "https://huggingface.co/litert-community/functiongemma-mobile-actions_q8_ekv1024.litertlm/" +
-            "resolve/main/mobile-actions_q8_ekv1024.litertlm",
-        bytes = 284_426_240L,
-        minFreeMb = 700L,
-        reasonsByDefault = false,
-        leanPrompts = true,
-        routesTools = true,
-    ),
     ;
-
-    val downloadable: Boolean get() = url != null
 
     companion object {
         fun fromId(id: String?): LlmModel = entries.firstOrNull { it.id == id } ?: Small
 
         /**
-         * The models to try, best first: the one the owner chose when it is
-         * installed and memory allows, then the small one as a safety net.
+         * The models to try, best first: the one wanted when it is installed and
+         * memory allows, then the small one, then any other, as safety nets.
          */
-        fun candidates(preferred: LlmModel, installed: Set<LlmModel>, availableMb: Long): List<LlmModel> =
-            listOf(preferred, Small)
+        fun candidates(wanted: LlmModel, installed: Set<LlmModel>, availableMb: Long): List<LlmModel> =
+            (listOf(wanted, Small) + entries)
                 .distinct()
-                .filter { !it.routesTools && it in installed && availableMb >= it.minFreeMb }
+                .filter { it in installed && availableMb >= it.minFreeMb }
     }
 }

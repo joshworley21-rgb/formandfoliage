@@ -112,14 +112,14 @@ class LocalBrainTest {
         val prompt = LocalBrain.intentPrompt(many)
         // The model has 1,280 tokens in total; about 3 characters a token is
         // a safe estimate, and the sentence and the answer need room too.
-        assertTrue("prompt was ${prompt.length} chars", prompt.length < 2_600)
-        assertTrue(prompt.contains("Customers:"))
+        assertTrue("prompt was ${prompt.length} chars", prompt.length < 3_100)
+        assertTrue(prompt.contains("Known customer names:"))
         assertTrue(!prompt.contains("Customer number 30 "))
     }
 
     @Test
     fun `no customers means no customer line`() {
-        assertTrue(!LocalBrain.intentPrompt(emptyList()).contains("Customers:"))
+        assertTrue(!LocalBrain.intentPrompt(emptyList()).contains("Known customer names:"))
     }
 
     @Test
@@ -129,17 +129,17 @@ class LocalBrainTest {
             "Mrs Bell", "Old Rectory", "Smith Farm", "Oak Lodge",
         )
         val prompt = LocalBrain.intentPrompt(typical, lean = true)
-        // About 3.5 characters a token puts 700 characters at 200 tokens.
-        assertTrue("prompt was ${prompt.length} chars", prompt.length <= 760)
+        // About 3.5 characters a token puts 1,000 characters at about 285 tokens.
+        assertTrue("prompt was ${prompt.length} chars", prompt.length <= 1_000)
         LocalBrain.labels.forEach { assertTrue("${it.wire} missing", prompt.contains(it.wire)) }
-        assertTrue(prompt.contains("Customers: Simon Hart"))
+        assertTrue(prompt.contains("Known customer names: Simon Hart"))
     }
 
     @Test
     fun `the lean intent prompt caps long customer lists`() {
         val many = (1..40).map { "Customer number $it of the long list" }
         val prompt = LocalBrain.intentPrompt(many, lean = true)
-        assertTrue("prompt was ${prompt.length} chars", prompt.length <= 950)
+        assertTrue("prompt was ${prompt.length} chars", prompt.length <= 1_150)
         assertTrue(!prompt.contains("Customer number 11 "))
     }
 
@@ -148,7 +148,7 @@ class LocalBrainTest {
         val full = LocalBrain.intentPrompt(clients)
         val lean = LocalBrain.intentPrompt(clients, lean = true)
         assertTrue(full.contains("label|client"))
-        assertTrue(lean.contains("label|customer"))
+        assertTrue(lean.contains("like log_hours|Simon"))
         assertEquals(SpokenIntent.LogHours, parse("log_hours|Simon", "put Simon down for a half day")?.intent)
     }
 
@@ -177,7 +177,15 @@ class LocalBrainTest {
     fun `prompts choose the short form only for lean models`() {
         val prompts = LocalBrain.Prompts(full = "FULL", lean = "LEAN")
         assertEquals("FULL", prompts.forModel(LlmModel.Small))
-        assertEquals("LEAN", prompts.forModel(LlmModel.Gemma))
         assertEquals("LEAN", prompts.forModel(LlmModel.Large))
+    }
+
+    @Test
+    fun `the Smiths is a client called Smith`() {
+        assertEquals("Smith", LocalBrain.verifiedClient("Smith", "book the Smiths in for Tuesday", listOf("Smith", "Jones")))
+        assertEquals("Smith", LocalBrain.verifiedClient("Smiths", "book the Smiths in for Tuesday", listOf("Smith", "Jones")))
+        assertEquals("The Hendersons", LocalBrain.verifiedClient("Henderson", "the Henderson job is done", listOf("The Hendersons")))
+        // A client nobody mentioned is still dropped.
+        assertEquals("", LocalBrain.verifiedClient("Smith", "book the Joneses in for Tuesday", listOf("Smith", "Jones")))
     }
 }

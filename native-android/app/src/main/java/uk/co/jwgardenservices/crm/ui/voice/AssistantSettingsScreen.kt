@@ -34,6 +34,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -49,7 +51,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -67,14 +71,17 @@ import uk.co.jwgardenservices.crm.voice.KokoroCustomVoices
 import uk.co.jwgardenservices.crm.voice.KokoroHqDownloader
 import uk.co.jwgardenservices.crm.voice.KokoroEngine
 import uk.co.jwgardenservices.crm.voice.KokoroVoice
+import uk.co.jwgardenservices.crm.voice.CallAudio
+import uk.co.jwgardenservices.crm.voice.FinalPass
 import uk.co.jwgardenservices.crm.voice.LlmModel
 import uk.co.jwgardenservices.crm.voice.LocalLlm
 import uk.co.jwgardenservices.crm.voice.MicSource
 import uk.co.jwgardenservices.crm.voice.MicTest
-import uk.co.jwgardenservices.crm.voice.MoonshineDownloader
+import uk.co.jwgardenservices.crm.voice.ParakeetDownloader
 import uk.co.jwgardenservices.crm.voice.NemotronDownloader
 import uk.co.jwgardenservices.crm.voice.OpenAiVoice
 import uk.co.jwgardenservices.crm.voice.PhononDownloader
+import uk.co.jwgardenservices.crm.voice.PhononModel
 import uk.co.jwgardenservices.crm.voice.PunctuationDownloader
 import uk.co.jwgardenservices.crm.voice.PhononVoice
 import uk.co.jwgardenservices.crm.voice.PiperVoice
@@ -84,6 +91,8 @@ import uk.co.jwgardenservices.crm.voice.PersonaLength
 import uk.co.jwgardenservices.crm.voice.PersonaTone
 import uk.co.jwgardenservices.crm.voice.PronunciationDictionary
 import uk.co.jwgardenservices.crm.voice.SpeechDenoiser
+import uk.co.jwgardenservices.crm.voice.WhisperCppDownloader
+import uk.co.jwgardenservices.crm.voice.WhisperDownloader
 import uk.co.jwgardenservices.crm.voice.SpeechEngine
 import uk.co.jwgardenservices.crm.ui.common.CompactScreenHeader
 import uk.co.jwgardenservices.crm.ui.common.SegmentedPillTabs
@@ -105,6 +114,9 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = AssistantPreferences.DEFAULT_SPEED)
     var draftSpeed by remember(savedSpeed) { mutableFloatStateOf(savedSpeed) }
     var previewingVoice by remember { mutableStateOf(false) }
+    /** The voice whose sample is playing, so only one plays at a time. */
+    var previewingName by remember { mutableStateOf<String?>(null) }
+    var section by rememberSaveable { mutableStateOf(SettingsSection.Voice) }
     var previewingOnline by remember { mutableStateOf(false) }
     var previewingOnlineVoice by remember { mutableStateOf<OpenAiVoice?>(null) }
     var onlinePreviewError by remember { mutableStateOf<String?>(null) }
@@ -148,15 +160,10 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     val pronunciations by AssistantPreferences.pronunciationsFlow(context)
         .collectAsStateWithLifecycle(initialValue = emptyMap())
     LaunchedEffect(pronunciations) { PronunciationDictionary.userEntries = pronunciations }
-    val localLlmState by LocalLlm.state.collectAsStateWithLifecycle()
-    var localLlmInstalled by remember {
-        mutableStateOf(LocalLlm.isInstalled(context, LlmModel.Small))
-    }
-    val localModel by AssistantPreferences.localModelFlow(context)
-        .collectAsStateWithLifecycle(initialValue = LlmModel.Small)
-    val toolRouterOn by AssistantPreferences.toolRouterFlow(context)
-        .collectAsStateWithLifecycle(initialValue = false)
-    var localLlmSaved by remember { mutableLongStateOf(LocalLlm.savedBytes(context)) }
+    val steadyVoice by AssistantPreferences.steadyVoiceFlow(context)
+        .collectAsStateWithLifecycle(initialValue = true)
+    val confirmChanges by AssistantPreferences.confirmChangesFlow(context)
+        .collectAsStateWithLifecycle(initialValue = true)
     val pickupGreeting by AssistantPreferences.pickupFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
     val followUp by AssistantPreferences.followUpFlow(context)
@@ -182,9 +189,6 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     var customVoices by remember { mutableStateOf(PhononDownloader.customVoices(context)) }
     var voiceDownloading by remember { mutableStateOf(false) }
     var voiceError by remember { mutableStateOf<String?>(null) }
-    val moonshineState by MoonshineDownloader.state.collectAsStateWithLifecycle()
-    var moonshineInstalled by remember { mutableStateOf(MoonshineDownloader.isInstalled(context)) }
-    var moonshineSaved by remember { mutableLongStateOf(MoonshineDownloader.savedBytes(context)) }
     val nemotronState by NemotronDownloader.state.collectAsStateWithLifecycle()
     var nemotronInstalled by remember { mutableStateOf(NemotronDownloader.isInstalled(context)) }
     var nemotronSaved by remember { mutableLongStateOf(NemotronDownloader.savedBytes(context)) }
@@ -196,20 +200,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         mutableLongStateOf(PunctuationDownloader.savedBytes(context))
     }
     val asrEngine by AssistantPreferences.asrEngineFlow(context)
-        .collectAsStateWithLifecycle(initialValue = AsrEngine.Moonshine)
+        .collectAsStateWithLifecycle(initialValue = AsrEngine.Nemotron)
 
-    LaunchedEffect(localLlmState) {
-        when (val snapshot = localLlmState) {
-            is LocalLlm.State.Done -> {
-                localLlmInstalled = true
-                localLlmSaved = 0
-                LocalLlm.clearResult()
-            }
-            is LocalLlm.State.Working -> localLlmSaved = snapshot.done
-            is LocalLlm.State.Failed -> localLlmSaved = LocalLlm.savedBytes(context)
-            else -> localLlmSaved = LocalLlm.savedBytes(context)
-        }
-    }
     LaunchedEffect(piperState) {
         when (val snapshot = piperState) {
             is PiperVoiceDownloader.State.Done -> {
@@ -235,17 +227,6 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
             is PhononDownloader.State.Working -> Unit
             else -> phononSaved = PhononDownloader.savedBytes(context)
-        }
-    }
-    LaunchedEffect(moonshineState) {
-        when (val snapshot = moonshineState) {
-            is MoonshineDownloader.State.Done -> {
-                moonshineInstalled = true
-                moonshineSaved = 0
-                MoonshineDownloader.clearResult()
-            }
-            is MoonshineDownloader.State.Working -> Unit
-            else -> moonshineSaved = MoonshineDownloader.savedBytes(context)
         }
     }
     LaunchedEffect(nemotronState) {
@@ -290,29 +271,42 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         }
     }
 
-    var showAdvanced by remember { mutableStateOf(false) }
     var crashRefresh by remember { mutableIntStateOf(0) }
     val crashReport = remember(crashRefresh) { CrashLog.read(context) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         CompactScreenHeader(
             title = "Secretary settings",
-            subtitle = "Voice, personality and local models.",
+            subtitle = "Voice, listening and the assistant's brain.",
             onBack = onBack,
             backLabel = "Settings",
         )
+        // One section at a time instead of one very long page.
+        SegmentedPillTabs(
+            options = SettingsSection.entries,
+            selected = section,
+            onSelect = { section = it },
+            label = { it.label },
+            modifier = Modifier.padding(
+                start = JwTokens.screenPadding,
+                end = JwTokens.screenPadding,
+                top = 12.dp,
+            ),
+        )
+        val pageScroll = rememberScrollState()
+        LaunchedEffect(section) { pageScroll.scrollTo(0) }
         Column(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(pageScroll)
                 .padding(JwTokens.screenPadding),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-        TextButton(onClick = { showAdvanced = !showAdvanced }) {
-            Text(if (showAdvanced) "Hide advanced model settings" else "Advanced model settings")
-        }
 
+        RecommendedSetupCard()
+        if (section == SettingsSection.Voice) {
+        SettingsGroupHeader("Voice", "How the assistant sounds.")
         SectionCard(
             title = "Phonon 31m (call voice)",
             subtitle = "The only in-call TTS engine.",
@@ -329,9 +323,20 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                SettingSwitchRow(
+                    title = "Steady voice",
+                    description = "Keeps it sounding like one speaker from sentence to sentence. " +
+                        "Switch off if it sounds flat.",
+                    checked = steadyVoice,
+                    onCheckedChange = { enabled ->
+                        scope.launch { AssistantPreferences.setSteadyVoice(context, enabled) }
+                    },
+                )
 
-                val working = phononState as? PhononDownloader.State.Working
-                val failure = phononState as? PhononDownloader.State.Failed
+                val working = (phononState as? PhononDownloader.State.Working)
+                    ?.takeIf { PhononDownloader.activeModel == PhononModel.Phonon31 }
+                val failure = (phononState as? PhononDownloader.State.Failed)
+                    ?.takeIf { PhononDownloader.activeModel == PhononModel.Phonon31 }
                 if (working != null) {
                     LinearProgressIndicator(
                         progress = { working.progress },
@@ -347,30 +352,110 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
 
                 if (phononInstalled) {
                     Text(
-                        text = "Voice",
+                        text = "Voice — tap play to hear one, Use to choose it",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    OptionPicker(
-                        options = PhononVoice.entries,
-                        selected = PhononVoice.entries.firstOrNull { it.name == phononVoice },
-                        label = { it?.label ?: "Custom — $phononVoice" },
-                        enabled = !voiceDownloading,
-                        onSelect = { selected ->
-                            scope.launch {
-                                voiceDownloading = true
-                                voiceError = null
-                                val ok = PhononDownloader.installVoice(context, selected)
-                                if (ok) {
-                                    AssistantPreferences.setPhononVoice(context, selected)
-                                    KokoroEngine.get(context).reload()
-                                } else {
-                                    voiceError = "Could not download that voice. Check your connection."
+                    // Listen before choosing: the play button downloads the voice if
+                    // needed, says a sample in it, then puts the current voice back.
+                    fun previewVoice(name: String, catalog: PhononVoice?) {
+                        if (previewingName != null) return
+                        previewingName = name
+                        voiceError = null
+                        scope.launch {
+                            try {
+                                if (catalog != null) {
+                                    val ok = PhononModel.entries
+                                        .filter { PhononDownloader.isInstalled(context, it) }
+                                        .map { PhononDownloader.installVoice(context, catalog, it) }
+                                        .all { it }
+                                    if (!ok) {
+                                        voiceError = "Could not download that voice. Check your connection."
+                                        return@launch
+                                    }
                                 }
-                                voiceDownloading = false
+                                val previous = phononVoice
+                                val engine = KokoroEngine.get(context)
+                                if (name != previous) {
+                                    AssistantPreferences.setPhononVoice(context, name)
+                                    engine.reload()
+                                }
+                                try {
+                                    engine.speak(PREVIEW_TEXT, voice.speakerId, draftSpeed)
+                                } finally {
+                                    if (name != previous) {
+                                        AssistantPreferences.setPhononVoice(context, previous)
+                                        engine.reload()
+                                    }
+                                }
+                            } catch (_: Exception) {
+                                // The speech path logs its own errors.
+                            } finally {
+                                previewingName = null
                             }
-                        },
-                    )
+                        }
+                    }
+
+                    fun useVoice(selected: PhononVoice) {
+                        scope.launch {
+                            voiceDownloading = true
+                            voiceError = null
+                            // Every installed checkpoint keeps its own copy of the voice.
+                            val ok = PhononModel.entries
+                                .filter { PhononDownloader.isInstalled(context, it) }
+                                .map { PhononDownloader.installVoice(context, selected, it) }
+                                .all { it }
+                            if (ok) {
+                                AssistantPreferences.setPhononVoice(context, selected)
+                                KokoroEngine.get(context).reload()
+                            } else {
+                                voiceError = "Could not download that voice. Check your connection."
+                            }
+                            voiceDownloading = false
+                        }
+                    }
+
+                    PhononVoice.entries.forEach { option ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = option.label.substringBefore(" —"),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                )
+                                Text(
+                                    text = option.label.substringAfter("— ", ""),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            IconButton(
+                                enabled = previewingName == null && !voiceDownloading,
+                                onClick = { previewVoice(option.name, option) },
+                            ) {
+                                Icon(
+                                    imageVector = if (previewingName == option.name) {
+                                        Icons.Outlined.GraphicEq
+                                    } else {
+                                        Icons.Outlined.PlayArrow
+                                    },
+                                    contentDescription = "Hear ${option.name}",
+                                )
+                            }
+                            if (phononVoice == option.name) {
+                                Text(
+                                    text = "In use",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 12.dp),
+                                )
+                            } else {
+                                OutlinedButton(
+                                    enabled = !voiceDownloading && previewingName == null,
+                                    onClick = { useVoice(option) },
+                                ) { Text("Use") }
+                            }
+                        }
+                    }
                     if (voiceDownloading) {
                         Text(
                             text = "Downloading voice…",
@@ -402,6 +487,19 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                                     text = "Imported voice file, works offline",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            IconButton(
+                                enabled = previewingName == null && !voiceDownloading,
+                                onClick = { previewVoice(name, null) },
+                            ) {
+                                Icon(
+                                    imageVector = if (previewingName == name) {
+                                        Icons.Outlined.GraphicEq
+                                    } else {
+                                        Icons.Outlined.PlayArrow
+                                    },
+                                    contentDescription = "Hear $name",
                                 )
                             }
                             if (phononVoice == name) {
@@ -472,34 +570,6 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     )
 
                     TextButton(
-                        enabled = !voiceDownloading,
-                        onClick = {
-                            previewingVoice = true
-                            scope.launch {
-                                try {
-                                    KokoroEngine.get(context).speak(
-                                        PREVIEW_TEXT,
-                                        voice.speakerId,
-                                        draftSpeed,
-                                    )
-                                } catch (_: Exception) {
-                                    // The reply path reports its own errors.
-                                } finally {
-                                    previewingVoice = false
-                                }
-                            }
-                        },
-                    ) {
-                        Text(if (previewingVoice) "Playing sample…" else "Preview Phonon voice")
-                    }
-                    Text(
-                        text = "Gradium's website demos use catalog voices; the checkpoint also " +
-                            "ships its own default. The 40m models on the site are non-commercial, " +
-                            "so the app uses 31m. Pick a voice and preview it here.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    TextButton(
                         onClick = {
                             scope.launch {
                                 PhononDownloader.remove(context)
@@ -544,43 +614,77 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
+
+        if (phononInstalled) Phonon40Card()
+
+
         SectionCard(
-            title = "Noise suppression",
-            subtitle = "Engine and road noise.",
-            leadingIcon = Icons.Outlined.Mic,
+            title = "Pronunciations",
+            subtitle = "Shared by recognition and speech.",
+            leadingIcon = Icons.Outlined.RecordVoiceOver,
         ) {
             Column(
                 modifier = Modifier.padding(JwTokens.cardPadding),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                SettingSwitchRow(
-                    title = "Clean up the microphone",
-                    description = "A tiny on-device model (0.5 MB) removes engine, road and wind " +
-                        "noise before the words are recognised. Try it in the van and switch " +
-                        "it off if names get worse.",
-                    checked = denoise && denoiseInstalled,
-                    onCheckedChange = { enabled ->
-                        when {
-                            !enabled -> scope.launch { AssistantPreferences.setDenoise(context, false) }
-                            denoiseInstalled -> scope.launch { AssistantPreferences.setDenoise(context, true) }
-                            else -> SpeechDenoiser.start(context)
+                Text(
+                    text = "Teach both sides a word. The recogniser fixes near misses back to the " +
+                        "real spelling, and the voice uses the sounds-like form: Bierton → Beerton, " +
+                        "Buckinghamshire → Buckinghamshur, Stihl → Steel. Built-in UK place, client " +
+                        "and trade terms are included; your entries win.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                var word by remember { mutableStateOf("") }
+                var soundsLike by remember { mutableStateOf("") }
+                OutlinedTextField(
+                    value = word,
+                    onValueChange = { word = it },
+                    label = { Text("Word") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = soundsLike,
+                    onValueChange = { soundsLike = it },
+                    label = { Text("Sounds like") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    enabled = word.isNotBlank() && soundsLike.isNotBlank(),
+                    onClick = {
+                        scope.launch {
+                            AssistantPreferences.addPronunciation(context, word, soundsLike)
+                            word = ""
+                            soundsLike = ""
                         }
                     },
-                )
-                when (val state = denoiseState) {
-                    is SpeechDenoiser.State.Working -> Text(
-                        text = "Downloading the noise model…",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    is SpeechDenoiser.State.Failed -> Text(
-                        text = state.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    else -> Unit
+                ) { Text("Add pronunciation") }
+                pronunciations.forEach { (key, value) ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "$key → $value",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(
+                            onClick = {
+                                scope.launch {
+                                    AssistantPreferences.removePronunciation(context, key)
+                                }
+                            },
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Delete,
+                                contentDescription = "Remove $key",
+                            )
+                        }
+                    }
                 }
             }
         }
+
 
         SectionCard(
             title = "Online voice (OpenAI)",
@@ -708,7 +812,41 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
-        if (showAdvanced) {
+
+        }
+        if (section == SettingsSection.Listening) {
+        SettingsGroupHeader("Listening", "How the assistant hears you.")
+        SectionCard(
+            title = "Speech engine",
+            subtitle = "What listens on a call.",
+            leadingIcon = Icons.Outlined.Mic,
+        ) {
+            Column(
+                modifier = Modifier.padding(JwTokens.cardPadding),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                SegmentedPillTabs(
+                    options = AsrEngine.entries,
+                    selected = asrEngine,
+                    onSelect = { engine ->
+                        scope.launch {
+                            AssistantPreferences.setAsrEngine(context, engine)
+                            if (engine != AsrEngine.Nemotron) SpeechEngine.get(context).releaseNemotron()
+                        }
+                    },
+                    label = { it.label },
+                )
+                Text(
+                    text = "Takes effect on the next call. Nemotron streams live words. Offline " +
+                        "waits until you stop and then uses the Parakeet or Whisper you choose " +
+                        "below. If Nemotron fails, the call carries on with that choice.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+
         SectionCard(
             title = "Nemotron ASR (streaming)",
             subtitle = "Optional streaming recogniser.",
@@ -723,10 +861,10 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                         "NVIDIA Open Model License (commercial use permitted). About 662 MB, " +
                         "April 2026 560 ms export. True streaming: live partial words. " +
                         "While Nemotron streams the partials, the finished sentence is " +
-                        "re-decoded with Moonshine when it is installed, so a quiet word " +
+                        "re-decoded by the offline recogniser you pick below, so a quiet word " +
                         "missed by NeMo still comes through in the final transcript. If a " +
                         "call produces no words at all the saved engine also switches to " +
-                        "Moonshine. While selected it holds about 650 MB in memory.",
+                        "it. While selected it holds about 650 MB in memory.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -757,7 +895,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                             scope.launch {
                                 NemotronDownloader.remove(context)
                                 if (asrEngine == AsrEngine.Nemotron) {
-                                    AssistantPreferences.setAsrEngine(context, AsrEngine.Moonshine)
+                                    AssistantPreferences.setAsrEngine(context, AsrEngine.Offline)
                                 }
                                 SpeechEngine.get(context).releaseNemotron()
                                 nemotronInstalled = false
@@ -796,560 +934,14 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
-        SectionCard(
-            title = "Moonshine ASR (experimental)",
-            subtitle = "Default offline recogniser.",
-            leadingIcon = Icons.Outlined.Mic,
-        ) {
-            Column(
-                modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "Moonshine v2 base English, MIT licence. About 135 MB. It is an " +
-                        "offline model: there are no live partial words, just a transcript when " +
-                        "you stop speaking. In testing it transcribed quiet phone audio that " +
-                        "Nemotron missed entirely, so it is the recommended engine day to day. " +
-                        "Client names are corrected after recognition on either engine.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
 
-                val working = moonshineState as? MoonshineDownloader.State.Working
-                val failure = moonshineState as? MoonshineDownloader.State.Failed
-                if (working != null) {
-                    LinearProgressIndicator(
-                        progress = { working.progress },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = "Downloading… ${working.done / MEGABYTE} of " +
-                            "${working.total / MEGABYTE} MB",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    TextButton(onClick = { MoonshineDownloader.cancel() }) { Text("Cancel") }
-                }
+        SettingsNote("Second look: after you stop talking, one of these hears the whole sentence again. Use at most one.")
 
-                if (moonshineInstalled) {
-                    Text(
-                        text = "Speech engine",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    SegmentedPillTabs(
-                        options = AsrEngine.entries,
-                        selected = asrEngine,
-                        onSelect = { engine ->
-                            scope.launch {
-                                AssistantPreferences.setAsrEngine(context, engine)
-                                val speechEngine = SpeechEngine.get(context)
-                                if (engine != AsrEngine.Moonshine) speechEngine.releaseMoonshine()
-                                if (engine != AsrEngine.Nemotron) speechEngine.releaseNemotron()
-                            }
-                        },
-                        label = { it.label },
-                    )
-                    Text(
-                        text = "Takes effect on the next call. Recommended: Moonshine — it " +
-                            "copes far better with this phone's quiet microphone. Nemotron is " +
-                            "worth using only when you want live partial words.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    TextButton(
-                        onClick = {
-                            scope.launch {
-                                MoonshineDownloader.remove(context)
-                                AssistantPreferences.setAsrEngine(context, AsrEngine.Moonshine)
-                                SpeechEngine.get(context).releaseMoonshine()
-                                moonshineInstalled = false
-                                moonshineSaved = 0
-                            }
-                        },
-                    ) { Text("Remove Moonshine model") }
-                } else if (working == null) {
-                    OutlinedButton(
-                        onClick = { MoonshineDownloader.start(context) },
-                    ) {
-                        Text(
-                            if (moonshineSaved > 0) {
-                                "Resume Moonshine download (${moonshineSaved / MEGABYTE} MB saved)"
-                            } else {
-                                "Download Moonshine v2 (135 MB)"
-                            },
-                        )
-                    }
-                }
+        ParakeetCard()
 
-                if (working == null && !moonshineInstalled) {
-                    Text(
-                        text = "Downloads on Wi-Fi or mobile data. About 135 MB.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                failure?.let { error ->
-                    Text(
-                        text = error.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
-        }
+        WhisperPassCard()
 
-        SectionCard(
-            title = "Punctuation",
-            subtitle = "How spoken sentences are written.",
-            leadingIcon = Icons.Outlined.Notes,
-        ) {
-            Column(
-                modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "A tiny English punctuation model (Apache 2.0) capitalises and " +
-                        "punctuates finished sentences before they are saved, so dictated notes " +
-                        "read like English and commands split cleanly. About 8 MB.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                val working = punctuationState as? PunctuationDownloader.State.Working
-                val failure = punctuationState as? PunctuationDownloader.State.Failed
-                if (working != null) {
-                    LinearProgressIndicator(
-                        progress = { working.progress },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = "Downloading… ${working.done / MEGABYTE} of " +
-                            "${working.total / MEGABYTE} MB",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    TextButton(onClick = { PunctuationDownloader.cancel() }) { Text("Cancel") }
-                }
-
-                if (punctuationInstalled) {
-                    TextButton(
-                        onClick = {
-                            scope.launch {
-                                PunctuationDownloader.remove(context)
-                                punctuationInstalled = false
-                                punctuationSaved = 0
-                            }
-                        },
-                    ) { Text("Remove punctuation model") }
-                } else if (working == null) {
-                    OutlinedButton(
-                        onClick = { PunctuationDownloader.start(context) },
-                    ) {
-                        Text(
-                            if (punctuationSaved > 0) {
-                                "Resume download (${punctuationSaved / MEGABYTE} MB saved)"
-                            } else {
-                                "Download punctuation model (8 MB)"
-                            },
-                        )
-                    }
-                }
-
-                failure?.let { error ->
-                    Text(
-                        text = error.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
-        }
-
-        }
-
-        SectionCard(
-            title = "Call",
-            subtitle = "Driving and call behaviour.",
-            leadingIcon = Icons.Outlined.Call,
-        ) {
-            Column(
-                modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "Calls open with the diary, then a friendly check-in, and leave the " +
-                        "line open after each answer.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                SettingSwitchRow(
-                    title = "Driving mode",
-                    description = "Shorter turns, slower speech, louder output and no follow-up nudge.",
-                    checked = drivingMode,
-                    onCheckedChange = { enabled ->
-                        scope.launch { AssistantPreferences.setDrivingMode(context, enabled) }
-                    },
-                )
-                SettingSwitchRow(
-                    title = "Turn on automatically in the car",
-                    description = "Uses the Bluetooth car connection as the trigger.",
-                    checked = autoDrivingMode,
-                    onCheckedChange = { enabled ->
-                        scope.launch {
-                            AssistantPreferences.setAutoDrivingMode(context, enabled)
-                        }
-                    },
-                )
-            }
-        }
-
-        SectionCard(
-            title = "Conversation & memory",
-            subtitle = "What Secretary remembers.",
-            leadingIcon = Icons.Outlined.Chat,
-        ) {
-            Column(
-                modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                SettingSwitchRow(
-                    title = "Ask OpenAI for anything else",
-                    description = "Billed per reply to your OpenAI key.",
-                    checked = cloudConversation,
-                    onCheckedChange = { enabled ->
-                        scope.launch { AssistantMemory.setCloudConversation(context, enabled) }
-                    },
-                )
-                Text(
-                    text = "Off by default: the diary, hours, jobs and money answers are free " +
-                        "and instant. Turn this on and a sentence they cannot place is sent to " +
-                        "the cloud with the business snapshot, in one request, billed to your " +
-                        "OpenAI key. Off means everything stays on the phone.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                HorizontalDivider()
-                Text(
-                    text = "What it remembers",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                )
-                if (facts.isEmpty()) {
-                    Text(
-                        text = "Say “remember that …” to teach it something about the business. " +
-                            "“What do you remember?” reads the list back, “forget …” removes one.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    facts.forEach { fact ->
-                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                            Text(
-                                text = fact.text,
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.weight(1f),
-                            )
-                            IconButton(
-                                onClick = {
-                                    scope.launch { AssistantMemory.forget(context, fact.text) }
-                                },
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Delete,
-                                    contentDescription = "Forget this",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        SectionCard(
-            title = "Local thinking (free)",
-            subtitle = "Optional on-device answers.",
-            leadingIcon = Icons.Outlined.Memory,
-        ) {
-            Column(
-                modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "Qwen3 0.6B runs on this phone with no key and no cost. " +
-                        "It loads only when a question needs it, stays warm for five minutes " +
-                        "of conversation, then closes so the speech models get the memory " +
-                        "back. 331 MB, downloaded once.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                SettingSwitchRow(
-                    title = "Use the local model for general questions",
-                    description = "Answer general questions without sending them to the cloud.",
-                    checked = localThinking,
-                    onCheckedChange = { enabled ->
-                        scope.launch { AssistantPreferences.setLocalThinking(context, enabled) }
-                    },
-                )
-                val working = localLlmState as? LocalLlm.State.Working
-                if (working != null) {
-                    LinearProgressIndicator(
-                        progress = { working.progress },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = "Downloading ${working.done / MEGABYTE} of " +
-                            "${working.total / MEGABYTE} MB",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    TextButton(onClick = { LocalLlm.cancel() }) { Text("Cancel") }
-                } else if (localLlmInstalled) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "Installed — loads on demand",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f),
-                        )
-                        TextButton(
-                            onClick = {
-                                LocalLlm.remove(context)
-                                localLlmInstalled = false
-                                localLlmSaved = 0
-                            },
-                        ) { Text("Remove") }
-                    }
-                } else {
-                    OutlinedButton(
-                        onClick = { LocalLlm.start(context) },
-                    ) {
-                        Text(
-                            if (localLlmSaved > 0) {
-                                "Resume download (${localLlmSaved / MEGABYTE} MB saved)"
-                            } else {
-                                "Download local model (331 MB)"
-                            },
-                        )
-                    }
-                }
-                (localLlmState as? LocalLlm.State.Failed)?.let { failure ->
-                    Text(
-                        text = failure.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
-        }
-
-        SectionCard(
-            title = "More accurate local models (experimental)",
-            subtitle = "Still fully on this phone.",
-            leadingIcon = Icons.Outlined.Memory,
-        ) {
-            Column(
-                modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                Text(
-                    text = "Understand loose phrasing and answer more sensibly than the small " +
-                        "model, at the cost of a longer wait for the first word. They use a " +
-                        "shorter prompt, fall back to the small model if memory is short, and " +
-                        "write their timings to the assistant log. Only one is used at a time.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OptionalModelRow(
-                    model = LlmModel.Gemma,
-                    active = localModel == LlmModel.Gemma,
-                    onToggle = { on ->
-                        scope.launch {
-                            AssistantPreferences.setLocalModel(context, if (on) LlmModel.Gemma else LlmModel.Small)
-                        }
-                    },
-                    onRemoved = {
-                        if (localModel == LlmModel.Gemma) {
-                            scope.launch { AssistantPreferences.setLocalModel(context, LlmModel.Small) }
-                        }
-                    },
-                    blurb = "Google's Gemma 3 1B. About 2.6 s to the first word on a Galaxy S22+ " +
-                        "with a long prompt. It needs a Hugging Face login to download: get " +
-                        "gemma3-1b-it-int4.litertlm from litert-community/Gemma3-1B-IT in your " +
-                        "browser, then import it here.",
-                )
-                OptionalModelRow(
-                    model = LlmModel.Large,
-                    active = localModel == LlmModel.Large,
-                    onToggle = { on ->
-                        scope.launch {
-                            AssistantPreferences.setLocalModel(context, if (on) LlmModel.Large else LlmModel.Small)
-                        }
-                    },
-                    onRemoved = {
-                        if (localModel == LlmModel.Large) {
-                            scope.launch { AssistantPreferences.setLocalModel(context, LlmModel.Small) }
-                        }
-                    },
-                    blurb = "Qwen3 1.7B. Slower on the CPU and needs about 3 GB free while a call " +
-                        "is open.",
-                )
-            }
-        }
-
-        SectionCard(
-            title = "Action picker (experimental)",
-            subtitle = "FunctionGemma chooses the action.",
-            leadingIcon = Icons.Outlined.Memory,
-        ) {
-            Column(
-                modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "For sentences the built-in rules do not recognise, a tiny model picks " +
-                        "one of six actions (log hours, diary, note, mark done, who owes, " +
-                        "materials) and fills in the details, so \"put Simon down for a half " +
-                        "day\" becomes four hours. Everything it returns is checked against " +
-                        "what you actually said before anything is saved. It runs on the " +
-                        "phone, about 0.5 GB of memory while a call is open, and its timings " +
-                        "go in the assistant log. Gemma terms of use apply to the model.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OptionalModelRow(
-                    model = LlmModel.Router,
-                    active = toolRouterOn,
-                    onToggle = { on -> scope.launch { AssistantPreferences.setToolRouter(context, on) } },
-                    onRemoved = { scope.launch { AssistantPreferences.setToolRouter(context, false) } },
-                    switchDescription = "Switch off to go back to the rules and the chat model only.",
-                    blurb = "FunctionGemma 270M, fine-tuned for phone actions by Google.",
-                )
-            }
-        }
-
-        SectionCard(
-            title = "Pronunciations",
-            subtitle = "Shared by recognition and speech.",
-            leadingIcon = Icons.Outlined.RecordVoiceOver,
-        ) {
-            Column(
-                modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "Teach both sides a word. The recogniser fixes near misses back to the " +
-                        "real spelling, and the voice uses the sounds-like form: Bierton → Beerton, " +
-                        "Buckinghamshire → Buckinghamshur, Stihl → Steel. Built-in UK place, client " +
-                        "and trade terms are included; your entries win.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                var word by remember { mutableStateOf("") }
-                var soundsLike by remember { mutableStateOf("") }
-                OutlinedTextField(
-                    value = word,
-                    onValueChange = { word = it },
-                    label = { Text("Word") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = soundsLike,
-                    onValueChange = { soundsLike = it },
-                    label = { Text("Sounds like") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Button(
-                    enabled = word.isNotBlank() && soundsLike.isNotBlank(),
-                    onClick = {
-                        scope.launch {
-                            AssistantPreferences.addPronunciation(context, word, soundsLike)
-                            word = ""
-                            soundsLike = ""
-                        }
-                    },
-                ) { Text("Add pronunciation") }
-                pronunciations.forEach { (key, value) ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "$key → $value",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(
-                            onClick = {
-                                scope.launch {
-                                    AssistantPreferences.removePronunciation(context, key)
-                                }
-                            },
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Delete,
-                                contentDescription = "Remove $key",
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        SectionCard(
-            title = "Personality",
-            subtitle = "Tone, humour and length.",
-            leadingIcon = Icons.Outlined.Chat,
-        ) {
-            Column(
-                modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "How it sounds once the words are chosen: warm or brisk, straight " +
-                        "or dry, short or normal. The voice itself is set above.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    value = ownerNameDraft,
-                    onValueChange = { value ->
-                        ownerNameDraft = value
-                        scope.launch { AssistantPreferences.setOwnerName(context, value) }
-                    },
-                    label = { Text("Your first name") },
-                    placeholder = { Text("Josh") },
-                    supportingText = {
-                        Text("Used in the pickup line and the occasional aside. Blank uses your sign-in name.")
-                    },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text("Tone", style = MaterialTheme.typography.labelMedium)
-                SegmentedPillTabs(
-                    options = PersonaTone.entries,
-                    selected = personaTone,
-                    onSelect = { tone ->
-                        scope.launch { AssistantPreferences.setPersonaTone(context, tone) }
-                    },
-                    label = { it.label },
-                )
-                Text("Humour", style = MaterialTheme.typography.labelMedium)
-                SegmentedPillTabs(
-                    options = PersonaHumour.entries,
-                    selected = personaHumour,
-                    onSelect = { humour ->
-                        scope.launch { AssistantPreferences.setPersonaHumour(context, humour) }
-                    },
-                    label = { it.label },
-                )
-                Text("Length", style = MaterialTheme.typography.labelMedium)
-                SegmentedPillTabs(
-                    options = PersonaLength.entries,
-                    selected = personaLength,
-                    onSelect = { length ->
-                        scope.launch { AssistantPreferences.setPersonaLength(context, length) }
-                    },
-                    label = { it.label },
-                )
-            }
-        }
+        WhisperCppCard()
 
         SectionCard(
             title = "Microphone",
@@ -1429,7 +1021,295 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
-        if (showAdvanced) {
+
+        SectionCard(
+            title = "Noise suppression",
+            subtitle = "Engine and road noise.",
+            leadingIcon = Icons.Outlined.Mic,
+        ) {
+            Column(
+                modifier = Modifier.padding(JwTokens.cardPadding),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                SettingSwitchRow(
+                    title = "Clean up the microphone",
+                    description = "A tiny on-device model (0.5 MB) removes engine, road and wind " +
+                        "noise before the words are recognised. Try it in the van and switch " +
+                        "it off if names get worse.",
+                    checked = denoise && denoiseInstalled,
+                    onCheckedChange = { enabled ->
+                        when {
+                            !enabled -> scope.launch { AssistantPreferences.setDenoise(context, false) }
+                            denoiseInstalled -> scope.launch { AssistantPreferences.setDenoise(context, true) }
+                            else -> SpeechDenoiser.start(context)
+                        }
+                    },
+                )
+                when (val state = denoiseState) {
+                    is SpeechDenoiser.State.Working -> Text(
+                        text = "Downloading the noise model…",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    is SpeechDenoiser.State.Failed -> Text(
+                        text = state.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    else -> Unit
+                }
+            }
+        }
+
+
+        SectionCard(
+            title = "Punctuation",
+            subtitle = "How spoken sentences are written.",
+            leadingIcon = Icons.Outlined.Notes,
+        ) {
+            Column(
+                modifier = Modifier.padding(JwTokens.cardPadding),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "A tiny English punctuation model (Apache 2.0) capitalises and " +
+                        "punctuates finished sentences before they are saved, so dictated notes " +
+                        "read like English and commands split cleanly. About 8 MB.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                val working = punctuationState as? PunctuationDownloader.State.Working
+                val failure = punctuationState as? PunctuationDownloader.State.Failed
+                if (working != null) {
+                    LinearProgressIndicator(
+                        progress = { working.progress },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "Downloading… ${working.done / MEGABYTE} of " +
+                            "${working.total / MEGABYTE} MB",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = { PunctuationDownloader.cancel() }) { Text("Cancel") }
+                }
+
+                if (punctuationInstalled) {
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                PunctuationDownloader.remove(context)
+                                punctuationInstalled = false
+                                punctuationSaved = 0
+                            }
+                        },
+                    ) { Text("Remove punctuation model") }
+                } else if (working == null) {
+                    OutlinedButton(
+                        onClick = { PunctuationDownloader.start(context) },
+                    ) {
+                        Text(
+                            if (punctuationSaved > 0) {
+                                "Resume download (${punctuationSaved / MEGABYTE} MB saved)"
+                            } else {
+                                "Download punctuation model (8 MB)"
+                            },
+                        )
+                    }
+                }
+
+                failure?.let { error ->
+                    Text(
+                        text = error.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+
+        }
+        if (section == SettingsSection.Brain) {
+        SettingsGroupHeader("Assistant brain", "How it thinks and what it remembers.")
+        LocalModelsCard()
+
+        SectionCard(
+            title = "Conversation & memory",
+            subtitle = "What Secretary remembers.",
+            leadingIcon = Icons.Outlined.Chat,
+        ) {
+            Column(
+                modifier = Modifier.padding(JwTokens.cardPadding),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                SettingSwitchRow(
+                    title = "Ask OpenAI for anything else",
+                    description = "Billed per reply to your OpenAI key.",
+                    checked = cloudConversation,
+                    onCheckedChange = { enabled ->
+                        scope.launch { AssistantMemory.setCloudConversation(context, enabled) }
+                    },
+                )
+                Text(
+                    text = "Off by default: the diary, hours, jobs and money answers are free " +
+                        "and instant. Turn this on and a sentence they cannot place is sent to " +
+                        "the cloud with the business snapshot, in one request, billed to your " +
+                        "OpenAI key. Off means everything stays on the phone.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                HorizontalDivider()
+                Text(
+                    text = "What it remembers",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+                if (facts.isEmpty()) {
+                    Text(
+                        text = "Say “remember that …” to teach it something about the business. " +
+                            "“What do you remember?” reads the list back, “forget …” removes one.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    facts.forEach { fact ->
+                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Text(
+                                text = fact.text,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(
+                                onClick = {
+                                    scope.launch { AssistantMemory.forget(context, fact.text) }
+                                },
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Delete,
+                                    contentDescription = "Forget this",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+
+        SectionCard(
+            title = "Personality",
+            subtitle = "Tone, humour and length.",
+            leadingIcon = Icons.Outlined.Chat,
+        ) {
+            Column(
+                modifier = Modifier.padding(JwTokens.cardPadding),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "How it sounds once the words are chosen: warm or brisk, straight " +
+                        "or dry, short or normal. The voice itself is set above.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = ownerNameDraft,
+                    onValueChange = { value ->
+                        ownerNameDraft = value
+                        scope.launch { AssistantPreferences.setOwnerName(context, value) }
+                    },
+                    label = { Text("Your first name") },
+                    placeholder = { Text("Josh") },
+                    supportingText = {
+                        Text("Used in the pickup line and the occasional aside. Blank uses your sign-in name.")
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("Tone", style = MaterialTheme.typography.labelMedium)
+                SegmentedPillTabs(
+                    options = PersonaTone.entries,
+                    selected = personaTone,
+                    onSelect = { tone ->
+                        scope.launch { AssistantPreferences.setPersonaTone(context, tone) }
+                    },
+                    label = { it.label },
+                )
+                Text("Humour", style = MaterialTheme.typography.labelMedium)
+                SegmentedPillTabs(
+                    options = PersonaHumour.entries,
+                    selected = personaHumour,
+                    onSelect = { humour ->
+                        scope.launch { AssistantPreferences.setPersonaHumour(context, humour) }
+                    },
+                    label = { it.label },
+                )
+                Text("Length", style = MaterialTheme.typography.labelMedium)
+                SegmentedPillTabs(
+                    options = PersonaLength.entries,
+                    selected = personaLength,
+                    onSelect = { length ->
+                        scope.launch { AssistantPreferences.setPersonaLength(context, length) }
+                    },
+                    label = { it.label },
+                )
+            }
+        }
+
+
+        SectionCard(
+            title = "Call",
+            subtitle = "Driving and call behaviour.",
+            leadingIcon = Icons.Outlined.Call,
+        ) {
+            Column(
+                modifier = Modifier.padding(JwTokens.cardPadding),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "Calls open with the diary, then a friendly check-in, and leave the " +
+                        "line open after each answer.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                SettingSwitchRow(
+                    title = "Confirm before saving changes",
+                    description = "Reads back exactly what it will do, with the date and the money, " +
+                        "and only saves when you say yes. Switch off to save straight away " +
+                        "(you can still say \"undo that\").",
+                    checked = confirmChanges,
+                    onCheckedChange = { enabled ->
+                        scope.launch { AssistantPreferences.setConfirmChanges(context, enabled) }
+                    },
+                )
+                SettingSwitchRow(
+                    title = "Driving mode",
+                    description = "Shorter turns, slower speech, louder output and no follow-up nudge.",
+                    checked = drivingMode,
+                    onCheckedChange = { enabled ->
+                        scope.launch { AssistantPreferences.setDrivingMode(context, enabled) }
+                    },
+                )
+                SettingSwitchRow(
+                    title = "Turn on automatically in the car",
+                    description = "Uses the Bluetooth car connection as the trigger.",
+                    checked = autoDrivingMode,
+                    onCheckedChange = { enabled ->
+                        scope.launch {
+                            AssistantPreferences.setAutoDrivingMode(context, enabled)
+                        }
+                    },
+                )
+            }
+        }
+
+
+        }
+        if (section == SettingsSection.Testing) {
+        SettingsGroupHeader("Testing and tuning", "Diagnostics, and audio for tuning.")
+        PhoneCheckCard()
+        AudioCaptureCard()
+
+
         SectionCard(
             title = "Diagnostics",
             subtitle = "Crash and model status.",
@@ -1468,6 +1348,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
+
         }
         Spacer(Modifier.height(8.dp))
         }
@@ -1475,16 +1356,583 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
 }
 
 @Composable
-private fun OptionalModelRow(
-    model: LlmModel,
-    blurb: String,
-    active: Boolean,
-    onToggle: (Boolean) -> Unit,
-    onRemoved: () -> Unit,
-    switchDescription: String = "Switch off to go back to the small, faster model.",
-) {
+private fun Phonon40Card() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val model = PhononModel.Phonon40
+    val chosen by AssistantPreferences.phononModelFlow(context)
+        .collectAsStateWithLifecycle(initialValue = PhononModel.Phonon31)
+    val state by PhononDownloader.state.collectAsStateWithLifecycle()
+    var installed by remember { mutableStateOf(PhononDownloader.isInstalled(context, model)) }
+    var saved by remember { mutableLongStateOf(PhononDownloader.savedBytes(context, model)) }
+    var switching by remember { mutableStateOf(false) }
+    val savedToken by AssistantPreferences.hfTokenFlow(context).collectAsStateWithLifecycle(initialValue = "")
+    var tokenDraft by remember { mutableStateOf("") }
+    LaunchedEffect(savedToken) { if (tokenDraft.isEmpty()) tokenDraft = savedToken }
+    LaunchedEffect(state) {
+        when (state) {
+            is PhononDownloader.State.Done -> {
+                installed = PhononDownloader.isInstalled(context, model)
+                saved = 0
+                PhononDownloader.clearResult()
+            }
+            is PhononDownloader.State.Working -> Unit
+            else -> saved = PhononDownloader.savedBytes(context, model)
+        }
+    }
+    SectionCard(
+        title = "Phonon 40m voice (optional)",
+        subtitle = "Larger model. Non-commercial licence.",
+        leadingIcon = Icons.Outlined.GraphicEq,
+    ) {
+        Column(
+            modifier = Modifier.padding(JwTokens.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Licence: ${model.licence} The 40m checkpoint is released under CC BY-NC 4.0, " +
+                    "which does not allow commercial use. This app runs a business, so decide " +
+                    "whether that applies to you before downloading it. Nothing is downloaded " +
+                    "unless you tap the button. About ${model.totalBytes / MEGABYTE} MB; the " +
+                    "standard 31m stays installed as the fallback.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SettingSwitchRow(
+                title = "Use Phonon 40m",
+                description = "Switch off to go back to 31m. Takes effect on the next reply.",
+                checked = chosen == model && installed,
+                enabled = installed && !switching,
+                onCheckedChange = { on ->
+                    scope.launch {
+                        switching = true
+                        if (on) {
+                            // Bring the chosen and any imported voices across, so the
+                            // voice does not change when the model does.
+                            val voice = AssistantPreferences.phononVoiceFlow(context).first()
+                            PhononVoiceLookup.find(voice)?.let {
+                                PhononDownloader.installVoice(context, it, model)
+                            }
+                            PhononDownloader.copyVoices(context, PhononModel.Phonon31, model)
+                            AssistantPreferences.setPhononModel(context, model)
+                        } else {
+                            AssistantPreferences.setPhononModel(context, PhononModel.Phonon31)
+                        }
+                        KokoroEngine.get(context).reload()
+                        switching = false
+                    }
+                },
+            )
+            val working = (state as? PhononDownloader.State.Working)
+                ?.takeIf { PhononDownloader.activeModel == model }
+            if (!installed && working == null) {
+                Text(
+                    text = "Hugging Face keeps this model behind a free login. Three steps: " +
+                        "1) open the model page and accept the licence; 2) create a Read token at " +
+                        "huggingface.co/settings/tokens; 3) paste it here. The token stays on this phone " +
+                        "and is only sent to Hugging Face.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedButton(
+                    onClick = {
+                        context.startActivity(
+                            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(model.pageUrl))
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    },
+                ) { Text("Open the model page") }
+                OutlinedTextField(
+                    value = tokenDraft,
+                    onValueChange = { tokenDraft = it.trim() },
+                    label = { Text("Hugging Face read token") },
+                    singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (working != null) {
+                LinearProgressIndicator(progress = { working.progress }, modifier = Modifier.fillMaxWidth())
+                Text(
+                    text = "Downloading ${working.done / MEGABYTE} of ${working.total / MEGABYTE} MB",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(onClick = { PhononDownloader.cancel() }) { Text("Cancel") }
+            } else if (installed) {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            AssistantPreferences.setPhononModel(context, PhononModel.Phonon31)
+                            PhononDownloader.remove(context, model)
+                            installed = false
+                            saved = 0
+                            KokoroEngine.get(context).reload()
+                        }
+                    },
+                ) { Text("Remove Phonon 40m") }
+            } else {
+                OutlinedButton(
+                    enabled = tokenDraft.isNotBlank(),
+                    onClick = {
+                        scope.launch { AssistantPreferences.setHfToken(context, tokenDraft) }
+                        PhononDownloader.start(context, model, tokenDraft)
+                    },
+                ) {
+                    Text(
+                        if (saved > 0) {
+                            "Resume download (${saved / MEGABYTE} MB saved)"
+                        } else {
+                            "Download Phonon 40m (${model.totalBytes / MEGABYTE} MB)"
+                        },
+                    )
+                }
+            }
+            (state as? PhononDownloader.State.Failed)
+                ?.takeIf { PhononDownloader.activeModel == model }
+                ?.let { failure ->
+                Text(
+                    text = failure.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
+private object PhononVoiceLookup {
+    fun find(name: String): uk.co.jwgardenservices.crm.voice.PhononVoice? =
+        uk.co.jwgardenservices.crm.voice.PhononVoice.entries.firstOrNull { it.name == name }
+}
+
+@Composable
+private fun ParakeetCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val pass by AssistantPreferences.finalPassFlow(context)
+        .collectAsStateWithLifecycle(initialValue = FinalPass.Off)
+    val state by ParakeetDownloader.state.collectAsStateWithLifecycle()
+    var installed by remember { mutableStateOf(ParakeetDownloader.isInstalled(context)) }
+    var saved by remember { mutableLongStateOf(ParakeetDownloader.savedBytes(context)) }
+    LaunchedEffect(state) {
+        when (state) {
+            is ParakeetDownloader.State.Done -> {
+                installed = true
+                saved = 0
+                ParakeetDownloader.clearResult()
+            }
+            is ParakeetDownloader.State.Working -> Unit
+            else -> saved = ParakeetDownloader.savedBytes(context)
+        }
+    }
+    SectionCard(
+        title = "Second look: Parakeet (experimental)",
+        subtitle = "NVIDIA's accurate English recogniser.",
+        leadingIcon = Icons.Outlined.GraphicEq,
+    ) {
+        Column(
+            modifier = Modifier.padding(JwTokens.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Every sentence is heard twice: live, and again as a whole once you stop. " +
+                    "NVIDIA Parakeet TDT 0.6B v2 has some of the lowest word error rates of any " +
+                    "open English model and writes its own punctuation. It is the heaviest " +
+                    "option: about 660 MB on disk and over a gigabyte of spare memory to run, " +
+                    "next to Nemotron and the local models. If memory is short it quietly " +
+                    "skips the second look. Each sentence's time is in the assistant log.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SettingSwitchRow(
+                title = "Use Parakeet for the second look",
+                description = "Switch off to turn the second look off.",
+                checked = pass == FinalPass.Parakeet && installed,
+                enabled = installed,
+                onCheckedChange = { on ->
+                    scope.launch {
+                        AssistantPreferences.setFinalPass(context, if (on) FinalPass.Parakeet else FinalPass.Off)
+                    }
+                },
+            )
+            val working = state as? ParakeetDownloader.State.Working
+            if (working != null) {
+                LinearProgressIndicator(progress = { working.progress }, modifier = Modifier.fillMaxWidth())
+                Text(
+                    text = "Downloading ${working.done / MEGABYTE} of ${working.total / MEGABYTE} MB",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(onClick = { ParakeetDownloader.cancel() }) { Text("Cancel") }
+            } else if (installed) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Installed", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                AssistantPreferences.setFinalPass(context, FinalPass.Off)
+                                ParakeetDownloader.remove(context)
+                                installed = false
+                                saved = 0
+                            }
+                        },
+                    ) { Text("Remove") }
+                }
+            } else {
+                OutlinedButton(onClick = { ParakeetDownloader.start(context) }) {
+                    Text(
+                        if (saved > 0) {
+                            "Resume download (${saved / MEGABYTE} MB saved)"
+                        } else {
+                            "Download Parakeet (${ParakeetDownloader.TOTAL_BYTES / MEGABYTE} MB)"
+                        },
+                    )
+                }
+            }
+            (state as? ParakeetDownloader.State.Failed)?.let { failure ->
+                Text(
+                    text = failure.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WhisperPassCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val pass by AssistantPreferences.finalPassFlow(context)
+        .collectAsStateWithLifecycle(initialValue = FinalPass.Off)
+    val state by WhisperDownloader.state.collectAsStateWithLifecycle()
+    var installed by remember { mutableStateOf(WhisperDownloader.isInstalled(context)) }
+    var saved by remember { mutableLongStateOf(WhisperDownloader.savedBytes(context)) }
+    LaunchedEffect(state) {
+        when (state) {
+            is WhisperDownloader.State.Done -> {
+                installed = true
+                saved = 0
+                WhisperDownloader.clearResult()
+            }
+            is WhisperDownloader.State.Working -> Unit
+            else -> saved = WhisperDownloader.savedBytes(context)
+        }
+    }
+    SectionCard(
+        title = "Second look: Whisper (experimental)",
+        subtitle = "Built for noisy speech.",
+        leadingIcon = Icons.Outlined.GraphicEq,
+    ) {
+        Column(
+            modifier = Modifier.padding(JwTokens.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Every sentence is heard twice: live, and again as a whole once you stop. " +
+                    "Whisper was trained on a lot of " +
+                    "noisy speech, so it may follow you better in the van, but it is slower " +
+                    "(a second or more a sentence) and needs about 375 MB and spare memory. If " +
+                    "memory is short it quietly skips the second look. Each sentence's time is in the " +
+                    "assistant log.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SettingSwitchRow(
+                title = "Use Whisper for the second look",
+                description = "Switch off to turn the second look off.",
+                checked = pass == FinalPass.Whisper && installed,
+                enabled = installed,
+                onCheckedChange = { on ->
+                    scope.launch {
+                        AssistantPreferences.setFinalPass(context, if (on) FinalPass.Whisper else FinalPass.Off)
+                    }
+                },
+            )
+            val working = state as? WhisperDownloader.State.Working
+            if (working != null) {
+                LinearProgressIndicator(progress = { working.progress }, modifier = Modifier.fillMaxWidth())
+                Text(
+                    text = "Downloading ${working.done / MEGABYTE} of ${working.total / MEGABYTE} MB",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(onClick = { WhisperDownloader.cancel() }) { Text("Cancel") }
+            } else if (installed) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Installed", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                AssistantPreferences.setFinalPass(context, FinalPass.Off)
+                                WhisperDownloader.remove(context)
+                                installed = false
+                                saved = 0
+                            }
+                        },
+                    ) { Text("Remove") }
+                }
+            } else {
+                OutlinedButton(onClick = { WhisperDownloader.start(context) }) {
+                    Text(
+                        if (saved > 0) {
+                            "Resume download (${saved / MEGABYTE} MB saved)"
+                        } else {
+                            "Download Whisper small.en (${WhisperDownloader.TOTAL_BYTES / MEGABYTE} MB)"
+                        },
+                    )
+                }
+            }
+            (state as? WhisperDownloader.State.Failed)?.let { failure ->
+                Text(
+                    text = failure.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WhisperCppCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val pass by AssistantPreferences.finalPassFlow(context)
+        .collectAsStateWithLifecycle(initialValue = FinalPass.Off)
+    val state by WhisperCppDownloader.state.collectAsStateWithLifecycle()
+    var installed by remember { mutableStateOf(WhisperCppDownloader.isInstalled(context)) }
+    var saved by remember { mutableLongStateOf(WhisperCppDownloader.savedBytes(context)) }
+    LaunchedEffect(state) {
+        when (state) {
+            is WhisperCppDownloader.State.Done -> {
+                installed = true
+                saved = 0
+                WhisperCppDownloader.clearResult()
+            }
+            is WhisperCppDownloader.State.Working -> Unit
+            else -> saved = WhisperCppDownloader.savedBytes(context)
+        }
+    }
+    SectionCard(
+        title = "Second look: whisper.cpp (experimental)",
+        subtitle = "Whisper with a shorter window, plus voice detection.",
+        leadingIcon = Icons.Outlined.GraphicEq,
+    ) {
+        Column(
+            modifier = Modifier.padding(JwTokens.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "The same Whisper small.en model, run by whisper.cpp instead. It only looks at " +
+                    "as much audio as the sentence needs rather than a fixed 30 seconds, and a " +
+                    "voice detector skips silence so a pause is not written up as words. It needs " +
+                    "about 190 MB and spare memory; if memory is short it quietly skips the second look. " +
+                    "Each sentence's time is in the assistant log, so you can compare.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SettingSwitchRow(
+                title = "Use whisper.cpp for the second look",
+                description = "Switch off to turn the second look off.",
+                checked = pass == FinalPass.WhisperCpp && installed,
+                enabled = installed,
+                onCheckedChange = { on ->
+                    scope.launch {
+                        AssistantPreferences.setFinalPass(context, if (on) FinalPass.WhisperCpp else FinalPass.Off)
+                    }
+                },
+            )
+            val working = state as? WhisperCppDownloader.State.Working
+            if (working != null) {
+                LinearProgressIndicator(progress = { working.progress }, modifier = Modifier.fillMaxWidth())
+                Text(
+                    text = "Downloading ${working.done / MEGABYTE} of ${working.total / MEGABYTE} MB",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(onClick = { WhisperCppDownloader.cancel() }) { Text("Cancel") }
+            } else if (installed) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Installed", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                AssistantPreferences.setFinalPass(context, FinalPass.Off)
+                                WhisperCppDownloader.remove(context)
+                                installed = false
+                                saved = 0
+                            }
+                        },
+                    ) { Text("Remove") }
+                }
+            } else {
+                OutlinedButton(onClick = { WhisperCppDownloader.start(context) }) {
+                    Text(
+                        if (saved > 0) {
+                            "Resume download (${saved / MEGABYTE} MB saved)"
+                        } else {
+                            "Download whisper.cpp small.en (${WhisperCppDownloader.TOTAL_BYTES / MEGABYTE} MB)"
+                        },
+                    )
+                }
+            }
+            (state as? WhisperCppDownloader.State.Failed)?.let { failure ->
+                Text(
+                    text = failure.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AudioCaptureCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val save by AssistantPreferences.saveAudioFlow(context).collectAsStateWithLifecycle(initialValue = false)
+    var count by remember { mutableIntStateOf(CallAudio.count(context)) }
+    LaunchedEffect(save) { count = CallAudio.count(context) }
+    SectionCard(
+        title = "Save call audio (for tuning)",
+        subtitle = "Stays on this phone.",
+        leadingIcon = Icons.Outlined.Mic,
+    ) {
+        Column(
+            modifier = Modifier.padding(JwTokens.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Keeps a copy of each sentence the assistant hears, with what each recogniser " +
+                    "made of it, so the recognisers can be compared on your own voice in the van. " +
+                    "It stays on this phone (the newest 60 sentences) and nothing is sent anywhere " +
+                    "unless you tap Share. Switch it off when you are done.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SettingSwitchRow(
+                title = "Save call audio",
+                description = "Takes effect from the next call.",
+                checked = save,
+                onCheckedChange = { on -> scope.launch { AssistantPreferences.setSaveAudio(context, on) } },
+            )
+            Text(
+                text = "Saved: $count ${if (count == 1) "sentence" else "sentences"}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    enabled = count > 0,
+                    onClick = {
+                        scope.launch {
+                            val zip = withContext(kotlinx.coroutines.Dispatchers.IO) { CallAudio.zipForShare(context) }
+                            if (zip != null) {
+                                val uri = androidx.core.content.FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    zip,
+                                )
+                                val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                    type = "application/zip"
+                                    putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(
+                                    android.content.Intent.createChooser(send, "Share call audio")
+                                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                                )
+                            }
+                        }
+                    },
+                ) { Text("Share saved audio") }
+                TextButton(
+                    enabled = count > 0,
+                    onClick = {
+                        CallAudio.clear(context)
+                        count = 0
+                    },
+                ) { Text("Delete") }
+            }
+        }
+    }
+}
+
+/** The tabs across the top of Secretary settings. */
+private enum class SettingsSection(val label: String) {
+    Voice("Voice"),
+    Listening("Listening"),
+    Brain("Brain"),
+    Testing("Testing"),
+}
+
+@Composable
+private fun SettingsGroupHeader(title: String, subtitle: String) {
+    Column(modifier = Modifier.padding(top = 8.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun SettingsNote(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/** The two on-device models, each with one fixed job, and the switch for using them at all. */
+@Composable
+private fun LocalModelsCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val localThinking by AssistantPreferences.localThinkingFlow(context)
+        .collectAsStateWithLifecycle(initialValue = true)
+    SectionCard(
+        title = "On-device assistant",
+        subtitle = "Answers with no internet.",
+        leadingIcon = Icons.Outlined.Memory,
+    ) {
+        Column(
+            modifier = Modifier.padding(JwTokens.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            SettingSwitchRow(
+                title = "Use the on-device assistant",
+                description = "Understands loose phrasing and answers questions without sending them anywhere.",
+                checked = localThinking,
+                onCheckedChange = { enabled ->
+                    scope.launch { AssistantPreferences.setLocalThinking(context, enabled) }
+                },
+            )
+            LocalModelRow(
+                model = LlmModel.Small,
+                blurb = "Fast. Understands what you say and answers on a phone call. " +
+                    "Loads when needed and closes after a few idle minutes.",
+            )
+            LocalModelRow(
+                model = LlmModel.Large,
+                blurb = "Clever. Used in typed chat, where it reads a summary of your diary, " +
+                    "money and clients to answer. Slower, so it is never used on a call. " +
+                    "Needs about 2.4 GB of free memory; without it the fast model answers.",
+            )
+        }
+    }
+}
+
+@Composable
+private fun LocalModelRow(model: LlmModel, blurb: String) {
+    val context = LocalContext.current
     val state by LocalLlm.stateFor(model).collectAsStateWithLifecycle()
     var installed by remember { mutableStateOf(LocalLlm.isInstalled(context, model)) }
     var saved by remember { mutableLongStateOf(LocalLlm.savedBytes(context, model)) }
@@ -1500,22 +1948,12 @@ private fun OptionalModelRow(
             else -> saved = LocalLlm.savedBytes(context, model)
         }
     }
-    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) LocalLlm.importFrom(context, model, uri)
-    }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(model.label, style = MaterialTheme.typography.titleSmall)
         Text(
             text = blurb,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        SettingSwitchRow(
-            title = "Use ${model.label}",
-            description = switchDescription,
-            checked = active && installed,
-            enabled = installed,
-            onCheckedChange = onToggle,
         )
         val working = state as? LocalLlm.State.Working
         if (working != null) {
@@ -1524,8 +1962,7 @@ private fun OptionalModelRow(
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(
-                text = "${if (model.downloadable) "Downloading" else "Importing"} " +
-                    "${working.done / MEGABYTE} of ${working.total / MEGABYTE} MB",
+                text = "Downloading ${working.done / MEGABYTE} of ${working.total / MEGABYTE} MB",
                 style = MaterialTheme.typography.bodySmall,
             )
             TextButton(onClick = { LocalLlm.cancel(model) }) { Text("Cancel") }
@@ -1538,14 +1975,13 @@ private fun OptionalModelRow(
                 )
                 TextButton(
                     onClick = {
-                        onRemoved()
                         LocalLlm.remove(context, model)
                         installed = false
                         saved = 0
                     },
                 ) { Text("Remove") }
             }
-        } else if (model.downloadable) {
+        } else {
             OutlinedButton(onClick = { LocalLlm.start(context, model) }) {
                 Text(
                     if (saved > 0) {
@@ -1554,10 +1990,6 @@ private fun OptionalModelRow(
                         "Download ($megabytes MB)"
                     },
                 )
-            }
-        } else {
-            OutlinedButton(onClick = { pickFile.launch(arrayOf("*/*")) }) {
-                Text("Import ${model.fileName} ($megabytes MB)")
             }
         }
         (state as? LocalLlm.State.Failed)?.let { failure ->

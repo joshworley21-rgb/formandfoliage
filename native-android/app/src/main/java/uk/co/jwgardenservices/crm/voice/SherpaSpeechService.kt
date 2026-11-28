@@ -20,7 +20,8 @@ import com.k2fsa.sherpa.onnx.FeatureConfig
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
-import com.k2fsa.sherpa.onnx.OfflineMoonshineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
+import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
 import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
@@ -110,69 +111,6 @@ private class InputAgc {
         get() = (20.0 * log10(gain.coerceAtLeast(0.001f).toDouble())).toFloat()
 }
 
-/**
- * Wind and handling-noise control for a Bluetooth HFP/SCO headset.
- *
- * Hardware AGC is usually unavailable on that route, so a 100 Hz single-pole
- * high-pass removes the low rumble first, then a light AGC lifts the voice
- * toward RMS 0.12. The gain is limited to 1.4–2.6x and ramped per 100 ms frame,
- * so it does not pump or suddenly amplify a gust of wind. The result is
- * softly clipped to ±1.0 before it reaches Silero VAD or Moonshine.
- */
-private class HeadsetAudio {
-    private var lastInput = 0f
-    private var lastOutput = 0f
-    private var gain = 2.2f
-
-    fun reset() {
-        lastInput = 0f
-        lastOutput = 0f
-        gain = 2.2f
-    }
-
-    fun process(raw: FloatArray): FloatArray {
-        if (raw.isEmpty()) return raw
-        val filtered = FloatArray(raw.size)
-        var energy = 0.0
-        for (index in raw.indices) {
-            val sample = raw[index]
-            val out = HPF_ALPHA * (lastOutput + sample - lastInput)
-            lastInput = sample
-            lastOutput = out
-            filtered[index] = out
-            energy += out * out
-        }
-        val rms = sqrt(energy / raw.size).toFloat()
-        val desired = if (rms < 0.0025f) {
-            1.4f
-        } else {
-            (TARGET_RMS / rms).coerceIn(MIN_GAIN, MAX_GAIN).toFloat()
-        }
-        // ~100 ms frame smoothing: a gust cannot jump the gain to maximum.
-        gain += (desired - gain) * 0.25f
-        return FloatArray(raw.size) { index ->
-            softClip(filtered[index] * gain)
-        }
-    }
-
-    private fun softClip(value: Float): Float {
-        val magnitude = kotlin.math.abs(value)
-        if (magnitude <= 0.9f) return value
-        val over = (magnitude - 0.9f) / 0.1f
-        val shaped = 0.9f + 0.1f * kotlin.math.tanh(over.toDouble()).toFloat()
-        return if (value < 0f) -shaped else shaped
-    }
-
-    private companion object {
-        const val TARGET_RMS = 0.12f
-        const val MIN_GAIN = 1.4f
-        const val MAX_GAIN = 2.6f
-
-        /** 100 Hz one-pole high-pass at 16 kHz. */
-        const val HPF_ALPHA = 0.9622f
-    }
-}
-
 class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     enum class Phase {
@@ -207,9 +145,6 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     /** Serialises starts: three ensureListening calls must not open three mics. */
     private val startLock = Mutex()
 
-    /** Moonshine loading is separate: it is 135 MB and only loaded on demand. */
-    private val moonshineLock = Mutex()
-
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
@@ -217,7 +152,24 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     private val _transcripts = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val transcripts: SharedFlow<String> = _transcripts.asSharedFlow()
 
-    private var moonshine: OfflineRecognizer? = null
+    /** Typed text enters the same pipeline as a spoken sentence. */
+    fun injectTranscript(text: String) {
+        _transcripts.tryEmit(text)
+    }
+
+    /** Parakeet TDT 0.6B, an optional offline recogniser; loaded only when chosen and installed. */
+    private var parakeet: OfflineRecognizer? = null
+
+    /** The optional Whisper second pass; loaded only when chosen and installed. */
+    private var whisper: OfflineRecognizer? = null
+    private val whisperLock = Mutex()
+
+    /** whisper.cpp, the other optional second pass: shorter encoder window, built-in VAD. */
+    private var whisperCpp: WhisperCpp? = null
+
+    /** Which offline recogniser takes the second look; read once when listening starts. */
+    @Volatile
+    private var finalPass = FinalPass.Off
     private var nemotron: OnlineRecognizer? = null
     private val nemotronLock = Mutex()
     private val offlineDecodeLock = Any()
@@ -227,7 +179,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     @Volatile
     private var listening = false
 
-    /** True when the current call is using the offline Moonshine recogniser. */
+    /** True when the current call is using the offline recogniser alone, with no live partials. */
     @Volatile
     private var offlineMode = false
 
@@ -301,7 +253,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     private var echoCanceller: AcousticEchoCanceler? = null
     /** The engine this listening session actually runs, for quiet-mic fallback. */
     @Volatile
-    private var activeEngine = AsrEngine.Moonshine
+    private var activeEngine = AsrEngine.Offline
 
     /** A raw-mic fallback chosen after a silent source; clears with the service. */
     @Volatile
@@ -313,6 +265,12 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     /** The noise-suppression switch, read once when listening starts. */
     private var denoiseWanted = false
+
+    /** The audio-capture switch, read once when listening starts. */
+    private var captureWanted = false
+
+    /** Client names alone (not the wider correction list), for choosing between transcripts. */
+    private var clientNames: List<String> = emptyList()
 
     /** True when this session explicitly pinned the built-in microphone. */
     @Volatile
@@ -379,20 +337,21 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         if (released) return
         // Neither model is bundled: never pull one into memory at app launch.
         // The ringback covers its load when a call actually starts.
+        loadFinalPass()
         val engine = engineOverride ?: runCatching {
             AssistantPreferences.asrEngineFlow(context).first()
-        }.getOrDefault(AsrEngine.Moonshine)
-        val moonshineHere = MoonshineDownloader.isInstalled(context)
+        }.getOrDefault(AsrEngine.Nemotron)
+        val offlineHere = offlineRecogniserReady()
         val nemotronHere = NemotronDownloader.isInstalled(context)
         CrashLog.note(
             context,
             TAG,
-            "prepare: engine=${engine.name} installed(moonshine=$moonshineHere, " +
+            "prepare: engine=${engine.name} installed(offline=$offlineHere via ${finalPass.id}, " +
                 "nemotron=$nemotronHere) forCall=$forCall override=${engineOverride?.name}",
         )
         when {
-            engine == AsrEngine.Moonshine && moonshineHere -> {
-                if (forCall) ensureMoonshine()
+            engine == AsrEngine.Offline && offlineHere -> {
+                if (forCall) warmFinalPass()
             }
             engine == AsrEngine.Nemotron && nemotronHere -> {
                 if (forCall) ensureNemotron()
@@ -401,23 +360,38 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         }
     }
 
+    private suspend fun loadFinalPass() {
+        finalPass = runCatching { AssistantPreferences.finalPassFlow(context).first() }
+            .getOrDefault(FinalPass.Off)
+    }
+
+    /** True when the chosen offline recogniser (Parakeet or a Whisper) has its files. */
+    private fun offlineRecogniserReady(): Boolean = when (finalPass) {
+        FinalPass.Parakeet -> ParakeetDownloader.isInstalled(context)
+        FinalPass.Whisper -> WhisperDownloader.isInstalled(context)
+        FinalPass.WhisperCpp -> WhisperCppDownloader.isInstalled(context) && WhisperCpp.available
+        FinalPass.Off -> false
+    }
+
     /**
-     * Load the optional offline Moonshine recogniser.
-     *
-     * It has no streaming API, so it is decoded one utterance at a time after
-     * the VAD endpoint. Kept process-wide like the Zipformer.
+     * Load Parakeet TDT 0.6B (int8, about 660 MB on disk and more in memory), so
+     * it is skipped when the phone is short of free RAM.
      */
-    private suspend fun ensureMoonshine(): OfflineRecognizer? {
-        moonshine?.let { return it }
-        return moonshineLock.withLock {
-            moonshine?.let { return@withLock it }
-            val dir = MoonshineDownloader.dir(context)
-            if (!MoonshineDownloader.isInstalled(context)) {
-                fail("Moonshine is not downloaded. Open Assistant settings to install it.")
+    private suspend fun ensureParakeet(): OfflineRecognizer? {
+        parakeet?.let { return it }
+        return whisperLock.withLock {
+            parakeet?.let { return@withLock it }
+            if (!ParakeetDownloader.isInstalled(context)) return@withLock null
+            val manager = context.getSystemService(android.app.ActivityManager::class.java)
+            val info = android.app.ActivityManager.MemoryInfo()
+            manager?.getMemoryInfo(info)
+            val availableMb = info.availMem / (1024L * 1024L)
+            if (manager != null && !MemoryBudget.canLoad(availableMb, PARAKEET_MIN_FREE_MB)) {
+                CrashLog.note(context, TAG, "only $availableMb MB free for Parakeet; not loading it")
                 return@withLock null
             }
-            _state.update { it.copy(phase = Phase.Loading, message = "Loading Moonshine…") }
-            CrashLog.note(context, TAG, "loading Moonshine (native construct starts)")
+            val dir = ParakeetDownloader.dir(context)
+            CrashLog.note(context, TAG, "loading Parakeet (native construct starts)")
             val started = System.currentTimeMillis()
             val created = try {
                 withContext(Dispatchers.IO) {
@@ -429,12 +403,14 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                                 featureDim = FEATURE_DIM,
                             ),
                             modelConfig = OfflineModelConfig(
-                                moonshine = OfflineMoonshineModelConfig(
-                                    encoder = File(dir, "encoder_model.ort").absolutePath,
-                                    mergedDecoder = File(dir, "decoder_model_merged.ort").absolutePath,
+                                transducer = OfflineTransducerModelConfig(
+                                    encoder = File(dir, "encoder.int8.onnx").absolutePath,
+                                    decoder = File(dir, "decoder.int8.onnx").absolutePath,
+                                    joiner = File(dir, "joiner.int8.onnx").absolutePath,
                                 ),
                                 tokens = File(dir, "tokens.txt").absolutePath,
-                                numThreads = 2,
+                                modelType = "nemo_transducer",
+                                numThreads = 4,
                                 provider = "cpu",
                             ),
                             decodingMethod = "greedy_search",
@@ -444,33 +420,158 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                Log.e(TAG, "Could not load Moonshine", error)
-                fail("Moonshine could not be loaded. Check the downloaded files.")
+                Log.e(TAG, "Could not load Parakeet", error)
+                CrashLog.note(context, TAG, "Parakeet could not be loaded (${error.message})")
                 return@withLock null
             }
             if (released) {
                 created.release()
                 null
             } else {
-                moonshine = created
-                CrashLog.note(
-                    context,
-                    TAG,
-                    "Moonshine ready in ${System.currentTimeMillis() - started}ms",
-                )
-                _state.update { state ->
-                    if (state.phase == Phase.Loading) state.copy(phase = Phase.Ready, message = null) else state
-                }
+                parakeet = created
+                CrashLog.note(context, TAG, "Parakeet ready in ${System.currentTimeMillis() - started}ms")
                 created
             }
         }
     }
 
-    /** Free the 135 MB Moonshine model when the owner switches back or removes it. */
-    fun releaseMoonshine() {
+    /**
+     * Load Whisper small.en, about 375 MB on disk and noticeably more in memory,
+     * so it is skipped when the phone is short of free RAM.
+     */
+    private suspend fun ensureWhisper(): OfflineRecognizer? {
+        whisper?.let { return it }
+        return whisperLock.withLock {
+            whisper?.let { return@withLock it }
+            if (!WhisperDownloader.isInstalled(context)) return@withLock null
+            val manager = context.getSystemService(android.app.ActivityManager::class.java)
+            val info = android.app.ActivityManager.MemoryInfo()
+            manager?.getMemoryInfo(info)
+            val availableMb = info.availMem / (1024L * 1024L)
+            if (manager != null && !MemoryBudget.canLoad(availableMb, WHISPER_MIN_FREE_MB)) {
+                CrashLog.note(context, TAG, "only $availableMb MB free for Whisper; skipping the second look")
+                return@withLock null
+            }
+            val dir = WhisperDownloader.dir(context)
+            CrashLog.note(context, TAG, "loading Whisper (native construct starts)")
+            val started = System.currentTimeMillis()
+            val created = try {
+                withContext(Dispatchers.IO) {
+                    OfflineRecognizer(
+                        assetManager = null,
+                        config = OfflineRecognizerConfig(
+                            featConfig = FeatureConfig(
+                                sampleRate = SAMPLE_RATE,
+                                featureDim = FEATURE_DIM,
+                            ),
+                            modelConfig = OfflineModelConfig(
+                                whisper = OfflineWhisperModelConfig(
+                                    encoder = File(dir, "small.en-encoder.int8.onnx").absolutePath,
+                                    decoder = File(dir, "small.en-decoder.int8.onnx").absolutePath,
+                                    language = "en",
+                                    task = "transcribe",
+                                ),
+                                tokens = File(dir, "small.en-tokens.txt").absolutePath,
+                                numThreads = 3,
+                                provider = "cpu",
+                            ),
+                            decodingMethod = "greedy_search",
+                        ),
+                    )
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.e(TAG, "Could not load Whisper", error)
+                CrashLog.note(context, TAG, "Whisper could not be loaded (${error.message}); skipping the second look")
+                return@withLock null
+            }
+            if (released) {
+                created.release()
+                null
+            } else {
+                whisper = created
+                CrashLog.note(context, TAG, "Whisper ready in ${System.currentTimeMillis() - started}ms")
+                created
+            }
+        }
+    }
+
+    /** Load whisper.cpp (about 190 MB on disk) when it is chosen and installed. */
+    private suspend fun ensureWhisperCpp(): WhisperCpp? {
+        whisperCpp?.let { return it }
+        return whisperLock.withLock {
+            whisperCpp?.let { return@withLock it }
+            if (!WhisperCppDownloader.isInstalled(context)) return@withLock null
+            if (!WhisperCpp.available) {
+                CrashLog.note(context, TAG, "whisper.cpp library missing from this build; skipping the second look")
+                return@withLock null
+            }
+            val manager = context.getSystemService(android.app.ActivityManager::class.java)
+            val info = android.app.ActivityManager.MemoryInfo()
+            manager?.getMemoryInfo(info)
+            val availableMb = info.availMem / (1024L * 1024L)
+            if (manager != null && !MemoryBudget.canLoad(availableMb, WHISPER_CPP_MIN_FREE_MB)) {
+                CrashLog.note(context, TAG, "only $availableMb MB free for whisper.cpp; skipping the second look")
+                return@withLock null
+            }
+            val dir = WhisperCppDownloader.dir(context)
+            CrashLog.note(context, TAG, "loading whisper.cpp (native construct starts)")
+            val started = System.currentTimeMillis()
+            val created = withContext(Dispatchers.IO) {
+                WhisperCpp.open(File(dir, WhisperCppDownloader.MODEL_FILE), File(dir, WhisperCppDownloader.VAD_FILE))
+            }
+            if (created == null) {
+                CrashLog.note(context, TAG, "whisper.cpp could not be loaded; skipping the second look")
+                return@withLock null
+            }
+            if (released) {
+                created.close()
+                null
+            } else {
+                whisperCpp = created
+                CrashLog.note(context, TAG, "whisper.cpp ready in ${System.currentTimeMillis() - started}ms")
+                created
+            }
+        }
+    }
+
+    /**
+     * Let go of the optional second-look model when the system wants memory
+     * back. Safe mid-call: the live recogniser keeps going, and the next
+     * sentence only reloads it if there is room. Not done when the offline
+     * recogniser is the whole call.
+     */
+    fun dropSecondLook() {
+        if (offlineMode) return
+        synchronized(offlineDecodeLock) {
+            val held = parakeet != null || whisper != null || whisperCpp != null
+            runCatching { parakeet?.release() }
+            parakeet = null
+            runCatching { whisper?.release() }
+            whisper = null
+            runCatching { whisperCpp?.close() }
+            whisperCpp = null
+            if (held) CrashLog.note(context, TAG, "memory is short: second-look model released")
+        }
+    }
+
+    fun releaseWhisper() {
         if (listening) return
-        moonshine?.release()
-        moonshine = null
+        whisper?.release()
+        whisper = null
+        parakeet?.release()
+        parakeet = null
+        whisperCpp?.close()
+        whisperCpp = null
+    }
+
+    /** Load the chosen second-pass recogniser at the start of a call, not mid-sentence. */
+    suspend fun warmFinalPass() {
+        val pass = runCatching { AssistantPreferences.finalPassFlow(context).first() }            .getOrDefault(FinalPass.Off)
+        if (pass == FinalPass.Parakeet) ensureParakeet()
+        if (pass == FinalPass.Whisper) ensureWhisper()
+        if (pass == FinalPass.WhisperCpp) ensureWhisperCpp()
     }
 
     /**
@@ -491,7 +592,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             if (failures >= 2) {
                 // Two native deaths loading this model on this phone. Stop
                 // trying: the call keeps working on the smaller engine.
-                fail("Nemotron kept failing on this phone. Moonshine is the safer engine.")
+                fail("Nemotron kept failing on this phone. Use an offline recogniser instead.")
                 CrashLog.note(context, TAG, "nemotron retired after $failures native failures")
                 return@withLock null
             }
@@ -611,7 +712,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
      */
     fun releaseIdle() {
         if (listening) return
-        releaseMoonshine()
+        releaseWhisper()
         releaseNemotron()
         // A few megabytes that only matter while a call is up; it reloads
         // from disk on the next one.
@@ -620,7 +721,48 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     }
 
     /** Warm checks so a returning caller can skip the dial tone. */
-    fun moonshineWarm(): Boolean = moonshine != null
+    fun offlineWarm(): Boolean = parakeet != null || whisper != null || whisperCpp != null
+
+    /**
+     * For Settings → Testing: load each installed recogniser and time it, and
+     * time the second look on a two-second sample. Lines for a report.
+     */
+    suspend fun selfTest(): List<String> = withContext(Dispatchers.Default) {
+        if (listening) return@withContext listOf("Listening: skipped, a call is open.")
+        val lines = mutableListOf<String>()
+        if (NemotronDownloader.isInstalled(context)) {
+            val started = SystemClock.elapsedRealtime()
+            val ok = runCatching { ensureNemotron() }.getOrNull() != null
+            val seconds = (SystemClock.elapsedRealtime() - started) / 1000.0
+            lines += if (ok) {
+                "Live listening (Nemotron): works, loaded in ${"%.1f".format(seconds)} s"
+            } else {
+                "Live listening (Nemotron): FAILED to load"
+            }
+        } else {
+            lines += "Live listening (Nemotron): not downloaded"
+        }
+        loadFinalPass()
+        if (finalPass == FinalPass.Off) {
+            lines += "Second look: switched off"
+        } else {
+            val started = SystemClock.elapsedRealtime()
+            runCatching { warmFinalPass() }
+            val loadSeconds = (SystemClock.elapsedRealtime() - started) / 1000.0
+            if (!offlineWarm()) {
+                lines += "Second look (${finalPass.label}): FAILED to load (files, library or memory)"
+            } else {
+                // Quiet noise rather than silence, so the recogniser does real work.
+                val sample = List(SAMPLE_RATE * 2) { ((it * 7919) % 200 - 100) / 20_000f }
+                val decodeStarted = SystemClock.elapsedRealtime()
+                runCatching { decodeSecondLook(sample, null) }
+                val decodeMs = SystemClock.elapsedRealtime() - decodeStarted
+                lines += "Second look (${finalPass.label}): works, loaded in ${"%.1f".format(loadSeconds)} s, " +
+                    "a 2-second sample took $decodeMs ms"
+            }
+        }
+        lines
+    }
     fun nemotronWarm(): Boolean = nemotron != null
 
     /**
@@ -646,26 +788,23 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         listenWanted = true
         headsetAudio.reset()
 
+        loadFinalPass()
         var selected = engineOverride
             ?: AssistantPreferences.asrEngineFlow(context).first()
         CrashLog.note(context, TAG, "startListening: engine=${selected.name}")
-        val moonshineInstalled = MoonshineDownloader.isInstalled(context)
+        val offlineInstalled = offlineRecogniserReady()
         val nemotronInstalled = NemotronDownloader.isInstalled(context)
         if (selected == AsrEngine.Nemotron && !nemotronInstalled) {
-            if (!moonshineInstalled) {
+            if (!offlineInstalled) {
                 fail("Nemotron is not downloaded. Open Assistant settings to install it.")
                 return
             }
-            CrashLog.note(
-                context,
-                TAG,
-                "Nemotron is not installed; falling back to Moonshine",
-            )
-            selected = AsrEngine.Moonshine
+            CrashLog.note(context, TAG, "Nemotron is not installed; using the offline recogniser")
+            selected = AsrEngine.Offline
         }
-        offlineMode = selected == AsrEngine.Moonshine && moonshineInstalled
-        if (selected == AsrEngine.Moonshine && !offlineMode) {
-            fail("Moonshine is not downloaded. Open Assistant settings to install it.")
+        offlineMode = selected == AsrEngine.Offline && offlineInstalled
+        if (selected == AsrEngine.Offline && !offlineMode) {
+            fail("No offline recogniser is downloaded. Open Assistant settings to install Parakeet or Whisper.")
             return
         }
         var onlineEngine = when {
@@ -674,22 +813,29 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             else -> null
         }
         if (selected == AsrEngine.Nemotron && onlineEngine == null) {
-            if (!moonshineInstalled) {
-                fail("Nemotron could not be loaded, and Moonshine is not installed.")
+            if (!offlineInstalled) {
+                fail("Nemotron could not be loaded, and no offline recogniser is installed.")
                 return
             }
             // A load failure (including a retired Nemotron after native
             // deaths) must not leave the call dead. Continue this session on
-            // Moonshine and clear the error the failed load just posted.
-            CrashLog.note(
-                context,
-                TAG,
-                "Nemotron unavailable; falling back to Moonshine",
-            )
-            selected = AsrEngine.Moonshine
+            // the offline recogniser and clear the error the failed load posted.
+            CrashLog.note(context, TAG, "Nemotron unavailable; using the offline recogniser")
+            selected = AsrEngine.Offline
             offlineMode = true
             onlineEngine = null
             _state.update { it.copy(phase = Phase.Ready, message = null, partial = "") }
+        }
+        if (offlineMode) {
+            _state.update { it.copy(phase = Phase.Loading, message = "Loading the offline recogniser…") }
+            warmFinalPass()
+            if (!offlineWarm()) {
+                fail("The offline recogniser could not be loaded. Check the downloaded files and free memory.")
+                return
+            }
+            _state.update { state ->
+                if (state.phase == Phase.Loading) state.copy(phase = Phase.Ready, message = null) else state
+            }
         }
         if (!offlineMode && onlineEngine == null) return
         // Load the tiny punctuation model off the call path; the first
@@ -717,6 +863,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         preferPhoneMic = preferSetting && bluetoothConnected
         bluetoothRouteAvailable = bluetoothConnected
         denoiseWanted = AssistantPreferences.denoiseFlow(context).first()
+        captureWanted = AssistantPreferences.saveAudioFlow(context).first()
+        finalPass = AssistantPreferences.finalPassFlow(context).first()
+        clientNames = runCatching { AsrHotwords.names() }.getOrDefault(emptyList())
         // Prefer-phone-mic captures on the built-in VOICE_RECOGNITION source
         // at 16 kHz while Bluetooth carries the reply as normal media audio.
         val micSource = silentFallbackSource
@@ -815,9 +964,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         paused = false
         _state.update { it.copy(phase = Phase.Listening, message = null, partial = "") }
 
-        activeEngine = if (offlineMode) AsrEngine.Moonshine else AsrEngine.Nemotron
+        activeEngine = if (offlineMode) AsrEngine.Offline else AsrEngine.Nemotron
         thread = if (offlineMode) {
-            Thread({ processOffline(record) }, "moonshine-asr")
+            Thread({ processOffline(record) }, "offline-asr")
         } else {
             val engine = onlineEngine ?: return
             Thread({ process(engine, record) }, "streaming-asr")
@@ -884,8 +1033,12 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         val worker = thread
         thread = null
         if (worker != null) runCatching { worker.join(2_000) }
-        runCatching { moonshine?.release() }
-        moonshine = null
+        runCatching { parakeet?.release() }
+        parakeet = null
+        runCatching { whisper?.release() }
+        whisper = null
+        runCatching { whisperCpp?.close() }
+        whisperCpp = null
         runCatching { nemotron?.release() }
         nemotron = null
         _state.value = UiState()
@@ -994,7 +1147,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             val canBackchannel = wired || bargeHasEchoCancel
             val agc = InputAgc()
             // Amplified audio for the whole utterance: Nemotron streams the
-            // partials, Moonshine re-decodes this buffer for the final text.
+            // partials, the offline recogniser re-decodes this buffer for the final text.
             val utterance = ArrayList<Float>(SAMPLE_RATE * 8)
             val preRoll = java.util.ArrayDeque<Float>()
             while (listening) {
@@ -1055,7 +1208,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 pausedClean = false
                 frames += 1
                 val raw = FloatArray(read) { buffer[it] / 32768.0f }
-                val heard = denoise?.process(raw) ?: raw
+                // A phone mic is denoised as it arrives. A Bluetooth headset arrives
+                // too quiet for the denoiser to tell speech from noise, so it is
+                // levelled first and denoised afterwards (below).
+                val heard = if (headsetRoute) raw else (denoise?.process(raw) ?: raw)
                 var framePeak = 0f
                 var frameEnergy = 0.0
                 for (sample in raw) {
@@ -1083,20 +1239,24 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 // AGC, not a step ladder: it follows the voice instead of the
                 // quietest recent frame, and never attenuates loud speech.
                 val samples = if (headsetRoute) {
-                    headsetAudio.process(heard)
+                    val leveled = headsetAudio.process(raw)
+                    denoise?.process(leveled) ?: leveled
                 } else {
                     agc.process(boosted(heard, fallbackGain))
                 }
+                // On a headset the energy gate must see the levelled audio: a quiet
+                // headset's raw level sits under the speech threshold.
+                val gateRms = if (headsetRoute) rmsOf(samples) else frameRms
                 vad?.acceptWaveform(samples)
                 val vadVoiced = vad?.isSpeechDetected() == true
                 // Track the noise floor: fast down, and quick up only while the
                 // VAD hears no voice outside a turn, so a steady engine or road
                 // rumble settles into the floor instead of reading as speech.
-                noiseFloor = NoiseFloorTracker.next(noiseFloor, frameRms, vadVoiced, hasSpeech)
+                noiseFloor = NoiseFloorTracker.next(noiseFloor, gateRms, vadVoiced, hasSpeech)
                 // Silero misses quiet speech; raw RMS does not. Either is
                 // enough to open a turn, so a quiet sentence still endpoints.
                 val speechFloor = maxOf(RMS_SPEECH_THRESHOLD, noiseFloor * 2.2f)
-                val voiced = vadVoiced || frameRms >= speechFloor
+                val voiced = vadVoiced || gateRms >= speechFloor
                 if (voiced) {
                     val now = SystemClock.elapsedRealtime()
                     if (speechStartedAt == 0L) speechStartedAt = now
@@ -1154,20 +1314,29 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     )
                 }
                 if (endpoint || overflow) {
-                    // Nemotron gives the live partials; Moonshine, decoding the
+                    // Nemotron gives the live partials; the offline recogniser, decoding the
                     // same buffered audio, gives the final sentence. That is the
                     // hybrid: streaming feel without the NeMo low-energy misses.
-                    val refined = refineWithMoonshine(utterance)
-                    // Nemotron keeps the final when it produced words. The
-                    // hybrid exists to rescue a silent/low-energy NeMo turn,
-                    // not to replace a good streaming transcript with a worse
-                    // offline one (it wrote "No tech look at the schedule").
-                    val finalText = text.ifBlank { refined }
+                    val heard = TranscriptCleanup.clean(text)
+                    val refined = TranscriptCleanup.clean(decodeSecondLook(utterance, heard))
+                    // Neither recogniser is always right, so the one that reads as
+                    // something the owner could have said wins (a command the rules
+                    // know, a client, a day, a time, a length); a tie keeps the
+                    // streaming one, and a blank one always yields.
+                    val finalText = TranscriptChooser.choose(heard, refined, clientNames)
                     CrashLog.note(
                         context,
                         TAG,
-                        "endpoint: nemotron=${text.take(120)} moonshine=${refined.take(120)}",
+                        "endpoint: nemotron=${text.take(120)} offline=${refined.take(120)} " +
+                            "chosen=${if (finalText == heard.trim()) "streaming" else "offline"}",
                     )
+                    if (captureWanted) {
+                        CallAudio.save(
+                            context,
+                            utterance.toFloatArray(),
+                            "${routeNote(record)}\nstreaming=$text\noffline=$refined\nchosen=$finalText\n",
+                        )
+                    }
                     engine.reset(stream)
                     if (finalText.isNotEmpty()) {
                         producedText = true
@@ -1220,16 +1389,16 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                         // room dips between words, and resetting on a quiet beat
                         // meant the fallback never fired.
                         if (rawBeatPeak > 0.02f) quietSignalBeats++
-                        if (quietSignalBeats >= 3) {
+                        if (quietSignalBeats >= 3 && offlineRecogniserReady()) {
                             quietSignalBeats = 0
                             CrashLog.note(
                                 context,
                                 TAG,
-                                "Nemotron saw signal but produced no words; restarting on Moonshine",
+                                "Nemotron saw signal but produced no words; restarting on the offline recogniser",
                             )
                             Thread({
                                 kotlinx.coroutines.runBlocking {
-                                    AssistantPreferences.setAsrEngine(context, AsrEngine.Moonshine)
+                                    AssistantPreferences.setAsrEngine(context, AsrEngine.Offline)
                                 }
                                 // Wake the blocking read, then reopen on the
                                 // other engine. The loop's finally releases its
@@ -1239,7 +1408,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                                 Thread.sleep(700)
                                 if (!listenWanted) return@Thread
                                 runCatching { kotlinx.coroutines.runBlocking { startListening() } }
-                                    .onFailure { Log.w(TAG, "Moonshine restart failed", it) }
+                                    .onFailure { Log.w(TAG, "Offline restart failed", it) }
                             }, "asr-fallback").start()
                         }
                     }
@@ -1272,7 +1441,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     }
 
     /**
-     * Moonshine loop: collect one utterance with Silero VAD, then decode it
+     * Offline loop: collect one utterance with Silero VAD, then decode it
      * offline. There are no live partials; the final sentence appears after the
      * endpoint. A 0.4 s pre-roll keeps the first syllable.
      */
@@ -1289,10 +1458,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             context,
             TAG,
             if (headsetRoute) {
-                "moonshine mic HPF+AGC (100Hz, target=0.12, 1.4-2.6x) " +
+                "offline mic HPF+AGC (100Hz, target=0.12, 1.4-2.6x) " +
                     "vad=${"%.2f".format(VAD_THRESHOLD_HEADSET)}"
             } else {
-                "moonshine mic gain=${"%.1f".format(fallbackGain)}x " +
+                "offline mic gain=${"%.1f".format(fallbackGain)}x " +
                     "vad=${"%.2f".format(VAD_THRESHOLD_SPEAKER)}"
             },
         )
@@ -1316,7 +1485,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
             android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
             android.media.AudioDeviceInfo.TYPE_USB_DEVICE,
         )
-        CrashLog.note(context, TAG, "moonshine loop starting (source=${record.audioSource})")
+        CrashLog.note(context, TAG, "offline loop starting (source=${record.audioSource})")
         android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
         try {
             record.startRecording()
@@ -1368,7 +1537,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 }
                 pausedClean = false
                 val raw = FloatArray(read) { buffer[it] / 32768.0f }
-                val heard = denoise?.process(raw) ?: raw
+                // A phone mic is denoised as it arrives. A Bluetooth headset arrives
+                // too quiet for the denoiser to tell speech from noise, so it is
+                // levelled first and denoised afterwards (below).
+                val heard = if (headsetRoute) raw else (denoise?.process(raw) ?: raw)
                 var energy = 0.0
                 for (sample in raw) energy += sample * sample
                 val frameRms = if (denoise != null) rmsOf(heard) else sqrt(energy / raw.size).toFloat()
@@ -1386,17 +1558,21 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     silentPeak = 0f
                 }
                 val samples = if (headsetRoute) {
-                    headsetAudio.process(heard)
+                    val leveled = headsetAudio.process(raw)
+                    denoise?.process(leveled) ?: leveled
                 } else {
                     agc.process(boosted(heard, fallbackGain))
                 }
+                // On a headset the energy gate must see the levelled audio: a quiet
+                // headset's raw level sits under the speech threshold.
+                val gateRms = if (headsetRoute) rmsOf(samples) else frameRms
                 vad?.acceptWaveform(samples)
                 val vadVoiced = vad?.isSpeechDetected() == true
-                noiseFloor = NoiseFloorTracker.next(noiseFloor, frameRms, vadVoiced, hasSpeech)
+                noiseFloor = NoiseFloorTracker.next(noiseFloor, gateRms, vadVoiced, hasSpeech)
                 // Energy fallback: Silero misses quiet phone speech, but the
                 // floor keeps a car's road noise from opening a turn.
                 val speechFloor = maxOf(RMS_SPEECH_THRESHOLD, noiseFloor * 2.2f)
-                val voiced = vadVoiced || frameRms >= speechFloor
+                val voiced = vadVoiced || gateRms >= speechFloor
                 val now = SystemClock.elapsedRealtime()
                 if (voiced) {
                     if (speechStartedAt == 0L) speechStartedAt = now
@@ -1424,7 +1600,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 } else {
                     if (voiced) lastVoiceAt = now
                     for (sample in samples) utterance.add(sample)
-                    // Moonshine has no live partials. End quickly after the
+                    // The offline recogniser has no live partials. End quickly after the
                     // VAD hears silence instead of buffering seconds of dead
                     // air and decoding an empty window.
                     val waitMs = OFFLINE_ENDPOINT_MS +
@@ -1449,7 +1625,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                             CrashLog.note(
                                 context,
                                 TAG,
-                                "moonshine skipped blank turn " +
+                                "offline skipped blank turn " +
                                     "rms=${"%.4f".format(utterRms)} " +
                                     "speech=${speech.speechMs}ms",
                             )
@@ -1463,7 +1639,10 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                             silentFrames = 0
                             silentPeak = 0f
                         } else {
-                            val text = decodeOffline(speech.samples)
+                            val text = decodeSecondLook(speech.samples)
+                            if (captureWanted) {
+                                CallAudio.save(context, speech.samples.toFloatArray(), "${routeNote(record)}\nheard=$text\n")
+                            }
                             utterance.clear()
                             hasSpeech = false
                             vad?.reset()
@@ -1485,11 +1664,11 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
                 frames += 1
                 if (frames % 100 == 0) {
-                    Log.d(TAG, "moonshine frames=$frames buffered=${utterance.size}")
+                    Log.d(TAG, "offline frames=$frames buffered=${utterance.size}")
                 }
             }
         } catch (error: Exception) {
-            Log.e(TAG, "Moonshine loop failed", error)
+            Log.e(TAG, "Offline loop failed", error)
             if (!released) fail(error.message ?: "Speech recognition failed.")
         } finally {
             denoise?.release()
@@ -1504,23 +1683,66 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         }
     }
 
-    /** Decode one buffered utterance with Moonshine and return the text. */
     /**
-     * Re-decode the utterance with Moonshine while Nemotron supplied the live
-     * partials. Returns "" when Moonshine is not installed or the clip is too
-     * short to be a turn.
+     * The second look at a sentence, in whichever offline recogniser was chosen
+     * (Parakeet, Whisper or whisper.cpp). Returns "" when none is chosen or
+     * ready, or the clip is too short to be a turn. [streaming] is what the
+     * live recogniser heard; null means no live recogniser is running.
      */
-    private fun refineWithMoonshine(samples: List<Float>): String {
+    private fun decodeSecondLook(samples: List<Float>, streaming: String? = null): String {
         if (samples.size < SAMPLE_RATE / 3) return ""
-        if (!MoonshineDownloader.isInstalled(context)) return ""
-        if (moonshine == null) {
-            runCatching { kotlinx.coroutines.runBlocking { ensureMoonshine() } }
+        return when (finalPass) {
+            FinalPass.WhisperCpp -> {
+                if (whisperCpp == null) runCatching { kotlinx.coroutines.runBlocking { ensureWhisperCpp() } }
+                whisperCpp?.let { decodeWhisperCpp(it, samples) }.orEmpty()
+            }
+            FinalPass.Parakeet -> {
+                if (parakeet == null) runCatching { kotlinx.coroutines.runBlocking { ensureParakeet() } }
+                decodeOnnx(parakeet, "parakeet", samples)
+            }
+            FinalPass.Whisper -> {
+                // The ONNX Whisper takes about three seconds a sentence, so next to
+                // a live recogniser it only looks again when that heard almost nothing.
+                val missed = streaming == null ||
+                    streaming.split(' ').count { it.isNotBlank() } < WHISPER_MIN_WORDS
+                if (!missed) return ""
+                if (whisper == null) runCatching { kotlinx.coroutines.runBlocking { ensureWhisper() } }
+                decodeOnnx(whisper, "whisper", samples)
+            }
+            FinalPass.Off -> ""
         }
-        return decodeOffline(samples)
     }
 
-    private fun decodeOffline(samples: List<Float>): String {
-        val engine = moonshine ?: return ""
+    /** Free RAM, logged beside each decode: a slow one is usually memory pressure, not the model. */
+    private fun freeMemoryMb(): Long {
+        val manager = context.getSystemService(android.app.ActivityManager::class.java) ?: return -1
+        val info = android.app.ActivityManager.MemoryInfo()
+        manager.getMemoryInfo(info)
+        return info.availMem / (1024L * 1024L)
+    }
+
+    private fun decodeWhisperCpp(engine: WhisperCpp, samples: List<Float>): String {
+        val started = SystemClock.elapsedRealtime()
+        return synchronized(offlineDecodeLock) {
+            val text = try {
+                engine.transcribe(samples.toFloatArray())
+            } catch (error: Exception) {
+                CrashLog.note(context, TAG, "whisper.cpp decode failed: ${error.message}")
+                ""
+            }
+            CrashLog.note(
+                context,
+                TAG,
+                "whisper.cpp ${SystemClock.elapsedRealtime() - started}ms " +
+                    "(${samples.size / SAMPLE_RATE}s, ctx=${WhisperCpp.audioContextFor(samples.size / SAMPLE_RATE.toFloat())}): " +
+                    text.take(120),
+            )
+            text
+        }
+    }
+
+    private fun decodeOnnx(engine: OfflineRecognizer?, label: String, samples: List<Float>): String {
+        if (engine == null) return ""
         if (samples.isEmpty()) return ""
         val started = SystemClock.elapsedRealtime()
         return synchronized(offlineDecodeLock) {
@@ -1532,12 +1754,12 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                 CrashLog.note(
                     context,
                     TAG,
-                    "moonshine ${SystemClock.elapsedRealtime() - started}ms " +
-                        "(${samples.size / SAMPLE_RATE}s): ${text.take(120)}",
+                    "$label ${SystemClock.elapsedRealtime() - started}ms " +
+                        "(${samples.size / SAMPLE_RATE}s, ${freeMemoryMb()}MB free): ${text.take(120)}",
                 )
                 text
             } catch (error: Exception) {
-                CrashLog.note(context, TAG, "moonshine decode failed: ${error.message}")
+                CrashLog.note(context, TAG, "$label decode failed: ${error.message}")
                 ""
             } finally {
                 runCatching { stream.release() }
@@ -1634,7 +1856,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
     /**
      * Trim leading and trailing near-silence in 20 ms frames. The returned
      * speechMs counts only frames above [threshold], so a buffer of clicks or
-     * room noise is rejected before Moonshine is asked to decode it.
+     * room noise is rejected before the offline recogniser is asked to decode it.
      */
     private fun trimSpeech(samples: List<Float>, threshold: Float): TrimmedSpeech {
         if (samples.isEmpty()) return TrimmedSpeech(emptyList(), 0L)
@@ -1673,6 +1895,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
      * on the recognizer's trailing-silence heuristic. Loaded from assets; if
      * it cannot be created, the recognizer's endpoint still ends the turn.
      */
+    private fun routeNote(record: AudioRecord): String =
+        record.routedDevice?.let { "route=type ${it.type} ${it.productName}" } ?: "route=unknown"
+
     /** A denoiser for this listening session when the switch is on and the model is installed. */
     private fun openDenoiser(): SpeechDenoiser.Session? {
         if (!denoiseWanted) return null
@@ -1744,7 +1969,9 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         }
     }
 
-    private fun publish(text: String) {
+    private fun publish(spoken: String) {
+        val text = TranscriptCleanup.clean(spoken)
+        if (text.isEmpty()) return
         val corrected = AsrHotwords.correct(text, hotwordNames, aggressive = expectClientName)
         if (expectClientName) {
             CrashLog.note(context, TAG, "client-name correction aggressive: $corrected")
@@ -1878,6 +2105,12 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
          * audio arrives around -40 dBFS; room noise stays far below this.
          */
         const val RMS_SPEECH_THRESHOLD = 0.008f
+
+        /** Free memory needed before Whisper is loaded; below this the second look is skipped. */
+        const val WHISPER_MIN_FREE_MB = 900L
+        const val WHISPER_CPP_MIN_FREE_MB = 500L
+        const val PARAKEET_MIN_FREE_MB = 1200L
+        private const val WHISPER_MIN_WORDS = 3
 
         /** 250 ms kept before VAD reports speech, so the first word is not clipped. */
         const val PRE_ROLL_SAMPLES = SAMPLE_RATE * 25 / 100

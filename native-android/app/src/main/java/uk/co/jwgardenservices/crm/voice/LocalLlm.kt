@@ -2,7 +2,6 @@ package uk.co.jwgardenservices.crm.voice
 
 import android.app.ActivityManager
 import android.content.Context
-import android.net.Uri
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
@@ -11,10 +10,9 @@ import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.ExperimentalApi
+import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.ThinkingConfig
-import com.google.ai.edge.litertlm.ToolSet
-import com.google.ai.edge.litertlm.tool
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -22,8 +20,6 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -72,20 +68,16 @@ object LocalLlm {
 
     fun stateFor(model: LlmModel): StateFlow<State> = states.getValue(model).asStateFlow()
 
-    /** The model the owner chose. Changing it closes the loaded engine so the next use reloads. */
-    @Volatile
-    var preferred: LlmModel = LlmModel.Small
-        set(value) {
-            if (field == value) return
-            field = value
-            release()
-        }
-
-    private class Loaded(val engine: Engine, val model: LlmModel)
+    /** An engine, the model it holds, and which job it was loaded for. */
+    private class Loaded(val engine: Engine, val model: LlmModel, val smart: Boolean)
 
     private var idleJob: Job? = null
+
+    /** The model that answered last, for the phone check (the clever one can fall back to the fast one). */
+    @Volatile
+    var lastUsed: LlmModel? = null
+        private set
     private var loaded: Loaded? = null
-    private var routerEngine: Engine? = null
     private val loadLock = Any()
 
     fun file(context: Context, model: LlmModel = LlmModel.Small): File =
@@ -98,9 +90,9 @@ object LocalLlm {
         it.isFile && it.length() == model.bytes
     }
 
-    /** True when any chat model is installed (the action picker does not count). */
+    /** True when any local model is installed. */
     fun isInstalled(context: Context): Boolean =
-        LlmModel.entries.any { !it.routesTools && isInstalled(context, it) }
+        LlmModel.entries.any { isInstalled(context, it) }
 
     fun savedBytes(context: Context, model: LlmModel = LlmModel.Small): Long =
         maxOf(file(context, model).length(), partFile(context, model).length())
@@ -110,10 +102,6 @@ object LocalLlm {
         if (jobs[model]?.isActive == true) return
         val app = context.applicationContext
         val flow = states.getValue(model)
-        if (!model.downloadable) {
-            flow.value = State.Failed("${model.label} needs a login to download. Import the file instead.")
-            return
-        }
         jobs[model] = scope.launch {
             try {
                 download(app, model, flow)
@@ -125,64 +113,6 @@ object LocalLlm {
                 flow.value = State.Failed(error.message ?: "Download failed.")
             }
         }
-    }
-
-    /** Copy a model file the owner downloaded themselves, e.g. a gated one, into the app. */
-    fun importFrom(context: Context, model: LlmModel, uri: Uri) {
-        if (jobs[model]?.isActive == true) return
-        val app = context.applicationContext
-        val flow = states.getValue(model)
-        jobs[model] = scope.launch {
-            try {
-                copyIn(app, model, uri, flow)
-                flow.value = State.Done
-            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                partFile(app, model).delete()
-                throw cancelled
-            } catch (error: Exception) {
-                partFile(app, model).delete()
-                CrashLog.note(app, TAG, "${model.id} import failed: ${error.message}")
-                flow.value = State.Failed(error.message ?: "Import failed.")
-            }
-        }
-    }
-
-    private suspend fun copyIn(context: Context, model: LlmModel, uri: Uri, flow: MutableStateFlow<State>) {
-        val target = file(context, model)
-        target.parentFile?.mkdirs()
-        val part = partFile(context, model)
-        part.delete()
-        flow.value = State.Working(0, model.bytes)
-        val input = context.contentResolver.openInputStream(uri)
-            ?: throw IOException("Could not open that file.")
-        input.use { source ->
-            FileOutputStream(part).use { output ->
-                val buffer = ByteArray(256 * 1024)
-                var done = 0L
-                while (true) {
-                    currentCoroutineContext().ensureActive()
-                    val read = source.read(buffer)
-                    if (read < 0) break
-                    done += read
-                    if (done > model.bytes) break
-                    output.write(buffer, 0, read)
-                    flow.value = State.Working(done, model.bytes)
-                }
-            }
-        }
-        if (part.length() != model.bytes) {
-            val size = part.length() / (1024 * 1024)
-            part.delete()
-            throw IOException(
-                "That file does not match: expected ${model.fileName} " +
-                    "(${model.bytes / (1024 * 1024)} MB), got about $size MB.",
-            )
-        }
-        if (!part.renameTo(target)) {
-            part.copyTo(target, overwrite = true)
-            part.delete()
-        }
-        CrashLog.note(context, TAG, "${model.id} imported")
     }
 
     fun cancel(model: LlmModel = LlmModel.Small) {
@@ -208,7 +138,8 @@ object LocalLlm {
         question: String,
         maxTokens: Int = 80,
         temperature: Double = 0.4,
-    ): String? = generate(context, { system }, question, maxTokens, temperature)
+        smart: Boolean = false,
+    ): String? = generate(context, { system }, question, maxTokens, temperature, smart)
 
     /** [systemFor] runs once the model is chosen, so slower models can be given a shorter prompt. */
     suspend fun generate(
@@ -217,20 +148,24 @@ object LocalLlm {
         question: String,
         maxTokens: Int = 80,
         temperature: Double = 0.4,
+        smart: Boolean = false,
     ): String? = withContext(Dispatchers.Default) {
         val app = context.applicationContext
         // A new question cancels the pending idle close; otherwise the timer
         // could shut the engine down mid-generation.
         idleJob?.cancel()
         idleJob = null
-        val ready = load(app) ?: return@withContext null
+        val ready = load(app, smart) ?: return@withContext null
+        lastUsed = ready.model
 
         val answer: String? = runCatching {
             val conversation: Conversation = ready.engine.createConversation(
                 configFor(ready.model, systemFor(ready.model), maxTokens, temperature),
             )
             try {
+                val started = System.nanoTime()
                 val message = conversation.sendMessage(question)
+                note(app, ready.model, "answered", started)
                 logBenchmark(app, ready.model, conversation)
                 message.contents.contents
                     .filterIsInstance<Content.Text>()
@@ -255,18 +190,20 @@ object LocalLlm {
         system: String,
         question: String,
         maxTokens: Int = 100,
-    ): Flow<String> = stream(context, { system }, question, maxTokens)
+        smart: Boolean = false,
+    ): Flow<String> = stream(context, { system }, question, maxTokens, smart)
 
     fun stream(
         context: Context,
         systemFor: (LlmModel) -> String,
         question: String,
         maxTokens: Int = 100,
+        smart: Boolean = false,
     ): Flow<String> = flow {
         val app = context.applicationContext
         idleJob?.cancel()
         idleJob = null
-        val ready = load(app) ?: return@flow
+        val ready = load(app, smart) ?: return@flow
         val conversation: Conversation = ready.engine.createConversation(
             configFor(ready.model, systemFor(ready.model), maxTokens, 0.4),
         )
@@ -301,95 +238,12 @@ object LocalLlm {
      * question does not wait ~12 s for the engine. Still call-scoped: it is
      * never loaded at app start, and it closes on the usual idle timer.
      */
-    suspend fun warm(context: Context): Unit = withContext(Dispatchers.Default) {
+    suspend fun warm(context: Context, smart: Boolean = false): Unit = withContext(Dispatchers.Default) {
         val app = context.applicationContext
         idleJob?.cancel()
         idleJob = null
-        runCatching { load(app) }
+        runCatching { load(app, smart) }
         Unit
-    }
-
-    /** Warm the action picker at the start of a call, like the chat model. */
-    suspend fun warmRouter(context: Context): Unit = withContext(Dispatchers.Default) {
-        idleJob?.cancel()
-        idleJob = null
-        runCatching { loadRouter(context.applicationContext) }
-        Unit
-    }
-
-    /**
-     * Ask the action picker which app function fits [question]. The functions
-     * are only described to the model and never executed here; an empty list
-     * means it chose none, or is not installed, or memory is short.
-     */
-    suspend fun callTools(
-        context: Context,
-        system: String,
-        question: String,
-        tools: ToolSet,
-    ): List<ToolInvocation> = withContext(Dispatchers.Default) {
-        val app = context.applicationContext
-        idleJob?.cancel()
-        idleJob = null
-        val engine = loadRouter(app) ?: return@withContext emptyList()
-        val calls = try {
-            val conversation: Conversation = engine.createConversation(
-                ConversationConfig(
-                    systemInstruction = Contents.of(system),
-                    tools = listOf(tool(tools)),
-                    samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.1),
-                    automaticToolCalling = false,
-                    maxOutputToken = 160,
-                ),
-            )
-            try {
-                val started = System.nanoTime()
-                val message = conversation.sendMessage(question)
-                note(app, LlmModel.Router, "answered", started)
-                logBenchmark(app, LlmModel.Router, conversation)
-                val parsed = message.toolCalls.map { ToolInvocation(it.name, it.arguments) }
-                parsed.ifEmpty {
-                    val raw = message.contents.contents
-                        .filterIsInstance<Content.Text>()
-                        .joinToString("") { it.text }
-                    listOfNotNull(ToolRoute.parseRawCall(raw))
-                }
-            } finally {
-                runCatching { conversation.close() }
-            }
-        } catch (cancelled: kotlinx.coroutines.CancellationException) {
-            throw cancelled
-        } catch (error: Exception) {
-            CrashLog.note(app, TAG, "router failed: ${error.message}")
-            emptyList()
-        }
-        scheduleIdleClose()
-        calls
-    }
-
-    private fun loadRouter(app: Context): Engine? = synchronized(loadLock) {
-        routerEngine?.let { return@synchronized it }
-        val model = LlmModel.Router
-        if (!isInstalled(app, model)) return@synchronized null
-        if (availableMb(app) < model.minFreeMb) {
-            CrashLog.note(app, TAG, "not enough free memory for the action picker")
-            return@synchronized null
-        }
-        runCatching {
-            val started = System.currentTimeMillis()
-            Engine(
-                EngineConfig(
-                    modelPath = file(app, model).absolutePath,
-                    backend = Backend.CPU(),
-                    cacheDir = app.cacheDir.path,
-                ),
-            ).also {
-                it.initialize()
-                CrashLog.note(app, TAG, "${model.id} loaded in ${System.currentTimeMillis() - started} ms")
-            }
-        }.onFailure {
-            CrashLog.note(app, TAG, "${model.id} load failed: ${it.message}")
-        }.getOrNull()?.also { routerEngine = it }
     }
 
     private fun configFor(
@@ -430,7 +284,13 @@ object LocalLlm {
                     "decode ${info.lastDecodeTokenCount} tokens at " +
                     "${"%.1f".format(info.lastDecodeTokensPerSecond)} tok/s",
             )
-        }
+        }.onFailure { CrashLog.note(app, TAG, "${model.id}: timing unavailable (${it.message})") }
+    }
+
+    /** The runtime only collects timings when asked to, before an engine is created. */
+    @OptIn(ExperimentalApi::class)
+    private fun enableTimings() {
+        runCatching { ExperimentalFlags.enableBenchmark = true }
     }
 
     /** Wall-clock timings in the assistant log, so a model can be judged on the phone it runs on. */
@@ -439,10 +299,16 @@ object LocalLlm {
         CrashLog.note(app, TAG, "${model.id}: $what after ${"%.1f".format(seconds)} s")
     }
 
-    private fun load(app: Context): Loaded? = synchronized(loadLock) {
-        loaded?.let { return@synchronized it }
+    private fun load(app: Context, smart: Boolean = false): Loaded? = synchronized(loadLock) {
+        val wanted = if (smart) LlmModel.Large else LlmModel.Small
+        loaded?.let { current ->
+            if (current.smart == smart) return@synchronized current
+            // The other job needs the other model: only one is ever held.
+            runCatching { current.engine.close() }
+            loaded = null
+        }
         val options = LlmModel.candidates(
-            preferred,
+            wanted,
             LlmModel.entries.filter { isInstalled(app, it) }.toSet(),
             availableMb(app),
         )
@@ -452,6 +318,7 @@ object LocalLlm {
         }
         for (model in options) {
             val engine = runCatching {
+                enableTimings()
                 val started = System.currentTimeMillis()
                 Engine(
                     EngineConfig(
@@ -470,7 +337,7 @@ object LocalLlm {
             }.onFailure {
                 CrashLog.note(app, TAG, "${model.id} load failed: ${it.message}")
             }.getOrNull()
-            if (engine != null) return@synchronized Loaded(engine, model).also { loaded = it }
+            if (engine != null) return@synchronized Loaded(engine, model, smart).also { loaded = it }
         }
         null
     }
@@ -481,8 +348,6 @@ object LocalLlm {
         synchronized(loadLock) {
             runCatching { loaded?.engine?.close() }
             loaded = null
-            runCatching { routerEngine?.close() }
-            routerEngine = null
         }
     }
 
@@ -512,7 +377,7 @@ object LocalLlm {
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(120, TimeUnit.SECONDS)
             .build()
-        val request = Request.Builder().url(requireNotNull(model.url)).apply {
+        val request = Request.Builder().url(model.url).apply {
             if (have > 0) header("Range", "bytes=$have-")
         }.build()
         client.newCall(request).execute().use { response ->

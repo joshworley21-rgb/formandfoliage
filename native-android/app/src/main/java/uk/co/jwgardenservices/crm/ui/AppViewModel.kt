@@ -73,6 +73,10 @@ class AppViewModel(
                         cachedAuth = state
                         loadWorkspace()
                     }
+                    // A refresh in progress, or a failed one while offline, is not a
+                    // sign-out. Wiping the workspace here sent the owner back to the
+                    // splash and the first page whenever the app was left briefly.
+                    AuthState.Loading -> Unit
                     else -> {
                         cachedAuth = null
                         cachedWorkspace = null

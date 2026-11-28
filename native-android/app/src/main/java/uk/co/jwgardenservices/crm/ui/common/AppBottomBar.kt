@@ -8,10 +8,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -36,25 +37,31 @@ data class BottomBarEntry(
     val icon: ImageVector,
     val selected: Boolean,
     val onClick: () -> Unit,
+    /** A small count on the icon, e.g. jobs waiting to be marked. */
+    val badge: Int = 0,
 )
 
 /**
- * The bottom bar: a white strip with a hairline on top. The active tab sits
- * inside a rounded forest pill with an ochre icon; the rest are muted sage.
+ * The bottom bar: a floating frosted pill. The active tab sits inside a
+ * rounded forest pill with an ochre icon; the rest are muted sage.
  */
 @Composable
 fun AppBottomBar(entries: List<BottomBarEntry>, modifier: Modifier = Modifier) {
     val palette = JwTheme.colors
+    val barShape = RoundedCornerShape(28.dp)
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
-            .navigationBarsPadding(),
+            .background(glassBackdropFoot())
+            .navigationBarsPadding()
+            .padding(horizontal = 12.dp)
+            .padding(top = 6.dp, bottom = 8.dp),
     ) {
-        HorizontalDivider(color = palette.cardBorder)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .shadow(elevation = 10.dp, shape = barShape, clip = false)
+                .glass(barShape, strength = 0.80f)
                 .height(JwTokens.bottomBarHeight)
                 .padding(horizontal = 6.dp, vertical = 7.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -70,7 +77,7 @@ fun AppBottomBar(entries: List<BottomBarEntry>, modifier: Modifier = Modifier) {
                             role = Role.Tab
                             selected = entry.selected
                         },
-                    shape = RoundedCornerShape(JwTokens.cardRadius),
+                    shape = RoundedCornerShape(22.dp),
                     color = if (entry.selected) palette.forest else Color.Transparent,
                     contentColor = if (entry.selected) palette.onForestMuted else muted,
                 ) {
@@ -78,12 +85,27 @@ fun AppBottomBar(entries: List<BottomBarEntry>, modifier: Modifier = Modifier) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
                     ) {
-                        Icon(
-                            imageVector = entry.icon,
-                            contentDescription = null,
-                            tint = if (entry.selected) palette.brass else muted,
-                            modifier = Modifier.size(20.dp),
-                        )
+                        androidx.compose.foundation.layout.Box {
+                            Icon(
+                                imageVector = entry.icon,
+                                contentDescription = null,
+                                tint = if (entry.selected) palette.brass else muted,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            if (entry.badge > 0) {
+                                Text(
+                                    text = if (entry.badge > 9) "9+" else entry.badge.toString(),
+                                    color = palette.onBrass,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 10.sp),
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .offset(x = 8.dp, y = (-5).dp)
+                                        .background(palette.brass, androidx.compose.foundation.shape.CircleShape)
+                                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                                )
+                            }
+                        }
                         Text(
                             text = entry.label,
                             style = MaterialTheme.typography.labelMedium.copy(

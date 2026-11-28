@@ -70,7 +70,9 @@ import uk.co.jwgardenservices.crm.ui.visits.VisitsScreen
 import uk.co.jwgardenservices.crm.ui.voice.AssistantScreen
 import uk.co.jwgardenservices.crm.ui.voice.AssistantSettingsScreen
 import uk.co.jwgardenservices.crm.ui.common.AppBottomBar
+import uk.co.jwgardenservices.crm.ui.common.glassBackdrop
 import uk.co.jwgardenservices.crm.ui.common.BottomBarEntry
+import uk.co.jwgardenservices.crm.ui.common.glassBackdropFoot
 import uk.co.jwgardenservices.crm.ui.common.SectionLabel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -92,6 +94,19 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
         }
     }
     val unsynced = crmState.pendingWrites + failedWrites.size
+    val openHome by PendingNavigation.openHome.collectAsStateWithLifecycle()
+    LaunchedEffect(openHome) {
+        if (openHome && !isStaff) {
+            navController.navigate(AppDestination.Dashboard.route) {
+                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                launchSingleTop = true
+            }
+            PendingNavigation.openHome.value = false
+        }
+    }
+    val markingCount = remember(crmState.jobs) {
+        uk.co.jwgardenservices.crm.ui.dashboard.jobsNeedingMarking(crmState.jobs).size
+    }
     val requestSignOut: () -> Unit = {
         if (unsynced > 0) signOutWarning = true else onSignOut()
     }
@@ -104,12 +119,7 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
     } else {
         AppDestination.primaryItems
     }
-    // Secretary is a tab inside Business, so More does not repeat it.
-    val moreItems = if (isStaff) {
-        emptyList()
-    } else {
-        AppDestination.moreItems.filter { it != AppDestination.Secretary }
-    }
+    val moreItems = if (isStaff) emptyList() else AppDestination.moreItems
 
     SystemBarAppearance(darkStatusBar = true)
 
@@ -122,7 +132,7 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
     }
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = glassBackdropFoot(),
         // The forest header draws behind the status bar; the content itself
         // still clears the navigation bar and the bottom bar.
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -136,6 +146,7 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                     icon = destination.icon,
                     selected = currentRoute == destination.route,
                     onClick = { navigate(destination) },
+                    badge = if (destination == AppDestination.Schedule && !isStaff) markingCount else 0,
                 )
             } + if (moreItems.isNotEmpty()) {
                 listOf(
@@ -161,7 +172,8 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                 .padding(padding)
                 .background(JwTheme.colors.forest)
                 .statusBarsPadding()
-                .background(MaterialTheme.colorScheme.background),
+                // One brand-colour wash behind every page, for the glass cards to sit on.
+                .glassBackdrop(),
         ) {
             if (failedWrites.isNotEmpty()) {
                 FailedWritesBanner(
@@ -227,7 +239,9 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                         QuotesScreen(viewModel = crmViewModel)
                     }
                     composable(AppDestination.Secretary.route) {
-                        AssistantScreen()
+                        AssistantScreen(
+                            onOpenSettings = { navController.navigate("assistant-settings") },
+                        )
                     }
                     composable(AppDestination.Settings.route) {
                         SettingsScreen(
@@ -384,4 +398,9 @@ private fun PendingWritesBanner(count: Int, offline: Boolean) {
             modifier = Modifier.padding(horizontal = JwTokens.screenPadding, vertical = 8.dp),
         )
     }
+}
+
+/** A request from outside the screens (a notification) to show a page. */
+object PendingNavigation {
+    val openHome = kotlinx.coroutines.flow.MutableStateFlow(false)
 }

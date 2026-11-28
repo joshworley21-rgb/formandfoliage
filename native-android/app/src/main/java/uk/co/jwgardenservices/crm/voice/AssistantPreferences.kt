@@ -88,8 +88,10 @@ private val PHONON_KEY = booleanPreferencesKey("phonon_enabled")
 private val PICKUP_KEY = booleanPreferencesKey("pickup_greeting")
 private val USED_KEY = booleanPreferencesKey("assistant_used")
 private val LOCAL_THINKING_KEY = booleanPreferencesKey("local_thinking")
-private val LOCAL_MODEL_KEY = stringPreferencesKey("local_model")
-private val TOOL_ROUTER_KEY = booleanPreferencesKey("tool_router")
+private val STEADY_VOICE_KEY = booleanPreferencesKey("steady_voice")
+private val CONFIRM_CHANGES_KEY = booleanPreferencesKey("confirm_changes")
+private val SAVE_AUDIO_KEY = booleanPreferencesKey("save_call_audio")
+private val FINAL_PASS_KEY = stringPreferencesKey("final_pass")
 private val PRONUNCIATION_KEY = stringPreferencesKey("pronunciation")
 private val DRIVING_KEY = booleanPreferencesKey("driving_mode")
 private val AUTO_DRIVING_KEY = booleanPreferencesKey("auto_driving_mode")
@@ -97,14 +99,16 @@ private val PERSONA_TONE_KEY = stringPreferencesKey("persona_tone")
 private val PERSONA_HUMOUR_KEY = stringPreferencesKey("persona_humour")
 private val PERSONA_LENGTH_KEY = stringPreferencesKey("persona_length")
 private val PHONON_VOICE_KEY = stringPreferencesKey("phonon_voice")
+private val PHONON_MODEL_KEY = stringPreferencesKey("phonon_model")
+private val HF_TOKEN_KEY = stringPreferencesKey("hf_token")
 private val ASR_ENGINE_KEY = stringPreferencesKey("asr_engine")
 private val FOLLOW_UP_KEY = booleanPreferencesKey("follow_up")
 private val OWNER_NAME_KEY = stringPreferencesKey("owner_name")
 private val CUSTOM_VOICE_KEY = stringPreferencesKey("kokoro_custom_voice")
 
-/** The on-device speech recogniser. Streaming is the default; Moonshine is a test. */
+/** The on-device speech recogniser. Streaming is the default; Offline uses Parakeet or Whisper alone. */
 enum class AsrEngine(val label: String) {
-    Moonshine("Moonshine v2 — offline, English (en)"),
+    Offline("Offline — Parakeet or Whisper, English (en)"),
     Nemotron("Nemotron — streaming, live words, English (en)"),
 }
 
@@ -178,7 +182,7 @@ object AssistantPreferences {
 
     fun asrEngineFlow(context: Context): Flow<AsrEngine> = context.assistantDataStore.data.map { preferences ->
         // Nemotron is the default: it streams live words and is more accurate
-        // on a Bluetooth headset. Moonshine remains the automatic fallback.
+        // on a Bluetooth headset. The offline recogniser is the automatic fallback.
         AsrEngine.entries.firstOrNull { it.name == preferences[ASR_ENGINE_KEY] } ?: AsrEngine.Nemotron
     }
 
@@ -245,6 +249,22 @@ object AssistantPreferences {
      * The selected Phonon voice name. Catalogue voices use their enum name;
      * imported custom voices use the file name without `.safetensors`.
      */
+    /** A Hugging Face read token, kept on this phone only, for models that need a login to download. */
+    fun hfTokenFlow(context: Context): Flow<String> =
+        context.assistantDataStore.data.map { it[HF_TOKEN_KEY].orEmpty() }
+
+    suspend fun setHfToken(context: Context, token: String) {
+        context.assistantDataStore.edit { it[HF_TOKEN_KEY] = token.trim() }
+    }
+
+    /** Which Phonon checkpoint speaks. 31m unless the optional 40m was chosen. */
+    fun phononModelFlow(context: Context): Flow<PhononModel> =
+        context.assistantDataStore.data.map { PhononModel.fromId(it[PHONON_MODEL_KEY]) }
+
+    suspend fun setPhononModel(context: Context, model: PhononModel) {
+        context.assistantDataStore.edit { it[PHONON_MODEL_KEY] = model.id }
+    }
+
     fun phononVoiceFlow(context: Context): Flow<String> = context.assistantDataStore.data.map { preferences ->
         preferences[PHONON_VOICE_KEY] ?: PhononVoice.Freya.name
     }
@@ -302,22 +322,39 @@ object AssistantPreferences {
     fun localThinkingFlow(context: Context): Flow<Boolean> =
         context.assistantDataStore.data.map { it[LOCAL_THINKING_KEY] ?: true }
 
-    /** Which on-device model answers; the small one stands in whenever the chosen one cannot load. */
-    fun localModelFlow(context: Context): Flow<LlmModel> =
-        context.assistantDataStore.data.map { LlmModel.fromId(it[LOCAL_MODEL_KEY]) }
+    /** Keep a local copy of each utterance and what was heard, for tuning. Off unless switched on. */
+    fun saveAudioFlow(context: Context): Flow<Boolean> =
+        context.assistantDataStore.data.map { it[SAVE_AUDIO_KEY] ?: false }
 
-    suspend fun setLocalModel(context: Context, model: LlmModel) {
-        context.assistantDataStore.edit { it[LOCAL_MODEL_KEY] = model.id }
-        LocalLlm.preferred = model
+    suspend fun setSaveAudio(context: Context, enabled: Boolean) {
+        context.assistantDataStore.edit { it[SAVE_AUDIO_KEY] = enabled }
+    }
+
+    /** Which offline recogniser takes the second look at each sentence. */
+    fun finalPassFlow(context: Context): Flow<FinalPass> =
+        context.assistantDataStore.data.map { FinalPass.fromId(it[FINAL_PASS_KEY]) }
+
+    suspend fun setFinalPass(context: Context, pass: FinalPass) {
+        context.assistantDataStore.edit { it[FINAL_PASS_KEY] = pass.id }
+    }
+
+    /** Read every change back and wait for a yes before saving it. On unless switched off. */
+    fun confirmChangesFlow(context: Context): Flow<Boolean> =
+        context.assistantDataStore.data.map { it[CONFIRM_CHANGES_KEY] ?: true }
+
+    suspend fun setConfirmChanges(context: Context, enabled: Boolean) {
+        context.assistantDataStore.edit { it[CONFIRM_CHANGES_KEY] = enabled }
+    }
+
+    /** Keep the voice the same from clause to clause: fixed sampling seed, gentler pace changes. */
+    fun steadyVoiceFlow(context: Context): Flow<Boolean> =
+        context.assistantDataStore.data.map { it[STEADY_VOICE_KEY] ?: true }
+
+    suspend fun setSteadyVoice(context: Context, enabled: Boolean) {
+        context.assistantDataStore.edit { it[STEADY_VOICE_KEY] = enabled }
     }
 
     /** Let the small FunctionGemma model pick app actions for sentences the rules miss. */
-    fun toolRouterFlow(context: Context): Flow<Boolean> =
-        context.assistantDataStore.data.map { it[TOOL_ROUTER_KEY] ?: false }
-
-    suspend fun setToolRouter(context: Context, enabled: Boolean) {
-        context.assistantDataStore.edit { it[TOOL_ROUTER_KEY] = enabled }
-    }
 
     suspend fun setLocalThinking(context: Context, enabled: Boolean) {
         context.assistantDataStore.edit { it[LOCAL_THINKING_KEY] = enabled }

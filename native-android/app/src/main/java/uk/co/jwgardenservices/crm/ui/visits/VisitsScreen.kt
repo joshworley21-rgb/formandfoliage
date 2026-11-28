@@ -65,6 +65,7 @@ import uk.co.jwgardenservices.crm.domain.todayIso
 import uk.co.jwgardenservices.crm.domain.visitAmount
 import uk.co.jwgardenservices.crm.ui.CrmViewModel
 import uk.co.jwgardenservices.crm.ui.common.DateField
+import uk.co.jwgardenservices.crm.ui.common.HoursDropdown
 import uk.co.jwgardenservices.crm.ui.common.DialogTitle
 import uk.co.jwgardenservices.crm.ui.common.EmptyState
 import uk.co.jwgardenservices.crm.ui.common.ErrorState
@@ -424,13 +425,10 @@ private fun VisitEditorDialog(
 
                 if (!missed) {
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        OutlinedTextField(
+                        HoursDropdown(
                             value = hours,
                             onValueChange = { hours = it },
-                            label = { Text("Hours") },
-                            singleLine = true,
                             enabled = !locked,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.weight(1f),
                         )
                         OutlinedTextField(

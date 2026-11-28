@@ -28,6 +28,11 @@ import uk.co.jwgardenservices.crm.domain.buildReminderSummary
 import uk.co.jwgardenservices.crm.domain.formatTime
 import uk.co.jwgardenservices.crm.domain.money
 import uk.co.jwgardenservices.crm.domain.parseTimestamp
+import uk.co.jwgardenservices.crm.domain.BillingSource
+import uk.co.jwgardenservices.crm.domain.priceVisit
+import uk.co.jwgardenservices.crm.domain.RainPlan
+import uk.co.jwgardenservices.crm.data.weather.RainForecast
+import uk.co.jwgardenservices.crm.ui.dashboard.jobsNeedingMarking
 
 /**
  * Evening nudge built entirely from the offline cache, so it works without
@@ -47,13 +52,37 @@ class ReminderWorker(
             invoices = database.invoiceDao().observeAll().first(),
             visits = database.visitDao().observeAll().first(),
         )
-        if (summary.isEmpty) return Result.success()
+        val allJobs = database.scheduledJobDao().observeAll().first()
+        val marking = jobsNeedingMarking(allJobs)
+        // Rain tomorrow only matters when there is work booked for it.
+        val tomorrow = java.time.LocalDate.now().plusDays(1)
+        val wetTomorrow = summary.tomorrowJobs.isNotEmpty() &&
+            RainPlan.isWet(runCatching { RainForecast.refresh(context) }.getOrDefault(emptyMap())[tomorrow])
+        if (summary.isEmpty && marking.isEmpty()) return Result.success()
 
-        val clients = database.clientDao().observeAll().first().associate { it.id to it.name }
+        val clientRows = database.clientDao().observeAll().first()
+        val clients = clientRows.associate { it.id to it.name }
         val lines = buildList {
+            // First, because it is the one only the owner can fix: work done
+            // but never logged cannot be billed.
+            if (marking.isNotEmpty()) {
+                val byId = clientRows.associateBy { it.id }
+                val value = marking.sumOf { job ->
+                    byId[job.clientId]?.let {
+                        priceVisit(BillingSource(it.billingMode, it.hourlyRate, it.fixedPrice), job.durationMinutes / 60.0, 0.0)
+                    } ?: 0.0
+                }
+                add(
+                    "${marking.size} ${if (marking.size == 1) "job needs" else "jobs need"} marking" +
+                        (if (value > 0) " (about ${money(value)} not logged)" else ""),
+                )
+            }
             val jobs = summary.tomorrowJobs
             if (jobs.isNotEmpty()) {
-                add("${jobs.size} ${if (jobs.size == 1) "job" else "jobs"} tomorrow")
+                add(
+                    "${jobs.size} ${if (jobs.size == 1) "job" else "jobs"} tomorrow" +
+                        if (wetTomorrow) " — rain forecast, check the Rota" else "",
+                )
                 jobs.take(4).forEach { job ->
                     val time = parseTimestamp(job.startsAt)?.formatTime().orEmpty()
                     add("$time  ${clients[job.clientId] ?: "Client"}")
@@ -84,7 +113,10 @@ class ReminderWorker(
         val open = PendingIntent.getActivity(
             context,
             0,
-            Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            Intent(context, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                // Home holds the Needs marking card and tomorrow's jobs.
+                .putExtra(MainActivity.EXTRA_OPEN_HOME, true),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val notification = NotificationCompat.Builder(context, CHANNEL)
@@ -116,7 +148,7 @@ class ReminderWorker(
             val manager = context.getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(
                 NotificationChannel(CHANNEL, "Daily reminders", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                    description = "Tomorrow's jobs and overdue invoices"
+                    description = "Jobs to mark, tomorrow's jobs and overdue invoices"
                 },
             )
         }

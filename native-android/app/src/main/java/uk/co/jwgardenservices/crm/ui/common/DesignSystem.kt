@@ -40,6 +40,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -101,12 +103,21 @@ fun CompactScreenHeader(
 ) {
     val palette = JwTheme.colors
     val ink = palette.onForestMuted
+    // The band curves at the bottom and lightens a touch towards it, so it
+    // reads as a sheet laid over the page rather than a flat strip.
+    val headerShape = RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp)
     Surface(
         modifier = modifier.fillMaxWidth(),
+        shape = headerShape,
         color = palette.forest,
         contentColor = ink,
+        shadowElevation = 6.dp,
     ) {
-        Column {
+        Column(
+            modifier = Modifier.background(
+                Brush.verticalGradient(listOf(palette.forest, palette.forestSoft)),
+            ),
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -284,13 +295,13 @@ fun PillButton(
     val palette = JwTheme.colors
     val container = when (style) {
         PillStyle.Gold -> palette.brass
-        PillStyle.Forest -> palette.forest
+        PillStyle.Forest -> selectedFill()
         PillStyle.Quiet -> palette.track
         PillStyle.OnForest -> Color.Transparent
     }
     val content = when (style) {
         PillStyle.Gold -> palette.onBrass
-        PillStyle.Forest -> palette.onForestMuted
+        PillStyle.Forest -> selectedInk()
         PillStyle.Quiet -> MaterialTheme.colorScheme.onSurface
         PillStyle.OnForest -> palette.onForestMuted
     }
@@ -342,7 +353,8 @@ fun <T> SegmentedPillTabs(
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(JwTokens.chipRadius),
-        color = palette.track,
+        color = glassFill(0.62f),
+        border = BorderStroke(JwTokens.hairline, glassEdge()),
     ) {
         Row(
             modifier = Modifier.padding(4.dp),
@@ -353,9 +365,9 @@ fun <T> SegmentedPillTabs(
                 Surface(
                     onClick = { onSelect(option) },
                     shape = RoundedCornerShape(JwTokens.chipRadius),
-                    color = if (active) palette.forest else Color.Transparent,
+                    color = if (active) selectedFill() else Color.Transparent,
                     contentColor = if (active) {
-                        palette.onForestMuted
+                        selectedInk()
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
@@ -378,6 +390,22 @@ fun <T> SegmentedPillTabs(
     }
 }
 
+/**
+ * The "on" colour for tabs and pills. Forest reads well on the light page, but
+ * vanishes on the dark one, so dark mode uses the light sage primary instead.
+ */
+@Composable
+private fun selectedFill(): Color {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    return if (dark) MaterialTheme.colorScheme.primary else JwTheme.colors.forest
+}
+
+@Composable
+private fun selectedInk(): Color {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    return if (dark) MaterialTheme.colorScheme.onPrimary else JwTheme.colors.onForestMuted
+}
+
 /** One filter pill: forest when on, white with a hairline when off. */
 @Composable
 fun FilterPill(
@@ -391,13 +419,13 @@ fun FilterPill(
         onClick = onClick,
         modifier = modifier,
         shape = RoundedCornerShape(JwTokens.chipRadius),
-        color = if (selected) palette.forest else MaterialTheme.colorScheme.surface,
+        color = if (selected) selectedFill() else glassFill(0.72f),
         contentColor = if (selected) {
-            palette.onForestMuted
+            selectedInk()
         } else {
             MaterialTheme.colorScheme.onSurfaceVariant
         },
-        border = if (selected) null else BorderStroke(JwTokens.hairline, palette.cardBorder),
+        border = if (selected) null else BorderStroke(JwTokens.hairline, glassEdge()),
     ) {
         Box(
             modifier = Modifier
@@ -436,7 +464,7 @@ fun GoldFab(
 // Cards
 // ---------------------------------------------------------------------------
 
-/** The white card: 16dp radius, 1dp hairline, no shadow. */
+/** The glass card: translucent, 20dp radius, a lit hairline edge, no shadow. */
 @Composable
 fun JwCard(
     modifier: Modifier = Modifier,
@@ -447,9 +475,9 @@ fun JwCard(
     CardSurface(
         modifier = modifier,
         onClick = onClick,
-        color = MaterialTheme.colorScheme.surface,
+        color = glassFill(),
         contentColor = MaterialTheme.colorScheme.onSurface,
-        border = BorderStroke(JwTokens.hairline, JwTheme.colors.cardBorder),
+        border = BorderStroke(JwTokens.hairline, glassEdge()),
         padding = padding,
         content = content,
     )
@@ -468,7 +496,11 @@ fun ForestCard(
         onClick = onClick,
         color = JwTheme.colors.forest,
         contentColor = JwTheme.colors.onForestMuted,
-        border = null,
+        // A faint light on the top edge lifts the hero card off the page.
+        border = BorderStroke(
+            JwTokens.hairline,
+            Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.02f))),
+        ),
         padding = padding,
         content = content,
     )

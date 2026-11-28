@@ -16,6 +16,10 @@ ksp {
 }
 
 android {
+    testOptions {
+        // Robolectric needs the app's resources to draw screens in screenshot tests.
+        unitTests.isIncludeAndroidResources = true
+    }
     namespace = "uk.co.jwgardenservices.crm"
     compileSdk = 35
 
@@ -52,6 +56,16 @@ android {
             "\"" + (providers.gradleProperty("SENTRY_DSN").orNull?.takeIf { it.isNotBlank() }
                 ?: "https://2db5e3b800989fa06211896264228199@o4512413257826304.ingest.de.sentry.io/4512413289087056") + "\"",
         )
+        // Which commit this APK was built from, so an assistant log can be matched
+        // to a build. GitHub's runner provides it; locally it is asked of git.
+        val gitSha = (
+            System.getenv("GITHUB_SHA")?.take(7)
+                ?: runCatching {
+                    providers.exec { commandLine("git", "rev-parse", "--short=7", "HEAD") }
+                        .standardOutput.asText.get().trim()
+                }.getOrNull()
+            )?.takeIf { it.isNotBlank() } ?: "dev"
+        buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
         // Voice input runs entirely on the phone with sherpa-onnx, so there is
         // no server URL or token to inject here any more.
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
@@ -171,6 +185,14 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    // Screenshot tests: Robolectric draws the Compose screens on the build
+    // machine and Roborazzi saves them as PNGs (./gradlew testDebugUnitTest -Pscreenshots=true).
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.43.1")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.43.1")
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
 
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -449,5 +471,17 @@ afterEvaluate {
     tasks.named("preBuild") {
         dependsOn(downloadSherpa)
         dependsOn(downloadKokoro)
+    }
+}
+
+// Screenshot tests only run when asked for, so the normal unit tests (and CI)
+// do not download Robolectric's Android images.
+tasks.withType<Test>().configureEach {
+    val screenshots = project.findProperty("screenshots") == "true"
+    if (screenshots) {
+        systemProperty("roborazzi.test.record", "true")
+        filter { includeTestsMatching("*ScreenshotTest*") }
+    } else {
+        filter { excludeTestsMatching("*ScreenshotTest*") }
     }
 }

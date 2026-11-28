@@ -36,7 +36,6 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.HomeWork
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.LocalGasStation
-import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Savings
 import androidx.compose.material.icons.outlined.Shield
@@ -102,7 +101,6 @@ import uk.co.jwgardenservices.crm.ui.common.LoadingState
 import uk.co.jwgardenservices.crm.ui.common.SectionCard
 import uk.co.jwgardenservices.crm.ui.theme.JwTheme
 import uk.co.jwgardenservices.crm.ui.theme.JwTokens
-import uk.co.jwgardenservices.crm.ui.voice.AssistantScreen
 import androidx.compose.ui.draw.clip
 import uk.co.jwgardenservices.crm.ui.common.CompactScreenHeader
 import uk.co.jwgardenservices.crm.ui.common.FilterPill
@@ -119,7 +117,6 @@ private enum class BusinessTab(val label: String, val subtitle: String) {
     Overview("Overview", "Costs, profit and the next useful move."),
     Costs("Costs", "Vehicles, fuel, insurance, tools."),
     Coach("Coach", "What needs attention, what is an opportunity."),
-    Secretary("Secretary", "The voice assistant for the business."),
 }
 
 /** Forest, slate and sage: the three tones in the reference donut. */
@@ -233,7 +230,7 @@ fun BusinessRunningScreen(
         return
     }
 
-    // One header and one tab strip for all four views, so switching tabs
+    // One header and one tab strip for all three views, so switching tabs
     // changes the content and nothing else.
     Column(modifier = Modifier.fillMaxSize()) {
         CompactScreenHeader(
@@ -242,11 +239,6 @@ fun BusinessRunningScreen(
             actions = {
                 when (tab) {
                     BusinessTab.Overview -> {
-                        HeaderIconAction(
-                            icon = Icons.Outlined.Mic,
-                            contentDescription = "Call Secretary",
-                            onClick = { tab = BusinessTab.Secretary },
-                        )
                         HeaderIconAction(
                             icon = Icons.Outlined.Refresh,
                             contentDescription = "Refresh",
@@ -265,7 +257,6 @@ fun BusinessRunningScreen(
                         contentDescription = "Refresh",
                         onClick = viewModel::refresh,
                     )
-                    BusinessTab.Secretary -> Unit
                 }
             },
         )
@@ -348,16 +339,6 @@ fun BusinessRunningScreen(
                 onAction = ::handleAction,
                 modifier = Modifier.weight(1f),
             )
-            // The call sheet owns the rest of the screen. It binds the voice
-            // service only while this tab is on screen, and releases the mic
-            // when the owner switches back to the figures.
-            BusinessTab.Secretary -> Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-            ) {
-                AssistantScreen()
-            }
         }
     }
 

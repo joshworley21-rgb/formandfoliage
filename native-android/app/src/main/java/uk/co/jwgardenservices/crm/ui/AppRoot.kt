@@ -1,6 +1,8 @@
 package uk.co.jwgardenservices.crm.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -50,78 +52,44 @@ import uk.co.jwgardenservices.crm.ui.main.MainScaffold
 fun AppRoot(
     appViewModel: AppViewModel = viewModel { AppViewModel() },
 ) {
-    val context = LocalContext.current
-    var crashText by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) { crashText = CrashLog.read(context) }
-
-    crashText?.let { report ->
-        JwAlertDialog(
-            onDismissRequest = { },
-            title = { Text("Last crash report") },
-            text = {
-                Text(
-                    text = report.take(4000),
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
-                    clipboard?.setPrimaryClip(
-                        android.content.ClipData.newPlainText("crash", report),
-                    )
-                    android.widget.Toast.makeText(context, "Copied", android.widget.Toast.LENGTH_SHORT).show()
-                }) { Text("Copy") }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    CrashLog.clear(context)
-                    crashText = null
-                }) { Text("Clear") }
-            },
-        )
-    }
-
     val authState by appViewModel.authState.collectAsStateWithLifecycle()
     val workspace by appViewModel.workspace.collectAsStateWithLifecycle()
     val locked by AppLock.locked.collectAsStateWithLifecycle()
     val lockEnabled by AppLock.enabled.collectAsStateWithLifecycle()
 
-    when (authState) {
-        AuthState.Loading -> when (workspace) {
-            // Offline start: the session is still revalidating but the last
-            // known workspace is on disk, so show the cached CRM instead of
-            // an endless "Opening your workspace…" splash.
-            WorkspaceState.Owner -> MainScaffold(
+    // One fixed place for the main screen. It used to sit in several branches
+    // (loading, signed in, staff, owner), so any brief change of state while
+    // the session refreshed on return tore it down and rebuilt it, which sent
+    // the owner back to the first page after even a two-second absence.
+    val workspaceReady = workspace is WorkspaceState.Owner || workspace is WorkspaceState.Staff
+    when {
+        authState == AuthState.SignedOut -> AuthScreen()
+        workspaceReady -> Box(modifier = Modifier.fillMaxSize()) {
+            MainScaffold(
                 onSignOut = appViewModel::signOut,
-                isStaff = false,
+                isStaff = workspace is WorkspaceState.Staff,
             )
-            WorkspaceState.Staff -> MainScaffold(
-                onSignOut = appViewModel::signOut,
-                isStaff = true,
-            )
-            else -> SplashScreen()
-        }
-        AuthState.SignedOut -> AuthScreen()
-        is AuthState.SignedIn ->
+            // The lock sits on top instead of replacing the screen, so the
+            // page and what was being typed are still there once unlocked.
             if (locked && lockEnabled) {
-                LockScreen()
-            } else when (val role = workspace) {
-            WorkspaceState.Loading -> SplashScreen()
-            WorkspaceState.Owner -> MainScaffold(
-                onSignOut = appViewModel::signOut,
-                isStaff = false,
-            )
-            WorkspaceState.Staff -> MainScaffold(
-                onSignOut = appViewModel::signOut,
-                isStaff = true,
-            )
-            is WorkspaceState.Error -> WorkspaceErrorScreen(
-                message = role.message,
-                onRetry = appViewModel::retryWorkspace,
-            )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {},
+                        ),
+                ) {
+                    LockScreen()
+                }
+            }
         }
+        workspace is WorkspaceState.Error && authState is AuthState.SignedIn -> WorkspaceErrorScreen(
+            message = (workspace as WorkspaceState.Error).message,
+            onRetry = appViewModel::retryWorkspace,
+        )
+        else -> SplashScreen()
     }
 }
 

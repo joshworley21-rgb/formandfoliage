@@ -72,6 +72,8 @@ import uk.co.jwgardenservices.crm.data.model.ScheduledJob
 import uk.co.jwgardenservices.crm.data.model.SeriesDraft
 import uk.co.jwgardenservices.crm.data.model.SeriesEditInput
 import uk.co.jwgardenservices.crm.data.model.Visit
+import uk.co.jwgardenservices.crm.ui.common.HoursDropdown
+import uk.co.jwgardenservices.crm.ui.common.TimeDropdown
 import uk.co.jwgardenservices.crm.data.model.VisitDraft
 import uk.co.jwgardenservices.crm.domain.BillingSource
 import uk.co.jwgardenservices.crm.domain.Frequency
@@ -119,10 +121,12 @@ internal fun JobEditorDialog(
     onBookSeries: (SeriesDraft) -> Unit,
     onDelete: ((wholeSeries: Boolean) -> Unit)?,
     onEditSeries: (() -> Unit)? = null,
+    /** For a new booking started from a client, e.g. Home's "due again" list. */
+    initialClientId: String? = null,
 ) {
     val starts = parseTimestamp(existing?.startsAt)
     var clientId by remember(existing?.id) {
-        mutableStateOf(existing?.clientId ?: clients.firstOrNull()?.id.orEmpty())
+        mutableStateOf(existing?.clientId ?: initialClientId ?: clients.firstOrNull()?.id.orEmpty())
     }
     var date by remember(existing?.id, defaultDate) {
         mutableStateOf(starts?.localDate()?.toString() ?: defaultDate?.toString() ?: todayIso())
@@ -163,11 +167,10 @@ internal fun JobEditorDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
+                    TimeDropdown(
                         value = time,
                         onValueChange = { time = it },
-                        label = { Text("Start (HH:mm)") },
-                        singleLine = true,
+                        label = "Starts at",
                         modifier = Modifier.weight(1f),
                     )
                     Spacer(Modifier.width(12.dp))
@@ -363,9 +366,11 @@ internal fun CompleteJobDialog(
         missed: Boolean,
         amount: Double,
     ) -> Unit,
+    /** Start with no hours, so the owner always says how long it really took. */
+    askHours: Boolean = false,
 ) {
     var hours by remember(job.id) {
-        mutableStateOf((job.durationMinutes / 60.0).toString())
+        mutableStateOf(if (askHours) "" else (job.durationMinutes / 60.0).toString())
     }
     var materials by remember(job.id) { mutableStateOf("0") }
     var materialsNote by remember(job.id) { mutableStateOf("") }
@@ -442,12 +447,9 @@ internal fun CompleteJobDialog(
 
                     if (!missed) {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            OutlinedTextField(
+                            HoursDropdown(
                                 value = hours,
                                 onValueChange = { hours = it },
-                                label = { Text("Hours") },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 modifier = Modifier.weight(1f),
                             )
                             if (!isStaff) {
@@ -515,7 +517,7 @@ internal fun CompleteJobDialog(
                         TextButton(onClick = onDismiss, enabled = !saving) { Text("Cancel") }
                         Spacer(Modifier.width(6.dp))
                         Button(
-                            enabled = !saving,
+                            enabled = !saving && (missed || !askHours || hoursValue > 0),
                             onClick = {
                                 onComplete(
                                     hoursValue,
@@ -674,20 +676,16 @@ internal fun SeriesDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                OutlinedTextField(
+                TimeDropdown(
                     value = startTime,
                     onValueChange = { startTime = it },
-                    label = { Text("Start time (HH:mm)") },
-                    singleLine = true,
+                    label = "Start time",
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
-                    value = duration,
-                    onValueChange = { duration = it },
-                    label = { Text("Minutes per visit") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                DurationDropdown(
+                    selectedMinutes = duration.toIntOrNull() ?: 0,
                     modifier = Modifier.fillMaxWidth(),
+                    onPick = { duration = it.toString() },
                 )
 
                 OptionPicker(

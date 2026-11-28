@@ -140,10 +140,17 @@ object AsrHotwords {
                 val heard = slice(tokens, index, end).uppercase()
                 val lengthGap = abs(heard.length - name.length)
                 val distance = distance(heard, name)
-                val fuzzy = distance in 1..allowed
-                val phonetic = !fuzzy && heard.length >= 3 &&
+                // An everyday word is never rewritten into a name, by spelling or sound.
+                val everyday = heard.split(' ').any { it in COMMON_WORDS }
+                val fuzzy = !everyday && distance in 1..allowed
+                // The sound-alike rule is for a headset that drops a name's first
+                // letter. It matches any word with the same consonant skeleton, so
+                // in free speech it rewrote "backtrack" into SECATEURS and "make"
+                // into LOUISA. It only runs when a client name was just asked for,
+                // when the next words are expected to be a name.
+                val phonetic = aggressive && !fuzzy && heard.length >= 4 && name.length >= 6 &&
                     lengthGap <= (if (aggressive) 4 else 2) &&
-                    heard.lowercase() !in COMMON_WORDS &&
+                    !everyday &&
                     phoneticMatch(heard, name)
                 if (!fuzzy && !phonetic) continue
                 val score = if (fuzzy) distance else allowed + 1 + lengthGap
@@ -252,10 +259,18 @@ object AsrHotwords {
         "THE", "AND", "LTD", "LIMITED", "LLP", "MR", "MRS", "MS", "MISS", "DR",
     )
 
-    /** Command words a tail-only phonetic hit must never rewrite. */
+    /** Everyday and command words, uppercase like the text they are compared with. */
     private val COMMON_WORDS = setOf(
         "TODAY", "TOMORROW", "YESTERDAY", "VISIT", "HOURS", "HOUR", "MARK",
         "LOG", "DONE", "CLIENT", "WHICH", "THAT", "THIS", "WHAT", "WHEN",
         "WHERE", "PLEASE", "THANKS", "MORNING", "AFTERNOON", "SCHEDULE",
+        "CAN", "YOU", "ADD", "FOR", "WITH", "FROM", "HAVE", "GOT", "SHOW", "TELL",
+        "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE",
+        "TEN", "ELEVEN", "TWELVE", "HALF", "QUARTER", "MINUTE", "MINUTES",
+        "NEXT", "JOB", "JOBS", "DIARY", "NOTE", "MONEY", "OWES", "OWED", "PAID",
+        "UNPAID", "INVOICE", "INVOICES", "WEEK", "MONTH", "BOOKED", "CALENDAR",
+        "EARNINGS", "TAKINGS", "STARTED", "FINISH", "FINISHED", "COMPLETE",
+        "COMPLETED", "WORKED", "WORK", "MONDAY", "TUESDAY", "WEDNESDAY",
+        "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY",
     )
 }

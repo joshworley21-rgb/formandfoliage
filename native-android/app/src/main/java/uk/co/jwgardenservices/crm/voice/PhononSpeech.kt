@@ -83,6 +83,12 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
             try {
                 withContext(Dispatchers.IO) {
                     player.play()
+                    // The model samples with a little randomness, so each clause
+                    // is a fresh take and the timbre can drift between them. The
+                    // same seed for every clause keeps it one speaker.
+                    val steady = runCatching { AssistantPreferences.steadyVoiceFlow(context).first() }
+                        .getOrDefault(true)
+                    if (steady) runCatching { engine.setSeed(STEADY_SEED) }
                     engine.speak(clean) { pcm ->
                         if (stopped || closed) {
                             false
@@ -185,19 +191,30 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
         engine?.let { return it }
         return loadLock.withLock {
             engine ?: withContext(Dispatchers.IO) {
-                if (!PhononDownloader.isInstalled(context)) return@withContext null
-                val model: File = PhononDownloader.dir(context)
-                // Set before the first ptts_new: the default is one Rayon thread
-                // per core, which is usually more than one audio stream can use.
-                runCatching { Os.setenv("RAYON_NUM_THREADS", "2", true) }
+                // The chosen model first, the standard 31m as the fallback if
+                // the optional one is missing or will not load.
+                val wanted = runCatching { AssistantPreferences.phononModelFlow(context).first() }
+                    .getOrDefault(PhononModel.Phonon31)
                 val started = System.currentTimeMillis()
-                val created = runCatching {
-                    PhononTTS(model.absolutePath, "en")
-                }.getOrElse { error ->
-                    CrashLog.note(context, TAG, "load failed: ${error.message}")
-                    Log.e(TAG, "Phonon load failed", error)
-                    return@withContext null
+                var usedModel = wanted
+                var created: PhononTTS? = null
+                for (candidate in listOf(wanted, PhononModel.Phonon31).distinct()) {
+                    if (!PhononDownloader.isInstalled(context, candidate)) continue
+                    val model: File = PhononDownloader.dir(context, candidate)
+                    // Set before the first ptts_new: the default is one Rayon thread
+                    // per core, which is usually more than one audio stream can use.
+                    runCatching { Os.setenv("RAYON_NUM_THREADS", "2", true) }
+                    created = runCatching { PhononTTS(model.absolutePath, "en") }
+                        .onFailure { error ->
+                            CrashLog.note(context, TAG, "${candidate.label} load failed: ${error.message}")
+                            Log.e(TAG, "Phonon load failed", error)
+                        }.getOrNull()
+                    if (created != null) {
+                        usedModel = candidate
+                        break
+                    }
                 }
+                if (created == null) return@withContext null
                 val voices = created.voices
                 val selected = runCatching {
                     AssistantPreferences.phononVoiceFlow(context).first()
@@ -219,7 +236,7 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
                 CrashLog.note(
                     context,
                     TAG,
-                    "Phonon ready in ${System.currentTimeMillis() - started} ms " +
+                    "${usedModel.label} ready in ${System.currentTimeMillis() - started} ms " +
                         "(${voices.size} voices: ${voices.joinToString()})" +
                         (if (chosen != null) " voice=$chosen" else ""),
                 )
@@ -279,5 +296,8 @@ class PhononSpeech(private val context: Context) : AutoCloseable {
     private companion object {
         const val TAG = "Phonon"
         const val SAMPLE_RATE = 24_000
+
+        /** Any fixed value: it only has to be the same for every clause. */
+        const val STEADY_SEED = 20_261_127L
     }
 }

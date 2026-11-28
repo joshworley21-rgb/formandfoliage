@@ -52,7 +52,13 @@ object CrashLog {
         if (file.exists()) return
         runCatching {
             val manager = context.getSystemService(ActivityManager::class.java) ?: return
+            // Android keeps old exit records for days, so without a marker the
+            // same exit was re-captured on every launch, even after it was cleared.
+            val seen = context.getSharedPreferences("crashlog", Context.MODE_PRIVATE)
+            val lastSeen = seen.getLong("last_exit", 0L)
             val exits = manager.getHistoricalProcessExitReasons(context.packageName, 0, 8)
+                .filter { it.timestamp > lastSeen }
+            exits.maxOfOrNull { it.timestamp }?.let { seen.edit().putLong("last_exit", it).apply() }
             val interesting = exits.filter {
                 it.reason == ApplicationExitInfo.REASON_CRASH_NATIVE ||
                     it.reason == ApplicationExitInfo.REASON_CRASH ||

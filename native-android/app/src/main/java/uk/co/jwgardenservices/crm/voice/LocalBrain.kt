@@ -34,6 +34,21 @@ object LocalBrain {
         SpokenIntent.ClientList,
         SpokenIntent.InvoiceStatus,
         SpokenIntent.NextJobForClient,
+        SpokenIntent.AddClient,
+        SpokenIntent.BookJob,
+        SpokenIntent.MoveJob,
+        SpokenIntent.CancelJob,
+        SpokenIntent.BackfillVisits,
+        SpokenIntent.MarkPaid,
+        SpokenIntent.UpdateClient,
+        SpokenIntent.QuoteStatus,
+        SpokenIntent.EnquiryStatus,
+        SpokenIntent.Enquiries,
+        SpokenIntent.QuotesWaiting,
+        SpokenIntent.UnloggedJobs,
+        SpokenIntent.AddJobTask,
+        SpokenIntent.DeleteVisit,
+        SpokenIntent.CreateQuote,
         SpokenIntent.Weather,
         SpokenIntent.Other,
     )
@@ -56,19 +71,22 @@ object LocalBrain {
             .joinToString(", ")
         if (lean) {
             return buildString {
-                appendLine("Label a gardener's spoken sentence. Reply one line: label|customer")
+                appendLine("Label a gardener's spoken sentence. Reply with one line like log_hours|Simon")
                 appendLine(
                     "log_hours time worked, check_schedule diary, next_job, next_job_address, " +
                         "mark_job_done, who_owes_me unpaid invoices, today_earnings, " +
                         "weekly_earnings, month_earnings, hours_this_week, client_info, last_visit, " +
                         "best_client, profit, running_costs, add_note, add_expense, unbilled, " +
-                        "client_list, invoice_status, next_job_for_client, weather, other chat",
+                        "client_list, invoice_status, next_job_for_client, add_client, book_job, " +
+                        "move_job, cancel_job, backfill_visits fill in past visits, mark_paid, " +
+                        "update_client, quote_status, enquiry_status, enquiries, quotes_waiting, " +
+                        "unlogged_jobs, add_job_task checklist item, delete_visit, create_quote new quote, weather, other chat",
                 )
                 appendLine("stick Simon down for a half day => log_hours|Simon")
                 appendLine("who's not paid me => who_owes_me|")
                 appendLine("the Hendersons are done => mark_job_done|Hendersons")
                 appendLine("how are you => other|")
-                if (clients.isNotEmpty()) append("Customers: $clients")
+                if (clients.isNotEmpty()) append("Known customer names: $clients")
             }.trimEnd()
         }
         return buildString {
@@ -92,6 +110,18 @@ object LocalBrain {
             appendLine("client_list: list the customers")
             appendLine("invoice_status: has a customer paid")
             appendLine("next_job_for_client: when a customer is next booked")
+            appendLine("add_client: add a new customer")
+            appendLine("book_job, move_job, cancel_job: book, move or cancel a booking")
+            appendLine("backfill_visits: fill in or backdate past visits")
+            appendLine("mark_paid: a customer has paid")
+            appendLine("update_client: change a customer's phone or rate")
+            appendLine("quote_status: a quote was accepted or declined")
+            appendLine("enquiries, enquiry_status: new enquiries, or update one")
+            appendLine("quotes_waiting: quotes awaiting a reply")
+            appendLine("unlogged_jobs: past jobs not logged yet")
+            appendLine("add_job_task: add a checklist item to a customer's job")
+            appendLine("delete_visit: delete a logged visit")
+            appendLine("create_quote: write a new quote for a customer, with a price")
             appendLine("weather: the forecast")
             appendLine("other: chat, advice, anything else")
             appendLine("Examples:")
@@ -104,7 +134,7 @@ object LocalBrain {
             appendLine("remember the Parkers' gate sticks => add_note|Parkers")
             appendLine("bought thirty quid of compost for the Parkers => add_expense|Parkers")
             appendLine("how are you doing => other|")
-            if (clients.isNotEmpty()) append("Customers: $clients")
+            if (clients.isNotEmpty()) append("Known customer names: $clients")
         }.trimEnd()
     }
 
@@ -133,19 +163,22 @@ object LocalBrain {
         val said = candidate.trim()
         if (said.isEmpty()) return ""
         val heard = utterance.lowercase()
-        val heardWords = words(heard.replace("'s", "")).toSet()
-        val want = words(said)
+        // "The Smiths" is a client called Smith: compare without a trailing s.
+        val heardWords = words(heard.replace("'s", "")).map(::stem).toSet()
+        val want = words(said).map(::stem)
         val known = clientNames.map { it.trim() }.filter { it.isNotEmpty() }
 
         known.firstOrNull { it.equals(said, ignoreCase = true) }?.let { exact ->
-            return if (words(exact).any { it in heardWords }) exact else ""
+            return if (words(exact).any { stem(it) in heardWords }) exact else ""
         }
         if (want.isNotEmpty() && want.all { it in heardWords }) {
-            val fits = known.filter { name -> words(name).toSet().containsAll(want) }
+            val fits = known.filter { name -> words(name).map(::stem).toSet().containsAll(want) }
             if (fits.size == 1) return fits.first()
         }
         return if (heard.contains(said.lowercase())) said else ""
     }
+
+    private fun stem(word: String): String = if (word.length > 3 && word.endsWith("s")) word.dropLast(1) else word
 
     private fun words(text: String): List<String> = text.lowercase()
         .split(Regex("[^a-z0-9]+"))
@@ -162,6 +195,20 @@ object LocalBrain {
             SpokenIntent.AddNote -> NOTE_EVIDENCE
             SpokenIntent.AddExpense -> EXPENSE_EVIDENCE
             SpokenIntent.Weather -> WEATHER_EVIDENCE
+            SpokenIntent.AddClient -> CLIENT_EVIDENCE
+            SpokenIntent.BookJob -> BOOK_EVIDENCE
+            SpokenIntent.MoveJob -> MOVE_EVIDENCE
+            SpokenIntent.CancelJob -> CANCEL_EVIDENCE
+            SpokenIntent.BackfillVisits -> BACKFILL_EVIDENCE
+            SpokenIntent.MarkPaid -> PAID_EVIDENCE
+            SpokenIntent.UpdateClient -> UPDATE_EVIDENCE
+            SpokenIntent.QuoteStatus -> QUOTE_EVIDENCE
+            SpokenIntent.AddJobTask -> TASK_EVIDENCE
+            SpokenIntent.DeleteVisit -> DELETE_EVIDENCE
+            SpokenIntent.CreateQuote -> CREATE_QUOTE_EVIDENCE
+            SpokenIntent.EnquiryStatus, SpokenIntent.Enquiries -> ENQUIRY_EVIDENCE
+            SpokenIntent.QuotesWaiting -> QUOTE_EVIDENCE
+            SpokenIntent.UnloggedJobs -> UNLOGGED_EVIDENCE
             else -> return true
         }
         return evidence.containsMatchIn(lower)
@@ -179,6 +226,19 @@ object LocalBrain {
     private val EXPENSE_EVIDENCE = Regex(
         "£|\\d|\\b(pounds?|quid|spent|spend|bought|buy|cost|paid|diesel|fuel|petrol)\\b",
     )
+    private val CLIENT_EVIDENCE = Regex("\\b(?:client|customer)\\b")
+    private val BOOK_EVIDENCE = Regex("\\b(?:book|schedule|put|pencil|arrange|set up|add|down|in for)\\b")
+    private val MOVE_EVIDENCE = Regex("\\b(?:move|reschedule|rebook|push|swap|bring|change)\\b")
+    private val CANCEL_EVIDENCE = Regex("\\b(?:cancel|call off|scrap|drop|remove)\\b")
+    private val BACKFILL_EVIDENCE = Regex("\\b(?:backdate|back date|backfill|catch up|fill|mark|log|all)\\b")
+    private val PAID_EVIDENCE = Regex("\\b(?:paid|settled|pay|payment)\\b")
+    private val UPDATE_EVIDENCE = Regex("\\b(?:change|update|set|new|rate|number|phone|mobile)\\b")
+    private val QUOTE_EVIDENCE = Regex("quote")
+    private val TASK_EVIDENCE = Regex("\\b(?:task|to-?do|checklist|check list)\\b")
+    private val CREATE_QUOTE_EVIDENCE = Regex("\\bquote\\b.*(?:£|\\d)|(?:£|\\d).*\\bquote\\b")
+    private val DELETE_EVIDENCE = Regex("\\b(?:delete|remove|scrap|get rid|take off)\\b")
+    private val UNLOGGED_EVIDENCE = Regex("\\b(?:log|logged|record|recorded|entered)\\b")
+    private val ENQUIRY_EVIDENCE = Regex("enquir|inquir")
     private val WEATHER_EVIDENCE = Regex(
         "\\b(weather|rain\\w*|forecast|sun\\w*|cold|warm|wind\\w*|hot|snow\\w*|frost\\w*|" +
             "temperature|dry|wet|shower\\w*|storm\\w*)\\b",

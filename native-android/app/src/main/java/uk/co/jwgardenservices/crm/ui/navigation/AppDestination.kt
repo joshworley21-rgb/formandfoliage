@@ -6,7 +6,7 @@ import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Insights
-import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.People
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.RequestQuote
@@ -14,11 +14,11 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
- * The phone bar keeps the owner's driving workflow: the round, the calendar,
- * clients, the business's running costs and billing. Quotes, enquiries,
- * visits and Secretary live behind More. Secretary is also a tab inside
- * Business; its route is kept for the Dashboard microphone. Staff keep their
- * shorter bar (Schedule + Clients).
+ * The app opens on Home, the first tab. Secretary is the next one along.
+ * The bar then keeps the owner's working day: the round, the calendar, clients
+ * and billing. Business (running costs, profit, the coach) sits behind More
+ * with quotes, enquiries and visits. Staff keep their shorter bar (Schedule +
+ * Clients).
  */
 enum class AppDestination(
     val route: String,
@@ -27,14 +27,14 @@ enum class AppDestination(
     val primary: Boolean,
 ) {
     Dashboard("dashboard", "Home", Icons.Outlined.Dashboard, true),
-    Clients("clients", "Clients", Icons.Outlined.People, true),
+    Secretary("assistant", "Secretary", Icons.Outlined.AutoAwesome, true),
     Schedule("schedule", "Rota", Icons.Outlined.CalendarMonth, true),
-    Business("business", "Business", Icons.Outlined.Insights, true),
+    Clients("clients", "Clients", Icons.Outlined.People, true),
     Invoices("invoices", "Invoice", Icons.AutoMirrored.Outlined.ReceiptLong, true),
+    Business("business", "Business", Icons.Outlined.Insights, false),
     Enquiries("enquiries", "Enquiries", Icons.Outlined.Inbox, false),
     Quotes("quotes", "Quotes", Icons.Outlined.RequestQuote, false),
     Visits("visits", "Visits", Icons.Outlined.Checklist, false),
-    Secretary("assistant", "Secretary", Icons.Outlined.Mic, false),
     Settings("settings", "Settings", Icons.Outlined.Settings, false),
     ;
 

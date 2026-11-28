@@ -56,6 +56,11 @@ import uk.co.jwgardenservices.crm.data.model.Visit
 import uk.co.jwgardenservices.crm.domain.formatDateTime
 import uk.co.jwgardenservices.crm.domain.daysOverdue
 import uk.co.jwgardenservices.crm.domain.formatDayMonth
+import uk.co.jwgardenservices.crm.domain.hoursLabel
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.heightIn
 import uk.co.jwgardenservices.crm.domain.formatDayMonthYear
 import uk.co.jwgardenservices.crm.core.TaxReservePrefs
 import uk.co.jwgardenservices.crm.domain.taxReserveAmount
@@ -268,6 +273,7 @@ fun InvoicesScreen(viewModel: CrmViewModel) {
                 visits = state.visits,
                 clientNames = clientNames,
                 busy = state.saving,
+                vatRate = state.settings?.takeIf { it.vatRegistered }?.vatRate ?: 0.0,
                 onCreate = { client, visitIds ->
                     scope.launch {
                         try {
@@ -490,7 +496,7 @@ private fun OwedBand(
 }
 
 @Composable
-private fun InvoiceCard(
+internal fun InvoiceCard(
     invoice: Invoice,
     clientName: String,
     warning: androidx.compose.ui.graphics.Color,
@@ -605,6 +611,23 @@ private fun InvoiceCard(
 
             HorizontalDivider(Modifier.padding(vertical = 10.dp))
 
+            // Three buttons in one row left each too narrow ("WhatsAp / p"):
+            // the main action gets the full width, the two shares sit below it.
+            Button(
+                onClick = onSend,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    when {
+                        invoice.status == "draft" -> "Send"
+                        over > 0 -> "Send reminder"
+                        else -> "Resend"
+                    },
+                    maxLines = 1,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -614,27 +637,14 @@ private fun InvoiceCard(
                     enabled = !busy,
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("Share PDF")
+                    Text("Share PDF", maxLines = 1, softWrap = false)
                 }
                 OutlinedButton(
                     onClick = onWhatsApp,
                     enabled = !busy,
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("WhatsApp")
-                }
-                Button(
-                    onClick = onSend,
-                    enabled = !busy,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(
-                        when {
-                            invoice.status == "draft" -> "Send"
-                            over > 0 -> "Send reminder"
-                            else -> "Resend"
-                        },
-                    )
+                    Text("WhatsApp", maxLines = 1, softWrap = false)
                 }
             }
             Row(
@@ -999,19 +1009,110 @@ private fun DraftInvoiceDialog(
     }
 }
 
+/** The invoice Bill all would create: every visit, the totals, then confirm or back out. */
+@Composable
+internal fun BillPreviewDialog(
+    client: Client,
+    visits: List<Visit>,
+    vatRate: Double,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val subtotal = visits.sumOf { it.amount }
+    val vat = subtotal * vatRate / 100.0
+    JwAlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Draft invoice for ${client.name}") },
+        text = {
+            // Dialog text defaults to the muted colour; the figures are the point, so full strength.
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.material3.LocalContentColor provides MaterialTheme.colorScheme.onSurface,
+            ) {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                visits.forEach { visit ->
+                    Row(verticalAlignment = Alignment.Top) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = parseDate(visit.visitDate)?.formatDayMonth() ?: visit.visitDate,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            val detail = listOfNotNull(
+                                visit.hours.takeIf { it > 0 }?.let { hoursLabel(it) },
+                                visit.description?.takeIf { it.isNotBlank() },
+                                visit.materialsCost.takeIf { it > 0 }?.let { "materials ${money(it)}" },
+                            ).joinToString(" · ")
+                            if (detail.isNotEmpty()) {
+                                Text(
+                                    text = detail,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        Text(money(visit.amount), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                HorizontalDivider()
+                if (vat > 0) {
+                    Row {
+                        Text("Subtotal", modifier = Modifier.weight(1f))
+                        Text(money(subtotal))
+                    }
+                    Row {
+                        Text("VAT ${vatRate}%", modifier = Modifier.weight(1f))
+                        Text(money(vat))
+                    }
+                }
+                Row {
+                    Text("Total", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    Text(money(subtotal + vat), style = MaterialTheme.typography.titleMedium)
+                }
+                Text(
+                    text = "This makes a draft. Nothing is sent to ${client.name} until you tap Send.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            }
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Create draft") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 /**
  * One row per client with unbilled work. A single tap builds an invoice from
  * every unbilled visit — the recurring-clients shortcut so the monthly round
  * does not need a visit-by-visit picker.
  */
 @Composable
-private fun ReadyToBillCard(
+internal fun ReadyToBillCard(
     clients: List<Client>,
     visits: List<Visit>,
     clientNames: Map<String, String>,
     busy: Boolean,
+    vatRate: Double = 0.0,
     onCreate: (Client, List<String>) -> Unit,
 ) {
+    // Bill all shows the invoice it would make first; nothing is created until Create draft.
+    var preview by remember { mutableStateOf<Pair<Client, List<Visit>>?>(null) }
+    preview?.let { (client, rows) ->
+        BillPreviewDialog(
+            client = client,
+            visits = rows,
+            vatRate = vatRate,
+            onDismiss = { preview = null },
+            onConfirm = {
+                preview = null
+                onCreate(client, rows.map { it.id })
+            },
+        )
+    }
     val groups = remember(visits) {
         visits
             .filter { !it.billed && !it.missed }
@@ -1065,7 +1166,7 @@ private fun ReadyToBillCard(
                     }
                     PillButton(
                         label = "Bill all",
-                        onClick = { onCreate(client, rows.map { it.id }) },
+                        onClick = { preview = client to rows },
                         enabled = !busy,
                         style = PillStyle.Forest,
                     )
@@ -1073,7 +1174,8 @@ private fun ReadyToBillCard(
                 HorizontalDivider()
             }
             Text(
-                text = "Creates one invoice per client from all their unbilled visits. Drafts stay in the list below so you can adjust before sending.",
+                text = "Bill all shows the invoice first. Confirming makes a draft in the list below, " +
+                    "so you can still adjust it before sending.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 10.dp),
