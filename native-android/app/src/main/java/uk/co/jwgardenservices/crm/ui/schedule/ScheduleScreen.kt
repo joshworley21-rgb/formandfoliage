@@ -56,6 +56,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.widget.Toast
@@ -978,21 +979,24 @@ private fun WeekBoard(
     onOpenJob: (ScheduledJob) -> Unit,
     onAdd: (LocalDate) -> Unit,
 ) {
+    // All seven days across the screen at once: each job is a compact tile
+    // (time and name); tapping it opens the full details.
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         days.forEach { day ->
             val jobs = jobsByDay[day].orEmpty()
                 .filter { !recurringOnly || it.seriesId != null }
                 .sortedBy { it.startsAt }
-            Column(modifier = Modifier.width(150.dp)) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                 val isToday = day == today
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(JwTokens.controlRadius),
+                    shape = RoundedCornerShape(JwTokens.smallRadius),
                     color = if (isToday) JwTheme.colors.forest else JwTheme.colors.track,
                     contentColor = if (isToday) {
                         JwTheme.colors.onForestMuted
@@ -1001,15 +1005,15 @@ private fun WeekBoard(
                     },
                 ) {
                     Column(
-                        modifier = Modifier.padding(vertical = 8.dp),
+                        modifier = Modifier.padding(vertical = 6.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Text(
                             text = day.format(java.time.format.DateTimeFormatter.ofPattern(
                                 "EEE",
                                 java.util.Locale.UK,
-                            )).uppercase(),
-                            style = MaterialTheme.typography.labelSmall,
+                            )).uppercase().take(3),
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                             color = if (isToday) {
                                 JwTheme.colors.brass
                             } else {
@@ -1018,31 +1022,65 @@ private fun WeekBoard(
                         )
                         Text(
                             text = day.dayOfMonth.toString(),
-                            style = MaterialTheme.typography.titleLarge,
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                         )
                     }
                 }
-                Spacer(Modifier.height(7.dp))
                 jobs.forEach { job ->
-                    WeekJobCard(
+                    WeekJobTile(
                         job = job,
                         clientName = clientNames[job.clientId] ?: "Client",
-                        address = clients.firstOrNull { it.id == job.clientId }?.address,
                         onClick = { onOpenJob(job) },
                     )
-                    Spacer(Modifier.height(6.dp))
                 }
                 if (!isStaff) {
-                    DashedAddSlot(onClick = { onAdd(day) })
+                    DashedAddSlot(onClick = { onAdd(day) }, compact = true)
                 }
             }
         }
     }
 }
 
+/** One booking in the seven-day view: time on top, then the client, two lines at most. */
 @Composable
-private fun DashedAddSlot(onClick: () -> Unit) {
+private fun WeekJobTile(
+    job: ScheduledJob,
+    clientName: String,
+    onClick: () -> Unit,
+) {
+    val starts = parseTimestamp(job.startsAt)
+    val done = job.status == "done"
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(JwTokens.tinyRadius),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            JwTokens.hairline,
+            if (done) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 3.dp, vertical = 4.dp)) {
+            Text(
+                text = starts?.formatTime() ?: "—",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
+            Text(
+                text = clientName,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DashedAddSlot(onClick: () -> Unit, compact: Boolean = false) {
     val dashedColour = JwTheme.colors.dashed
     Box(
         modifier = Modifier
@@ -1059,76 +1097,14 @@ private fun DashedAddSlot(onClick: () -> Unit) {
                     cornerRadius = CornerRadius(JwTokens.controlRadius.toPx()),
                 )
             }
-            .padding(vertical = 12.dp),
+            .padding(vertical = if (compact) 6.dp else 12.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = "+ Add",
+            text = if (compact) "+" else "+ Add",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-    }
-}
-
-@Composable
-private fun WeekJobCard(
-    job: ScheduledJob,
-    clientName: String,
-    address: String?,
-    onClick: () -> Unit,
-) {
-    val starts = parseTimestamp(job.startsAt)
-    val end = starts?.plusSeconds((job.durationMinutes * 60).toLong())
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(JwTokens.controlRadius),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(JwTokens.hairline, JwTheme.colors.cardBorder),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(modifier = Modifier.height(IntrinsicSize.Min)) {
-            Box(
-                modifier = Modifier
-                    .width(4.dp)
-                    .fillMaxHeight()
-                    .background(
-                        if (job.status == "done") {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.tertiary
-                        },
-                    ),
-            )
-            Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp)) {
-                Text(
-                    text = clientName,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                )
-                if (!address.isNullOrBlank()) {
-                    Text(
-                        text = address,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    )
-                }
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    text = "${starts?.formatTime() ?: "—"}–${end?.formatTime() ?: "—"}",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = "${job.durationMinutes} min",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
     }
 }
 
