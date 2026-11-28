@@ -70,7 +70,9 @@ import uk.co.jwgardenservices.crm.ui.visits.VisitsScreen
 import uk.co.jwgardenservices.crm.ui.voice.AssistantScreen
 import uk.co.jwgardenservices.crm.ui.voice.AssistantSettingsScreen
 import uk.co.jwgardenservices.crm.ui.common.AppBottomBar
+import uk.co.jwgardenservices.crm.ui.common.glassBackdrop
 import uk.co.jwgardenservices.crm.ui.common.BottomBarEntry
+import uk.co.jwgardenservices.crm.ui.common.glassBackdropFoot
 import uk.co.jwgardenservices.crm.ui.common.SectionLabel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -117,7 +119,7 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
     }
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = glassBackdropFoot(),
         // The forest header draws behind the status bar; the content itself
         // still clears the navigation bar and the bottom bar.
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -156,7 +158,8 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
                 .padding(padding)
                 .background(JwTheme.colors.forest)
                 .statusBarsPadding()
-                .background(MaterialTheme.colorScheme.background),
+                // One brand-colour wash behind every page, for the glass cards to sit on.
+                .glassBackdrop(),
         ) {
             if (failedWrites.isNotEmpty()) {
                 FailedWritesBanner(

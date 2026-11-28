@@ -85,7 +85,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.widget.Toast
 import uk.co.jwgardenservices.crm.ui.common.glass
-import uk.co.jwgardenservices.crm.ui.common.glassBackdrop
 import uk.co.jwgardenservices.crm.ui.theme.JwTokens
 import uk.co.jwgardenservices.crm.ui.theme.JwTheme
 import uk.co.jwgardenservices.crm.voice.AssistantService
@@ -208,9 +207,8 @@ fun AssistantScreen(onOpenSettings: (() -> Unit)? = null) {
     val busy = speaking || thinking
 
     BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxSize()
-            .glassBackdrop(),
+        // The wash behind this page comes from the main scaffold, like every other page.
+        modifier = Modifier.fillMaxSize(),
     ) {
         // Short screens (small phones, split screen) get a smaller orb and
         // tighter spacing so the controls and transcript always fit.

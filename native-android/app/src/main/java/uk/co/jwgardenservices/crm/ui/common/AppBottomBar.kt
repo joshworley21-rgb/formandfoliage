@@ -49,7 +49,7 @@ fun AppBottomBar(entries: List<BottomBarEntry>, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background)
+            .background(glassBackdropFoot())
             .navigationBarsPadding()
             .padding(horizontal = 12.dp)
             .padding(top = 6.dp, bottom = 8.dp),
