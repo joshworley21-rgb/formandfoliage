@@ -1647,6 +1647,14 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
         }
     }
 
+    /** Free RAM, logged beside each decode: a slow one is usually memory pressure, not the model. */
+    private fun freeMemoryMb(): Long {
+        val manager = context.getSystemService(android.app.ActivityManager::class.java) ?: return -1
+        val info = android.app.ActivityManager.MemoryInfo()
+        manager.getMemoryInfo(info)
+        return info.availMem / (1024L * 1024L)
+    }
+
     private fun decodeWhisperCpp(engine: WhisperCpp, samples: List<Float>): String {
         val started = SystemClock.elapsedRealtime()
         return synchronized(offlineDecodeLock) {
@@ -1681,7 +1689,7 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
                     context,
                     TAG,
                     "$label ${SystemClock.elapsedRealtime() - started}ms " +
-                        "(${samples.size / SAMPLE_RATE}s): ${text.take(120)}",
+                        "(${samples.size / SAMPLE_RATE}s, ${freeMemoryMb()}MB free): ${text.take(120)}",
                 )
                 text
             } catch (error: Exception) {

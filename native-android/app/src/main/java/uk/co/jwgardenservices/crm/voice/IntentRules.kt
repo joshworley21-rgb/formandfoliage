@@ -383,8 +383,13 @@ object IntentRules {
                 text.containsAny("finished", "complete", "completed", "done with")) &&
                 !completionQuestion &&
                 !text.containsAny("how many", "hours", "hrs") -> SpokenIntent.MarkJobDone
-            text.containsAny("hour", "hours", "hrs", "log", "worked", "work for") ->
-                SpokenIntent.LogHours
+            // "I can see there's three visits logs for Louisa" is the owner
+            // reading something out, not an instruction to log hours.
+            text.containsAny("hour", "hours", "hrs", "log", "worked", "work for") &&
+                !Regex(
+                    "^(?:i can see|i see|i've seen|i noticed|there(?:'s| is| are)|it looks like|" +
+                        "looks like|it says|i think|i can tell)\\b",
+                ).containsMatchIn(text.trim()) -> SpokenIntent.LogHours
             // "Book the Smiths in for Friday" is a booking, not a diary question;
             // reading the diary back for it would be a confident wrong answer.
             Regex(

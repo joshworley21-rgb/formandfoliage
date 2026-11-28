@@ -1972,7 +1972,10 @@ class AssistantService : Service() {
         //     do, and not used at all when online answers are switched off.
         // The action picker comes first: it can turn "put Simon down for a half
         // day" into 4 hours, which the rules and the labeller cannot.
-        if (!quick.requiresCloud && toolRouterReady()) {
+        // A greeting or thanks has a free canned reply further down; asking two
+        // language models first cost up to ten seconds of silence for "hello".
+        val chatterNow = quick.intent == SpokenIntent.Other && smallTalk(text) != null
+        if (!quick.requiresCloud && !chatterNow && toolRouterReady()) {
             val routed = routeWithTools(text)
             if (routed != null && (!temporal || routed.intent in dateIndependentIntents)) {
                 CrashLog.note(
@@ -1985,7 +1988,7 @@ class AssistantService : Service() {
             }
         }
         var localTried = false
-        if (!quick.requiresCloud && localBrainReady()) {
+        if (!quick.requiresCloud && !chatterNow && localBrainReady()) {
             localTried = true
             val understood = localIntent(text)
             if (understood != null && (!temporal || understood.intent in dateIndependentIntents)) {
