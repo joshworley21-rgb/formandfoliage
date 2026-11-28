@@ -14,7 +14,7 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
- * The app opens on Home. Secretary is the first tab, one tap away.
+ * The app opens on Home, the first tab. Secretary is the next one along.
  * The bar then keeps the owner's working day: the round, the calendar, clients
  * and billing. Business (running costs, profit, the coach) sits behind More
  * with quotes, enquiries and visits. Staff keep their shorter bar (Schedule +
@@ -26,8 +26,8 @@ enum class AppDestination(
     val icon: ImageVector,
     val primary: Boolean,
 ) {
-    Secretary("assistant", "Secretary", Icons.Outlined.AutoAwesome, true),
     Dashboard("dashboard", "Home", Icons.Outlined.Dashboard, true),
+    Secretary("assistant", "Secretary", Icons.Outlined.AutoAwesome, true),
     Schedule("schedule", "Rota", Icons.Outlined.CalendarMonth, true),
     Clients("clients", "Clients", Icons.Outlined.People, true),
     Invoices("invoices", "Invoice", Icons.AutoMirrored.Outlined.ReceiptLong, true),
