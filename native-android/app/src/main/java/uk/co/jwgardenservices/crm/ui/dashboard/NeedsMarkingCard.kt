@@ -50,12 +50,17 @@ import uk.co.jwgardenservices.crm.voice.VoicePlans
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 
-/** Past bookings from the last 30 days that were never marked done or missed, oldest first. */
+/**
+ * Bookings from the last 30 days that have finished but were never marked done
+ * or missed, oldest first. A job still under way is left alone until its booked
+ * time is up.
+ */
 fun jobsNeedingMarking(jobs: List<ScheduledJob>, now: Instant = Instant.now()): List<ScheduledJob> {
     val since = now.minus(30, ChronoUnit.DAYS)
     return VoicePlans.unlogged(jobs, now, null).filter { job ->
         val start = parseTimestamp(job.startsAt) ?: return@filter false
-        !start.isBefore(since)
+        val end = start.plus(job.durationMinutes.coerceAtLeast(0).toLong(), ChronoUnit.MINUTES)
+        !start.isBefore(since) && !end.isAfter(now)
     }
 }
 

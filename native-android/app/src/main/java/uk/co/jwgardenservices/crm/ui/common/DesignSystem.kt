@@ -295,13 +295,13 @@ fun PillButton(
     val palette = JwTheme.colors
     val container = when (style) {
         PillStyle.Gold -> palette.brass
-        PillStyle.Forest -> palette.forest
+        PillStyle.Forest -> selectedFill()
         PillStyle.Quiet -> palette.track
         PillStyle.OnForest -> Color.Transparent
     }
     val content = when (style) {
         PillStyle.Gold -> palette.onBrass
-        PillStyle.Forest -> palette.onForestMuted
+        PillStyle.Forest -> selectedInk()
         PillStyle.Quiet -> MaterialTheme.colorScheme.onSurface
         PillStyle.OnForest -> palette.onForestMuted
     }

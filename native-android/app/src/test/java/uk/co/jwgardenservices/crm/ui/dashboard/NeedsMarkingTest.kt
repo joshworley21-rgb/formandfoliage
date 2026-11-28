@@ -23,4 +23,12 @@ class NeedsMarkingTest {
         )
         assertEquals(listOf("older", "recent"), jobsNeedingMarking(jobs, now).map { it.id })
     }
+
+    @Test
+    fun `a job still under way is not asked about yet`() {
+        // Started at 11:00 for two hours; it is now 12:00.
+        val running = ScheduledJob(id = "running", userId = "u", clientId = "c", startsAt = "2026-11-28T11:00:00Z", durationMinutes = 120)
+        assertEquals(emptyList<String>(), jobsNeedingMarking(listOf(running), now).map { it.id })
+        assertEquals(listOf("running"), jobsNeedingMarking(listOf(running), now.plusSeconds(3 * 3600)).map { it.id })
+    }
 }

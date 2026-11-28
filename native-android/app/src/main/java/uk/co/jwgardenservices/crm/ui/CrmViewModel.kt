@@ -74,6 +74,8 @@ data class CrmUiState(
 class CrmViewModel(
     private val repository: CrmRepository = ServiceLocator.crmRepository,
     private val syncEngine: SyncEngine = ServiceLocator.syncEngine,
+    /** False only in screenshot tests, which run on an in-memory database with no server. */
+    autoSync: Boolean = true,
 ) : ViewModel() {
     private val saving = MutableStateFlow(false)
     private val offline = MutableStateFlow(false)
@@ -167,7 +169,7 @@ class CrmViewModel(
     )
 
     init {
-        viewModelScope.launch { syncNow() }
+        if (autoSync) viewModelScope.launch { syncNow() }
     }
 
     fun refresh() {
