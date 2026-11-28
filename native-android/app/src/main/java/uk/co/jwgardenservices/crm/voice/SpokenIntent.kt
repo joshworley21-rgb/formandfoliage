@@ -59,6 +59,7 @@ enum class SpokenIntent(val wire: String) {
     UnloggedJobs("unlogged_jobs"),
     AddJobTask("add_job_task"),
     DeleteVisit("delete_visit"),
+    CreateQuote("create_quote"),
     Other("other"),
 }
 

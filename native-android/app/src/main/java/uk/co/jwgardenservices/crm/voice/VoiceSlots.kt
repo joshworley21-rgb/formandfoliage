@@ -122,4 +122,30 @@ object VoiceSlots {
         if (task.length < 3) return null
         return task.take(120).replaceFirstChar { it.uppercase() }
     }
+
+    /**
+     * The price and the work from "quote the Smiths £300 for cutting the
+     * hedge" or "draft a quote for Rose Cottage, 450 quid, new lawn".
+     */
+    fun quoteParts(text: String, clientName: String): Pair<Double?, String?> {
+        val priceMatch = Regex(
+            "£\\s?(\\d[\\d,]*(?:\\.\\d+)?)|(\\d[\\d,]*(?:\\.\\d+)?)\\s*(?:pounds|quid)",
+            RegexOption.IGNORE_CASE,
+        ).find(text)
+        val price = priceMatch?.let { (it.groupValues[1].ifEmpty { it.groupValues[2] }).replace(",", "").toDoubleOrNull() }
+        var rest = if (priceMatch != null) text.substring(priceMatch.range.last + 1) else text
+        // The work usually follows the price; if not, it is what is left once the
+        // command and the client are taken out.
+        rest = rest.replace(Regex("^[\\s,.:-]*(?:for|to|on)?\\s*", RegexOption.IGNORE_CASE), "")
+        if (rest.isBlank() && priceMatch != null) {
+            rest = text.substring(0, priceMatch.range.first)
+                .replace(Regex("^.*?\\bquote\\b", RegexOption.IGNORE_CASE), "")
+                .replace(Regex(Regex.escape(clientName), RegexOption.IGNORE_CASE), "")
+                .replace(Regex("\\b(?:for|the|to)\\b", RegexOption.IGNORE_CASE), " ")
+        }
+        val work = rest.replace(Regex("\\s+"), " ").trim().trim(',', '.', ':', '-', ' ')
+            .takeIf { it.length >= 3 }
+            ?.replaceFirstChar { it.uppercase() }
+        return price to work
+    }
 }

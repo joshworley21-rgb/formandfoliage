@@ -94,6 +94,16 @@ fun MainScaffold(onSignOut: () -> Unit, isStaff: Boolean) {
         }
     }
     val unsynced = crmState.pendingWrites + failedWrites.size
+    val openHome by PendingNavigation.openHome.collectAsStateWithLifecycle()
+    LaunchedEffect(openHome) {
+        if (openHome && !isStaff) {
+            navController.navigate(AppDestination.Dashboard.route) {
+                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                launchSingleTop = true
+            }
+            PendingNavigation.openHome.value = false
+        }
+    }
     val markingCount = remember(crmState.jobs) {
         uk.co.jwgardenservices.crm.ui.dashboard.jobsNeedingMarking(crmState.jobs).size
     }
@@ -388,4 +398,9 @@ private fun PendingWritesBanner(count: Int, offline: Boolean) {
             modifier = Modifier.padding(horizontal = JwTokens.screenPadding, vertical = 8.dp),
         )
     }
+}
+
+/** A request from outside the screens (a notification) to show a page. */
+object PendingNavigation {
+    val openHome = kotlinx.coroutines.flow.MutableStateFlow(false)
 }

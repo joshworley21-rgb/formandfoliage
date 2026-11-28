@@ -496,7 +496,7 @@ private fun OwedBand(
 }
 
 @Composable
-private fun InvoiceCard(
+internal fun InvoiceCard(
     invoice: Invoice,
     clientName: String,
     warning: androidx.compose.ui.graphics.Color,
@@ -1011,7 +1011,7 @@ private fun DraftInvoiceDialog(
 
 /** The invoice Bill all would create: every visit, the totals, then confirm or back out. */
 @Composable
-private fun BillPreviewDialog(
+internal fun BillPreviewDialog(
     client: Client,
     visits: List<Visit>,
     vatRate: Double,
@@ -1086,7 +1086,7 @@ private fun BillPreviewDialog(
  * does not need a visit-by-visit picker.
  */
 @Composable
-private fun ReadyToBillCard(
+internal fun ReadyToBillCard(
     clients: List<Client>,
     visits: List<Visit>,
     clientNames: Map<String, String>,

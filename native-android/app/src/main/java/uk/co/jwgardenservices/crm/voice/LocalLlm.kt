@@ -72,6 +72,11 @@ object LocalLlm {
     private class Loaded(val engine: Engine, val model: LlmModel, val smart: Boolean)
 
     private var idleJob: Job? = null
+
+    /** The model that answered last, for the phone check (the clever one can fall back to the fast one). */
+    @Volatile
+    var lastUsed: LlmModel? = null
+        private set
     private var loaded: Loaded? = null
     private val loadLock = Any()
 
@@ -151,6 +156,7 @@ object LocalLlm {
         idleJob?.cancel()
         idleJob = null
         val ready = load(app, smart) ?: return@withContext null
+        lastUsed = ready.model
 
         val answer: String? = runCatching {
             val conversation: Conversation = ready.engine.createConversation(

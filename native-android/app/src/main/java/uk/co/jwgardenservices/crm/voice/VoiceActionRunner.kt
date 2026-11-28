@@ -9,9 +9,13 @@ import uk.co.jwgardenservices.crm.data.model.NewInvoiceInput
 import uk.co.jwgardenservices.crm.data.model.RunningCost
 import uk.co.jwgardenservices.crm.data.model.ScheduledJob
 import uk.co.jwgardenservices.crm.data.model.VisitDraft
+import uk.co.jwgardenservices.crm.data.model.QuoteDraft
+import uk.co.jwgardenservices.crm.data.model.QuoteItemDraft
 import uk.co.jwgardenservices.crm.data.repository.CrmRepository
 import uk.co.jwgardenservices.crm.data.repository.ServiceLocator
 import uk.co.jwgardenservices.crm.data.repository.createInvoice
+import uk.co.jwgardenservices.crm.data.repository.createQuote
+import uk.co.jwgardenservices.crm.data.repository.deleteQuote
 import uk.co.jwgardenservices.crm.data.repository.createLocalInvoice
 import uk.co.jwgardenservices.crm.data.repository.deleteInvoice
 import uk.co.jwgardenservices.crm.data.repository.convertEnquiryToClient
@@ -369,6 +373,7 @@ class VoiceActionRunner(
             SpokenIntent.CancelJob -> cancelJob(text)
             SpokenIntent.AddJobTask -> addJobTask(text)
             SpokenIntent.DeleteVisit -> deleteVisit(text)
+            SpokenIntent.CreateQuote -> createQuote(text)
             SpokenIntent.BackfillVisits -> backfillVisits(text)
             SpokenIntent.MarkPaid -> markPaid(text)
             SpokenIntent.UpdateClient -> changeClientDetails(text)
@@ -1372,6 +1377,40 @@ class VoiceActionRunner(
                 }
             }
             fast("${done()} I've added \"$title\" to ${client.name}'s job on $whenText.")
+        }
+    }
+
+    /** "Quote the Smiths £300 for cutting the hedge": a draft quote, read back first, never sent from here. */
+    private suspend fun createQuote(text: String): String {
+        val clients = repository.observeClients().first()
+        val client = clientFor(clients, text)
+            ?: return askFor(SpokenIntent.CreateQuote, text, " for ", "Which client is the quote for?")
+        val (price, work) = VoiceSlots.quoteParts(text, client.name)
+        if (price == null || price <= 0) return "How much is the quote for ${client.name}?"
+        if (work == null) return "What's the work on that quote for ${client.name}?"
+        val vat = runCatching { repository.getSettings() }.getOrNull()?.takeIf { it.vatRegistered }
+        val vatNote = if (vat != null) " plus VAT" else ""
+        return commit("Draft a quote for ${client.name}: $work, ${money(price)}$vatNote") {
+            val id = try {
+                repository.createQuote(
+                    QuoteDraft(
+                        clientId = client.id,
+                        contactName = client.name,
+                        contactEmail = client.email,
+                        contactPhone = client.phone,
+                        contactAddress = client.address,
+                        items = listOf(QuoteItemDraft(description = work, quantity = 1.0, unitPrice = price)),
+                    ),
+                )
+            } catch (error: Exception) {
+                return@commit "I couldn't make that quote. A new quote needs signal to get its number, " +
+                    "so try again when you're connected."
+            }
+            CallLedger.record("Quote drafted for ${client.name}: $work") {
+                repository.deleteQuote(id)
+                "Removed that draft quote."
+            }
+            fast("${done()} Draft quote for ${client.name}: $work, ${money(price)}$vatNote. It's in Quotes to check and send.")
         }
     }
 
@@ -3164,6 +3203,7 @@ class VoiceActionRunner(
             SpokenIntent.CancelJob,
             SpokenIntent.AddJobTask,
             SpokenIntent.DeleteVisit,
+            SpokenIntent.CreateQuote,
             SpokenIntent.BackfillVisits,
             SpokenIntent.MarkPaid,
             SpokenIntent.UpdateClient,

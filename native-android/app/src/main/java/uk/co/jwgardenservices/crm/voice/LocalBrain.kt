@@ -48,6 +48,7 @@ object LocalBrain {
         SpokenIntent.UnloggedJobs,
         SpokenIntent.AddJobTask,
         SpokenIntent.DeleteVisit,
+        SpokenIntent.CreateQuote,
         SpokenIntent.Weather,
         SpokenIntent.Other,
     )
@@ -79,7 +80,7 @@ object LocalBrain {
                         "client_list, invoice_status, next_job_for_client, add_client, book_job, " +
                         "move_job, cancel_job, backfill_visits fill in past visits, mark_paid, " +
                         "update_client, quote_status, enquiry_status, enquiries, quotes_waiting, " +
-                        "unlogged_jobs, add_job_task checklist item, delete_visit, weather, other chat",
+                        "unlogged_jobs, add_job_task checklist item, delete_visit, create_quote new quote, weather, other chat",
                 )
                 appendLine("stick Simon down for a half day => log_hours|Simon")
                 appendLine("who's not paid me => who_owes_me|")
@@ -120,6 +121,7 @@ object LocalBrain {
             appendLine("unlogged_jobs: past jobs not logged yet")
             appendLine("add_job_task: add a checklist item to a customer's job")
             appendLine("delete_visit: delete a logged visit")
+            appendLine("create_quote: write a new quote for a customer, with a price")
             appendLine("weather: the forecast")
             appendLine("other: chat, advice, anything else")
             appendLine("Examples:")
@@ -203,6 +205,7 @@ object LocalBrain {
             SpokenIntent.QuoteStatus -> QUOTE_EVIDENCE
             SpokenIntent.AddJobTask -> TASK_EVIDENCE
             SpokenIntent.DeleteVisit -> DELETE_EVIDENCE
+            SpokenIntent.CreateQuote -> CREATE_QUOTE_EVIDENCE
             SpokenIntent.EnquiryStatus, SpokenIntent.Enquiries -> ENQUIRY_EVIDENCE
             SpokenIntent.QuotesWaiting -> QUOTE_EVIDENCE
             SpokenIntent.UnloggedJobs -> UNLOGGED_EVIDENCE
@@ -232,6 +235,7 @@ object LocalBrain {
     private val UPDATE_EVIDENCE = Regex("\\b(?:change|update|set|new|rate|number|phone|mobile)\\b")
     private val QUOTE_EVIDENCE = Regex("quote")
     private val TASK_EVIDENCE = Regex("\\b(?:task|to-?do|checklist|check list)\\b")
+    private val CREATE_QUOTE_EVIDENCE = Regex("\\bquote\\b.*(?:£|\\d)|(?:£|\\d).*\\bquote\\b")
     private val DELETE_EVIDENCE = Regex("\\b(?:delete|remove|scrap|get rid|take off)\\b")
     private val UNLOGGED_EVIDENCE = Regex("\\b(?:log|logged|record|recorded|entered)\\b")
     private val ENQUIRY_EVIDENCE = Regex("enquir|inquir")

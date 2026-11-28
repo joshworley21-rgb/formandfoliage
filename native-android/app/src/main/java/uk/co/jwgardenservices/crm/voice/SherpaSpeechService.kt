@@ -722,6 +722,47 @@ class SherpaSpeechService(private val context: Context) : AutoCloseable {
 
     /** Warm checks so a returning caller can skip the dial tone. */
     fun offlineWarm(): Boolean = parakeet != null || whisper != null || whisperCpp != null
+
+    /**
+     * For Settings → Testing: load each installed recogniser and time it, and
+     * time the second look on a two-second sample. Lines for a report.
+     */
+    suspend fun selfTest(): List<String> = withContext(Dispatchers.Default) {
+        if (listening) return@withContext listOf("Listening: skipped, a call is open.")
+        val lines = mutableListOf<String>()
+        if (NemotronDownloader.isInstalled(context)) {
+            val started = SystemClock.elapsedRealtime()
+            val ok = runCatching { ensureNemotron() }.getOrNull() != null
+            val seconds = (SystemClock.elapsedRealtime() - started) / 1000.0
+            lines += if (ok) {
+                "Live listening (Nemotron): works, loaded in ${"%.1f".format(seconds)} s"
+            } else {
+                "Live listening (Nemotron): FAILED to load"
+            }
+        } else {
+            lines += "Live listening (Nemotron): not downloaded"
+        }
+        loadFinalPass()
+        if (finalPass == FinalPass.Off) {
+            lines += "Second look: switched off"
+        } else {
+            val started = SystemClock.elapsedRealtime()
+            runCatching { warmFinalPass() }
+            val loadSeconds = (SystemClock.elapsedRealtime() - started) / 1000.0
+            if (!offlineWarm()) {
+                lines += "Second look (${finalPass.label}): FAILED to load (files, library or memory)"
+            } else {
+                // Quiet noise rather than silence, so the recogniser does real work.
+                val sample = List(SAMPLE_RATE * 2) { ((it * 7919) % 200 - 100) / 20_000f }
+                val decodeStarted = SystemClock.elapsedRealtime()
+                runCatching { decodeSecondLook(sample, null) }
+                val decodeMs = SystemClock.elapsedRealtime() - decodeStarted
+                lines += "Second look (${finalPass.label}): works, loaded in ${"%.1f".format(loadSeconds)} s, " +
+                    "a 2-second sample took $decodeMs ms"
+            }
+        }
+        lines
+    }
     fun nemotronWarm(): Boolean = nemotron != null
 
     /**

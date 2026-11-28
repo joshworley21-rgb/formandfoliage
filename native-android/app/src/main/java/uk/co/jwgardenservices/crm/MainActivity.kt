@@ -53,6 +53,7 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         handleDeepLink(intent)
+        handleOpenHome(intent)
         startApp()
     }
 
@@ -68,6 +69,7 @@ class MainActivity : FragmentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleDeepLink(intent)
+        handleOpenHome(intent)
     }
 
     /**
@@ -82,4 +84,16 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+
+    /** The evening reminder opens on Home, wherever the app was left. */
+    private fun handleOpenHome(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_OPEN_HOME, false) == true) {
+            uk.co.jwgardenservices.crm.ui.main.PendingNavigation.openHome.value = true
+            intent.removeExtra(EXTRA_OPEN_HOME)
+        }
+    }
+
+    companion object {
+        const val EXTRA_OPEN_HOME = "open_home"
+    }
 }

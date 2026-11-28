@@ -313,6 +313,11 @@ fun AssistantScreen(onOpenSettings: (() -> Unit)? = null) {
 
         Spacer(Modifier.height(8.dp))
 
+        if (onOpenSettings != null) {
+            SetupBanner(onOpen = onOpenSettings)
+            Spacer(Modifier.height(8.dp))
+        }
+
         Transcript(
             turns = turns,
             partial = "",

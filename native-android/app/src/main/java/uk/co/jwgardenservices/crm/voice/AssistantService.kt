@@ -2423,6 +2423,7 @@ class AssistantService : Service() {
         SpokenIntent.EnquiryStatus,
         SpokenIntent.AddJobTask,
         SpokenIntent.DeleteVisit,
+        SpokenIntent.CreateQuote,
         -> ReplyEnding.TaskComplete
         else -> ReplyEnding.None
     }
@@ -3248,6 +3249,7 @@ private fun confirmationFor(intent: IntentResult): String {
         SpokenIntent.UpdateClient -> "Updating that client."
         SpokenIntent.AddJobTask -> "Adding that to the checklist."
         SpokenIntent.DeleteVisit -> "Deleting that visit."
+        SpokenIntent.CreateQuote -> "Drafting that quote."
         SpokenIntent.QuoteStatus -> "Updating that quote."
         SpokenIntent.EnquiryStatus -> "Updating that enquiry."
         SpokenIntent.Enquiries -> "Checking your enquiries."

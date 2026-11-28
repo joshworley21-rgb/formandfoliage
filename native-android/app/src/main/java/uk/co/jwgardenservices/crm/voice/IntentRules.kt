@@ -198,6 +198,14 @@ object IntentRules {
                     "need logging", "need to log", "forget to log", "forgotten to log",
                 ) -> SpokenIntent.UnloggedJobs
 
+            // "Quote the Smiths £300 for cutting the hedge": a new draft quote.
+            Regex(
+                "^(?:(?:can|could|would|will) you |please |i (?:need|want) to |let's |lets )*" +
+                    "(?:quote|(?:draft|make|write|do|create|send) (?:up )?(?:a |an )?(?:new )?quote)\\b",
+            ).containsMatchIn(text) &&
+                Regex("£\\s?\\d|\\d+(?:\\.\\d+)?\\s*(?:pounds|quid)").containsMatchIn(text) ->
+                SpokenIntent.CreateQuote
+
             // "Add a task to Simon's job: buy bark", "put strim the edges on the Parkers' checklist".
             Regex("\\b(?:task|to-?do|checklist|check list)\\b").containsMatchIn(text) &&
                 Regex(
@@ -514,6 +522,7 @@ object IntentRules {
         SpokenIntent.NextVisitNote,
         SpokenIntent.AddJobTask,
         SpokenIntent.DeleteVisit,
+        SpokenIntent.CreateQuote,
         SpokenIntent.BusinessInfo,
         SpokenIntent.RunningCosts,
         SpokenIntent.Profit,
@@ -528,6 +537,7 @@ object IntentRules {
         SpokenIntent.CancelJob,
         SpokenIntent.AddJobTask,
         SpokenIntent.DeleteVisit,
+        SpokenIntent.CreateQuote,
         SpokenIntent.BackfillVisits,
         SpokenIntent.MarkPaid,
         SpokenIntent.UpdateClient,

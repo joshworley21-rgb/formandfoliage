@@ -139,7 +139,7 @@ class LocalBrainTest {
     fun `the lean intent prompt caps long customer lists`() {
         val many = (1..40).map { "Customer number $it of the long list" }
         val prompt = LocalBrain.intentPrompt(many, lean = true)
-        assertTrue("prompt was ${prompt.length} chars", prompt.length <= 1_100)
+        assertTrue("prompt was ${prompt.length} chars", prompt.length <= 1_150)
         assertTrue(!prompt.contains("Customer number 11 "))
     }
 

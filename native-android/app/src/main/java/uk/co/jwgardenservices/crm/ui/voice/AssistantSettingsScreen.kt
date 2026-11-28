@@ -304,6 +304,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
 
+        RecommendedSetupCard()
         if (section == SettingsSection.Voice) {
         SettingsGroupHeader("Voice", "How the assistant sounds.")
         SectionCard(
@@ -1305,6 +1306,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         }
         if (section == SettingsSection.Testing) {
         SettingsGroupHeader("Testing and tuning", "Diagnostics, and audio for tuning.")
+        PhoneCheckCard()
         AudioCaptureCard()
 
 
