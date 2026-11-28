@@ -65,6 +65,7 @@ import uk.co.jwgardenservices.crm.data.repository.invoiceItems
 import uk.co.jwgardenservices.crm.data.repository.sendInvoice
 import uk.co.jwgardenservices.crm.data.model.Client
 import uk.co.jwgardenservices.crm.domain.money
+import uk.co.jwgardenservices.crm.domain.monthlyRunningCosts
 import uk.co.jwgardenservices.crm.ui.common.Messaging
 import uk.co.jwgardenservices.crm.ui.invoices.InvoicePdf
 import uk.co.jwgardenservices.crm.ui.invoices.PdfSharing
@@ -167,7 +168,6 @@ class AssistantService : Service() {
     private var callWakeLock: PowerManager.WakeLock? = null
     private var cloudConversation = true
     private var localThinking = true
-    private var toolRouterOn = false
     private var drivingMode = false
     private var manualDrivingMode = false
     private var autoDrivingMode = true
@@ -367,14 +367,6 @@ class AssistantService : Service() {
                 .collect { localThinking = it }
         }
         scope.launch {
-            AssistantPreferences.localModelFlow(this@AssistantService)
-                .collect { LocalLlm.preferred = it }
-        }
-        scope.launch {
-            AssistantPreferences.toolRouterFlow(this@AssistantService)
-                .collect { toolRouterOn = it }
-        }
-        scope.launch {
             AssistantPreferences.confirmChangesFlow(this@AssistantService)
                 .collect { actions.confirmChanges = it }
         }
@@ -541,10 +533,7 @@ class AssistantService : Service() {
         if (shed == MemoryBudget.Shed.Nothing || !_callActive.value) return
         CrashLog.note(this, TAG, "trim memory level=$level: shedding $shed")
         speech.dropSecondLook()
-        if (shed == MemoryBudget.Shed.Router || shed == MemoryBudget.Shed.AllOptional) {
-            LocalLlm.dropRouter(this)
-        }
-        if (shed == MemoryBudget.Shed.AllOptional) LocalLlm.release()
+        if (shed == MemoryBudget.Shed.LocalModels) LocalLlm.release()
     }
 
     private fun applyMemoryGuard() {
@@ -675,9 +664,6 @@ class AssistantService : Service() {
         scope.launch {
             if (localThinking && LocalLlm.isInstalled(this@AssistantService)) {
                 LocalLlm.warm(this@AssistantService)
-            }
-            if (toolRouterOn && LocalLlm.isInstalled(this@AssistantService, LlmModel.Router)) {
-                LocalLlm.warmRouter(this@AssistantService)
             }
             runCatching { speech.warmFinalPass() }
         }
@@ -1947,6 +1933,10 @@ class AssistantService : Service() {
         val startedAt = android.os.SystemClock.elapsedRealtime()
         replyStarted = false
         _thinkingStatus.value = "Working out what you meant…"
+        // A typed chat has nobody on the line, so it gets far longer, and says nothing aloud.
+        val typed = chatTurn && !_callActive.value
+        val giveUpAt = if (typed) CHAT_TIMEOUT_MS + 30_000L else TurnWatch.GIVE_UP_AT_MS
+        val statusAt = if (typed) Long.MAX_VALUE else TurnWatch.STATUS_AT_MS
         val finished = kotlinx.coroutines.CompletableDeferred<Unit>()
         val gaveUp = kotlinx.coroutines.CompletableDeferred<Unit>()
         val work = scope.launch {
@@ -1966,7 +1956,7 @@ class AssistantService : Service() {
             while (work.isActive) {
                 delay(500)
                 val elapsed = android.os.SystemClock.elapsedRealtime() - startedAt
-                when (TurnWatch.next(elapsed, replyStarted, statusSpoken)) {
+                when (TurnWatch.next(elapsed, replyStarted, statusSpoken, giveUpAt, statusAt)) {
                     TurnWatch.Step.Wait -> Unit
                     TurnWatch.Step.Status -> {
                         statusSpoken = true
@@ -2119,23 +2109,9 @@ class AssistantService : Service() {
         //     business questions as a stream, speaking each sentence as soon
         //     as it is written. The cloud below is only for what this cannot
         //     do, and not used at all when online answers are switched off.
-        // The action picker comes first: it can turn "put Simon down for a half
-        // day" into 4 hours, which the rules and the labeller cannot.
-        // A greeting or thanks has a free canned reply further down; asking two
-        // language models first cost up to ten seconds of silence for "hello".
+        // A greeting or thanks has a free canned reply further down; asking a
+        // language model first cost seconds of silence for "hello".
         val chatterNow = quick.intent == SpokenIntent.Other && smallTalk(text) != null
-        if (!quick.requiresCloud && !chatterNow && toolRouterReady()) {
-            val routed = routeWithTools(text)
-            if (routed != null && (!temporal || routed.intent in dateIndependentIntents)) {
-                CrashLog.note(
-                    this,
-                    TAG,
-                    "intent=router:${routed.intent.wire} in ${System.currentTimeMillis() - started}ms",
-                )
-                runIntent(routed.text, IntentResult(routed.intent, routed.client, false))
-                return
-            }
-        }
         var localTried = false
         if (!quick.requiresCloud && !chatterNow && localBrainReady()) {
             localTried = true
@@ -2148,6 +2124,18 @@ class AssistantService : Service() {
                 )
                 runIntent(text, understood)
                 return
+            }
+            // Typed chat has no wait to protect: anything the rules and the
+            // labeller did not take goes to the clever model, with the figures.
+            if (chatTurn && !_callActive.value && quick.intent == SpokenIntent.Other) {
+                if (answerSmart(text)) {
+                    CrashLog.note(
+                        this,
+                        TAG,
+                        "smart chat answered in ${System.currentTimeMillis() - started}ms",
+                    )
+                    return
+                }
             }
             if (quick.intent == SpokenIntent.Other && looksLikeQuestion(text) &&
                 !looksLikeFactualQuestion(text) && smallTalk(text) == null
@@ -2429,6 +2417,8 @@ class AssistantService : Service() {
         SpokenIntent.UpdateClient,
         SpokenIntent.QuoteStatus,
         SpokenIntent.EnquiryStatus,
+        SpokenIntent.AddJobTask,
+        SpokenIntent.DeleteVisit,
         -> ReplyEnding.TaskComplete
         else -> ReplyEnding.None
     }
@@ -2511,21 +2501,6 @@ class AssistantService : Service() {
         return LocalBrain.Prompts(full, lean)
     }
 
-    private fun toolRouterReady(): Boolean =
-        toolRouterOn && !lowBattery && LocalLlm.isInstalled(this, LlmModel.Router)
-
-    /** The model's choice of app action, checked against what was actually said. */
-    private suspend fun routeWithTools(text: String): RoutedCommand? {
-        val names = runCatching { ServiceLocator.crmRepository.observeClients().first() }
-            .getOrDefault(emptyList())
-            .map { it.name }
-        val calls = withTimeoutOrNull(8_000) {
-            LocalLlm.callTools(this@AssistantService, ToolRoute.SYSTEM, text, RouterTools())
-        } ?: return null
-        CrashLog.note(this, TAG, "router chose: ${calls.firstOrNull()?.let { "${it.name} ${it.arguments}" }}".take(200))
-        return calls.firstNotNullOfOrNull { ToolRoute.toCommand(it, text, names) }
-    }
-
     private fun localBrainReady(): Boolean =
         localThinking && !lowBattery && LocalLlm.isInstalled(this)
 
@@ -2598,6 +2573,57 @@ class AssistantService : Service() {
         }
         if (said.isNotEmpty()) AssistantMemory.lastSpokenReply = said.toString()
         return said.isNotEmpty()
+    }
+
+    /**
+     * Answer a typed message with the larger model and a short summary of the
+     * business, as one reply. Returns false when no model could answer, so the
+     * caller falls through to the other options.
+     */
+    private suspend fun answerSmart(question: String): Boolean {
+        _thinkingStatus.value = "Thinking it through…"
+        val data = chatSnapshotData()
+        val snapshot = ChatSnapshot.format(data, question)
+        val facts = runCatching { AssistantMemory.facts(this).map { it.text } }.getOrDefault(emptyList())
+        val system = ChatBrain.system(
+            owner = VoiceLines.OWNER_NAME,
+            snapshot = snapshot,
+            remembered = facts,
+            style = personalityInstruction(),
+        )
+        val raw = StringBuilder()
+        withTimeoutOrNull(CHAT_TIMEOUT_MS) {
+            try {
+                LocalLlm.stream(this@AssistantService, { system }, question, maxTokens = 200, smart = true)
+                    .collect { raw.append(it) }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                CrashLog.note(this@AssistantService, TAG, "smart chat failed: ${error.message}")
+            }
+        }
+        val reply = ChatBrain.tidy(raw.toString())
+        if (reply.isBlank()) return false
+        CrashLog.note(this, TAG, "smart reply: ${reply.take(160)}")
+        say(reply)
+        return true
+    }
+
+    private suspend fun chatSnapshotData(): ChatSnapshot.Data {
+        val repository = ServiceLocator.crmRepository
+        suspend fun <T> load(read: suspend () -> List<T>): List<T> = runCatching { read() }.getOrDefault(emptyList())
+        return ChatSnapshot.Data(
+            today = java.time.LocalDate.now(),
+            clients = load { repository.observeClients().first() },
+            jobs = load { repository.observeJobs().first() },
+            visits = load { repository.observeVisits().first() },
+            invoices = load { repository.observeInvoices().first() },
+            quotes = load { repository.observeQuotes().first() },
+            enquiries = load { repository.observeEnquiries().first() },
+            monthlyRunningCosts = runCatching {
+                repository.observeRunningCosts().first().monthlyRunningCosts()
+            }.getOrDefault(0.0),
+        )
     }
 
     /** The small model sometimes opens by asking the question back. */
@@ -3109,6 +3135,9 @@ class AssistantService : Service() {
         const val CALLING_TEXT = "Secretary is dialling…"
         const val LISTENING_TEXT = "Secretary is listening for your next command"
         const val CLOUD_TAG = "CloudRouter"
+
+        /** A clever reply may take a while on a phone; chat has no caller waiting. */
+        const val CHAT_TIMEOUT_MS = 120_000L
         const val HELP_TEXT = "I can log hours, check your diary, mark a job done, add a client " +
             "note, read out invoices and takings, tell you what the business costs and how " +
             "healthy it looks, answer what services and areas you cover, run through today's " +
@@ -3213,6 +3242,8 @@ private fun confirmationFor(intent: IntentResult): String {
         SpokenIntent.BackfillVisits -> "Filling in those visits."
         SpokenIntent.MarkPaid -> "Marking that paid."
         SpokenIntent.UpdateClient -> "Updating that client."
+        SpokenIntent.AddJobTask -> "Adding that to the checklist."
+        SpokenIntent.DeleteVisit -> "Deleting that visit."
         SpokenIntent.QuoteStatus -> "Updating that quote."
         SpokenIntent.EnquiryStatus -> "Updating that enquiry."
         SpokenIntent.Enquiries -> "Checking your enquiries."

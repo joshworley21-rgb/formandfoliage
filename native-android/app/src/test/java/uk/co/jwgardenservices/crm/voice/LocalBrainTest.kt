@@ -129,8 +129,8 @@ class LocalBrainTest {
             "Mrs Bell", "Old Rectory", "Smith Farm", "Oak Lodge",
         )
         val prompt = LocalBrain.intentPrompt(typical, lean = true)
-        // About 3.5 characters a token puts 900 characters at about 250 tokens.
-        assertTrue("prompt was ${prompt.length} chars", prompt.length <= 900)
+        // About 3.5 characters a token puts 1,000 characters at about 285 tokens.
+        assertTrue("prompt was ${prompt.length} chars", prompt.length <= 1_000)
         LocalBrain.labels.forEach { assertTrue("${it.wire} missing", prompt.contains(it.wire)) }
         assertTrue(prompt.contains("Known customer names: Simon Hart"))
     }
@@ -177,7 +177,6 @@ class LocalBrainTest {
     fun `prompts choose the short form only for lean models`() {
         val prompts = LocalBrain.Prompts(full = "FULL", lean = "LEAN")
         assertEquals("FULL", prompts.forModel(LlmModel.Small))
-        assertEquals("LEAN", prompts.forModel(LlmModel.Gemma))
         assertEquals("LEAN", prompts.forModel(LlmModel.Large))
     }
 

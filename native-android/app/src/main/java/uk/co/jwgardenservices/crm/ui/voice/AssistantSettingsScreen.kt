@@ -155,19 +155,10 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     val pronunciations by AssistantPreferences.pronunciationsFlow(context)
         .collectAsStateWithLifecycle(initialValue = emptyMap())
     LaunchedEffect(pronunciations) { PronunciationDictionary.userEntries = pronunciations }
-    val localLlmState by LocalLlm.state.collectAsStateWithLifecycle()
-    var localLlmInstalled by remember {
-        mutableStateOf(LocalLlm.isInstalled(context, LlmModel.Small))
-    }
-    val localModel by AssistantPreferences.localModelFlow(context)
-        .collectAsStateWithLifecycle(initialValue = LlmModel.Small)
-    val toolRouterOn by AssistantPreferences.toolRouterFlow(context)
-        .collectAsStateWithLifecycle(initialValue = false)
     val steadyVoice by AssistantPreferences.steadyVoiceFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
     val confirmChanges by AssistantPreferences.confirmChangesFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
-    var localLlmSaved by remember { mutableLongStateOf(LocalLlm.savedBytes(context)) }
     val pickupGreeting by AssistantPreferences.pickupFlow(context)
         .collectAsStateWithLifecycle(initialValue = true)
     val followUp by AssistantPreferences.followUpFlow(context)
@@ -206,18 +197,6 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
     val asrEngine by AssistantPreferences.asrEngineFlow(context)
         .collectAsStateWithLifecycle(initialValue = AsrEngine.Nemotron)
 
-    LaunchedEffect(localLlmState) {
-        when (val snapshot = localLlmState) {
-            is LocalLlm.State.Done -> {
-                localLlmInstalled = true
-                localLlmSaved = 0
-                LocalLlm.clearResult()
-            }
-            is LocalLlm.State.Working -> localLlmSaved = snapshot.done
-            is LocalLlm.State.Failed -> localLlmSaved = LocalLlm.savedBytes(context)
-            else -> localLlmSaved = LocalLlm.savedBytes(context)
-        }
-    }
     LaunchedEffect(piperState) {
         when (val snapshot = piperState) {
             is PiperVoiceDownloader.State.Done -> {
@@ -287,14 +266,13 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         }
     }
 
-    var showAdvanced by remember { mutableStateOf(false) }
     var crashRefresh by remember { mutableIntStateOf(0) }
     val crashReport = remember(crashRefresh) { CrashLog.read(context) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         CompactScreenHeader(
             title = "Secretary settings",
-            subtitle = "Voice, personality and local models.",
+            subtitle = "Voice, listening and the assistant's brain.",
             onBack = onBack,
             backLabel = "Settings",
         )
@@ -306,10 +284,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 .padding(JwTokens.screenPadding),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-        TextButton(onClick = { showAdvanced = !showAdvanced }) {
-            Text(if (showAdvanced) "Hide advanced model settings" else "Advanced model settings")
-        }
 
+        SettingsGroupHeader("Voice", "How the assistant sounds.")
         SectionCard(
             title = "Phonon 31m (call voice)",
             subtitle = "The only in-call TTS engine.",
@@ -553,50 +529,77 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
+
         if (phononInstalled) Phonon40Card()
 
+
         SectionCard(
-            title = "Noise suppression",
-            subtitle = "Engine and road noise.",
-            leadingIcon = Icons.Outlined.Mic,
+            title = "Pronunciations",
+            subtitle = "Shared by recognition and speech.",
+            leadingIcon = Icons.Outlined.RecordVoiceOver,
         ) {
             Column(
                 modifier = Modifier.padding(JwTokens.cardPadding),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                SettingSwitchRow(
-                    title = "Clean up the microphone",
-                    description = "A tiny on-device model (0.5 MB) removes engine, road and wind " +
-                        "noise before the words are recognised. Try it in the van and switch " +
-                        "it off if names get worse.",
-                    checked = denoise && denoiseInstalled,
-                    onCheckedChange = { enabled ->
-                        when {
-                            !enabled -> scope.launch { AssistantPreferences.setDenoise(context, false) }
-                            denoiseInstalled -> scope.launch { AssistantPreferences.setDenoise(context, true) }
-                            else -> SpeechDenoiser.start(context)
+                Text(
+                    text = "Teach both sides a word. The recogniser fixes near misses back to the " +
+                        "real spelling, and the voice uses the sounds-like form: Bierton → Beerton, " +
+                        "Buckinghamshire → Buckinghamshur, Stihl → Steel. Built-in UK place, client " +
+                        "and trade terms are included; your entries win.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                var word by remember { mutableStateOf("") }
+                var soundsLike by remember { mutableStateOf("") }
+                OutlinedTextField(
+                    value = word,
+                    onValueChange = { word = it },
+                    label = { Text("Word") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = soundsLike,
+                    onValueChange = { soundsLike = it },
+                    label = { Text("Sounds like") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    enabled = word.isNotBlank() && soundsLike.isNotBlank(),
+                    onClick = {
+                        scope.launch {
+                            AssistantPreferences.addPronunciation(context, word, soundsLike)
+                            word = ""
+                            soundsLike = ""
                         }
                     },
-                )
-                when (val state = denoiseState) {
-                    is SpeechDenoiser.State.Working -> Text(
-                        text = "Downloading the noise model…",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    is SpeechDenoiser.State.Failed -> Text(
-                        text = state.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    else -> Unit
+                ) { Text("Add pronunciation") }
+                pronunciations.forEach { (key, value) ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "$key → $value",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(
+                            onClick = {
+                                scope.launch {
+                                    AssistantPreferences.removePronunciation(context, key)
+                                }
+                            },
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Delete,
+                                contentDescription = "Remove $key",
+                            )
+                        }
+                    }
                 }
             }
         }
 
-        ParakeetCard()
-        WhisperPassCard()
-        WhisperCppCard()
-        AudioCaptureCard()
 
         SectionCard(
             title = "Online voice (OpenAI)",
@@ -724,7 +727,39 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
-        if (showAdvanced) {
+
+        SettingsGroupHeader("Listening", "How the assistant hears you.")
+        SectionCard(
+            title = "Speech engine",
+            subtitle = "What listens on a call.",
+            leadingIcon = Icons.Outlined.Mic,
+        ) {
+            Column(
+                modifier = Modifier.padding(JwTokens.cardPadding),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                SegmentedPillTabs(
+                    options = AsrEngine.entries,
+                    selected = asrEngine,
+                    onSelect = { engine ->
+                        scope.launch {
+                            AssistantPreferences.setAsrEngine(context, engine)
+                            if (engine != AsrEngine.Nemotron) SpeechEngine.get(context).releaseNemotron()
+                        }
+                    },
+                    label = { it.label },
+                )
+                Text(
+                    text = "Takes effect on the next call. Nemotron streams live words. Offline " +
+                        "waits until you stop and then uses the Parakeet or Whisper you choose " +
+                        "below. If Nemotron fails, the call carries on with that choice.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+
         SectionCard(
             title = "Nemotron ASR (streaming)",
             subtitle = "Optional streaming recogniser.",
@@ -812,498 +847,14 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
-        SectionCard(
-            title = "Speech engine",
-            subtitle = "What listens on a call.",
-            leadingIcon = Icons.Outlined.Mic,
-        ) {
-            Column(
-                modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                SegmentedPillTabs(
-                    options = AsrEngine.entries,
-                    selected = asrEngine,
-                    onSelect = { engine ->
-                        scope.launch {
-                            AssistantPreferences.setAsrEngine(context, engine)
-                            if (engine != AsrEngine.Nemotron) SpeechEngine.get(context).releaseNemotron()
-                        }
-                    },
-                    label = { it.label },
-                )
-                Text(
-                    text = "Takes effect on the next call. Nemotron streams live words. Offline " +
-                        "waits until you stop and then uses the Parakeet or Whisper you choose " +
-                        "below. If Nemotron fails, the call carries on with that choice.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
 
-        SectionCard(
-            title = "Punctuation",
-            subtitle = "How spoken sentences are written.",
-            leadingIcon = Icons.Outlined.Notes,
-        ) {
-            Column(
-                modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "A tiny English punctuation model (Apache 2.0) capitalises and " +
-                        "punctuates finished sentences before they are saved, so dictated notes " +
-                        "read like English and commands split cleanly. About 8 MB.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        SettingsNote("Second look: after you stop talking, one of these hears the whole sentence again. Use at most one.")
 
-                val working = punctuationState as? PunctuationDownloader.State.Working
-                val failure = punctuationState as? PunctuationDownloader.State.Failed
-                if (working != null) {
-                    LinearProgressIndicator(
-                        progress = { working.progress },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = "Downloading… ${working.done / MEGABYTE} of " +
-                            "${working.total / MEGABYTE} MB",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    TextButton(onClick = { PunctuationDownloader.cancel() }) { Text("Cancel") }
-                }
+        ParakeetCard()
 
-                if (punctuationInstalled) {
-                    TextButton(
-                        onClick = {
-                            scope.launch {
-                                PunctuationDownloader.remove(context)
-                                punctuationInstalled = false
-                                punctuationSaved = 0
-                            }
-                        },
-                    ) { Text("Remove punctuation model") }
-                } else if (working == null) {
-                    OutlinedButton(
-                        onClick = { PunctuationDownloader.start(context) },
-                    ) {
-                        Text(
-                            if (punctuationSaved > 0) {
-                                "Resume download (${punctuationSaved / MEGABYTE} MB saved)"
-                            } else {
-                                "Download punctuation model (8 MB)"
-                            },
-                        )
-                    }
-                }
+        WhisperPassCard()
 
-                failure?.let { error ->
-                    Text(
-                        text = error.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
-        }
-
-        }
-
-        SectionCard(
-            title = "Call",
-            subtitle = "Driving and call behaviour.",
-            leadingIcon = Icons.Outlined.Call,
-        ) {
-            Column(
-                modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "Calls open with the diary, then a friendly check-in, and leave the " +
-                        "line open after each answer.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                SettingSwitchRow(
-                    title = "Confirm before saving changes",
-                    description = "Reads back exactly what it will do, with the date and the money, " +
-                        "and only saves when you say yes. Switch off to save straight away " +
-                        "(you can still say \"undo that\").",
-                    checked = confirmChanges,
-                    onCheckedChange = { enabled ->
-                        scope.launch { AssistantPreferences.setConfirmChanges(context, enabled) }
-                    },
-                )
-                SettingSwitchRow(
-                    title = "Driving mode",
-                    description = "Shorter turns, slower speech, louder output and no follow-up nudge.",
-                    checked = drivingMode,
-                    onCheckedChange = { enabled ->
-                        scope.launch { AssistantPreferences.setDrivingMode(context, enabled) }
-                    },
-                )
-                SettingSwitchRow(
-                    title = "Turn on automatically in the car",
-                    description = "Uses the Bluetooth car connection as the trigger.",
-                    checked = autoDrivingMode,
-                    onCheckedChange = { enabled ->
-                        scope.launch {
-                            AssistantPreferences.setAutoDrivingMode(context, enabled)
-                        }
-                    },
-                )
-            }
-        }
-
-        SectionCard(
-            title = "Conversation & memory",
-            subtitle = "What Secretary remembers.",
-            leadingIcon = Icons.Outlined.Chat,
-        ) {
-            Column(
-                modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                SettingSwitchRow(
-                    title = "Ask OpenAI for anything else",
-                    description = "Billed per reply to your OpenAI key.",
-                    checked = cloudConversation,
-                    onCheckedChange = { enabled ->
-                        scope.launch { AssistantMemory.setCloudConversation(context, enabled) }
-                    },
-                )
-                Text(
-                    text = "Off by default: the diary, hours, jobs and money answers are free " +
-                        "and instant. Turn this on and a sentence they cannot place is sent to " +
-                        "the cloud with the business snapshot, in one request, billed to your " +
-                        "OpenAI key. Off means everything stays on the phone.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                HorizontalDivider()
-                Text(
-                    text = "What it remembers",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                )
-                if (facts.isEmpty()) {
-                    Text(
-                        text = "Say “remember that …” to teach it something about the business. " +
-                            "“What do you remember?” reads the list back, “forget …” removes one.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    facts.forEach { fact ->
-                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                            Text(
-                                text = fact.text,
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.weight(1f),
-                            )
-                            IconButton(
-                                onClick = {
-                                    scope.launch { AssistantMemory.forget(context, fact.text) }
-                                },
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Delete,
-                                    contentDescription = "Forget this",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        SectionCard(
-            title = "Local thinking (free)",
-            subtitle = "Optional on-device answers.",
-            leadingIcon = Icons.Outlined.Memory,
-        ) {
-            Column(
-                modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "Qwen3 0.6B runs on this phone with no key and no cost. " +
-                        "It loads only when a question needs it, stays warm for five minutes " +
-                        "of conversation, then closes so the speech models get the memory " +
-                        "back. 331 MB, downloaded once.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                SettingSwitchRow(
-                    title = "Use the local model for general questions",
-                    description = "Answer general questions without sending them to the cloud.",
-                    checked = localThinking,
-                    onCheckedChange = { enabled ->
-                        scope.launch { AssistantPreferences.setLocalThinking(context, enabled) }
-                    },
-                )
-                val working = localLlmState as? LocalLlm.State.Working
-                if (working != null) {
-                    LinearProgressIndicator(
-                        progress = { working.progress },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = "Downloading ${working.done / MEGABYTE} of " +
-                            "${working.total / MEGABYTE} MB",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    TextButton(onClick = { LocalLlm.cancel() }) { Text("Cancel") }
-                } else if (localLlmInstalled) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "Installed — loads on demand",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f),
-                        )
-                        TextButton(
-                            onClick = {
-                                LocalLlm.remove(context)
-                                localLlmInstalled = false
-                                localLlmSaved = 0
-                            },
-                        ) { Text("Remove") }
-                    }
-                } else {
-                    OutlinedButton(
-                        onClick = { LocalLlm.start(context) },
-                    ) {
-                        Text(
-                            if (localLlmSaved > 0) {
-                                "Resume download (${localLlmSaved / MEGABYTE} MB saved)"
-                            } else {
-                                "Download local model (331 MB)"
-                            },
-                        )
-                    }
-                }
-                (localLlmState as? LocalLlm.State.Failed)?.let { failure ->
-                    Text(
-                        text = failure.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
-        }
-
-        SectionCard(
-            title = "More accurate local models (experimental)",
-            subtitle = "Still fully on this phone.",
-            leadingIcon = Icons.Outlined.Memory,
-        ) {
-            Column(
-                modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                Text(
-                    text = "Understand loose phrasing and answer more sensibly than the small " +
-                        "model, at the cost of a longer wait for the first word. They use a " +
-                        "shorter prompt, fall back to the small model if memory is short, and " +
-                        "write their timings to the assistant log. Only one is used at a time.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OptionalModelRow(
-                    model = LlmModel.Gemma,
-                    active = localModel == LlmModel.Gemma,
-                    onToggle = { on ->
-                        scope.launch {
-                            AssistantPreferences.setLocalModel(context, if (on) LlmModel.Gemma else LlmModel.Small)
-                        }
-                    },
-                    onRemoved = {
-                        if (localModel == LlmModel.Gemma) {
-                            scope.launch { AssistantPreferences.setLocalModel(context, LlmModel.Small) }
-                        }
-                    },
-                    blurb = "Google's Gemma 3 1B. About 2.6 s to the first word on a Galaxy S22+ " +
-                        "with a long prompt. It needs a Hugging Face login to download: get " +
-                        "gemma3-1b-it-int4.litertlm from litert-community/Gemma3-1B-IT in your " +
-                        "browser, then import it here.",
-                )
-                OptionalModelRow(
-                    model = LlmModel.Large,
-                    active = localModel == LlmModel.Large,
-                    onToggle = { on ->
-                        scope.launch {
-                            AssistantPreferences.setLocalModel(context, if (on) LlmModel.Large else LlmModel.Small)
-                        }
-                    },
-                    onRemoved = {
-                        if (localModel == LlmModel.Large) {
-                            scope.launch { AssistantPreferences.setLocalModel(context, LlmModel.Small) }
-                        }
-                    },
-                    blurb = "Qwen3 1.7B. Slower on the CPU and needs about 3 GB free while a call " +
-                        "is open.",
-                )
-            }
-        }
-
-        SectionCard(
-            title = "Action picker (experimental)",
-            subtitle = "FunctionGemma chooses the action.",
-            leadingIcon = Icons.Outlined.Memory,
-        ) {
-            Column(
-                modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "For sentences the built-in rules do not recognise, a tiny model picks " +
-                        "one of six actions (log hours, diary, note, mark done, who owes, " +
-                        "materials) and fills in the details, so \"put Simon down for a half " +
-                        "day\" becomes four hours. Everything it returns is checked against " +
-                        "what you actually said before anything is saved. It runs on the " +
-                        "phone, about 0.5 GB of memory while a call is open, and its timings " +
-                        "go in the assistant log. Gemma terms of use apply to the model.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OptionalModelRow(
-                    model = LlmModel.Router,
-                    active = toolRouterOn,
-                    onToggle = { on -> scope.launch { AssistantPreferences.setToolRouter(context, on) } },
-                    onRemoved = { scope.launch { AssistantPreferences.setToolRouter(context, false) } },
-                    switchDescription = "Switch off to go back to the rules and the chat model only.",
-                    blurb = "FunctionGemma 270M, fine-tuned for phone actions by Google.",
-                )
-            }
-        }
-
-        SectionCard(
-            title = "Pronunciations",
-            subtitle = "Shared by recognition and speech.",
-            leadingIcon = Icons.Outlined.RecordVoiceOver,
-        ) {
-            Column(
-                modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "Teach both sides a word. The recogniser fixes near misses back to the " +
-                        "real spelling, and the voice uses the sounds-like form: Bierton → Beerton, " +
-                        "Buckinghamshire → Buckinghamshur, Stihl → Steel. Built-in UK place, client " +
-                        "and trade terms are included; your entries win.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                var word by remember { mutableStateOf("") }
-                var soundsLike by remember { mutableStateOf("") }
-                OutlinedTextField(
-                    value = word,
-                    onValueChange = { word = it },
-                    label = { Text("Word") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = soundsLike,
-                    onValueChange = { soundsLike = it },
-                    label = { Text("Sounds like") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Button(
-                    enabled = word.isNotBlank() && soundsLike.isNotBlank(),
-                    onClick = {
-                        scope.launch {
-                            AssistantPreferences.addPronunciation(context, word, soundsLike)
-                            word = ""
-                            soundsLike = ""
-                        }
-                    },
-                ) { Text("Add pronunciation") }
-                pronunciations.forEach { (key, value) ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "$key → $value",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(
-                            onClick = {
-                                scope.launch {
-                                    AssistantPreferences.removePronunciation(context, key)
-                                }
-                            },
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Delete,
-                                contentDescription = "Remove $key",
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        SectionCard(
-            title = "Personality",
-            subtitle = "Tone, humour and length.",
-            leadingIcon = Icons.Outlined.Chat,
-        ) {
-            Column(
-                modifier = Modifier.padding(JwTokens.cardPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "How it sounds once the words are chosen: warm or brisk, straight " +
-                        "or dry, short or normal. The voice itself is set above.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    value = ownerNameDraft,
-                    onValueChange = { value ->
-                        ownerNameDraft = value
-                        scope.launch { AssistantPreferences.setOwnerName(context, value) }
-                    },
-                    label = { Text("Your first name") },
-                    placeholder = { Text("Josh") },
-                    supportingText = {
-                        Text("Used in the pickup line and the occasional aside. Blank uses your sign-in name.")
-                    },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text("Tone", style = MaterialTheme.typography.labelMedium)
-                SegmentedPillTabs(
-                    options = PersonaTone.entries,
-                    selected = personaTone,
-                    onSelect = { tone ->
-                        scope.launch { AssistantPreferences.setPersonaTone(context, tone) }
-                    },
-                    label = { it.label },
-                )
-                Text("Humour", style = MaterialTheme.typography.labelMedium)
-                SegmentedPillTabs(
-                    options = PersonaHumour.entries,
-                    selected = personaHumour,
-                    onSelect = { humour ->
-                        scope.launch { AssistantPreferences.setPersonaHumour(context, humour) }
-                    },
-                    label = { it.label },
-                )
-                Text("Length", style = MaterialTheme.typography.labelMedium)
-                SegmentedPillTabs(
-                    options = PersonaLength.entries,
-                    selected = personaLength,
-                    onSelect = { length ->
-                        scope.launch { AssistantPreferences.setPersonaLength(context, length) }
-                    },
-                    label = { it.label },
-                )
-            }
-        }
+        WhisperCppCard()
 
         SectionCard(
             title = "Microphone",
@@ -1383,7 +934,290 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
-        if (showAdvanced) {
+
+        SectionCard(
+            title = "Noise suppression",
+            subtitle = "Engine and road noise.",
+            leadingIcon = Icons.Outlined.Mic,
+        ) {
+            Column(
+                modifier = Modifier.padding(JwTokens.cardPadding),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                SettingSwitchRow(
+                    title = "Clean up the microphone",
+                    description = "A tiny on-device model (0.5 MB) removes engine, road and wind " +
+                        "noise before the words are recognised. Try it in the van and switch " +
+                        "it off if names get worse.",
+                    checked = denoise && denoiseInstalled,
+                    onCheckedChange = { enabled ->
+                        when {
+                            !enabled -> scope.launch { AssistantPreferences.setDenoise(context, false) }
+                            denoiseInstalled -> scope.launch { AssistantPreferences.setDenoise(context, true) }
+                            else -> SpeechDenoiser.start(context)
+                        }
+                    },
+                )
+                when (val state = denoiseState) {
+                    is SpeechDenoiser.State.Working -> Text(
+                        text = "Downloading the noise model…",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    is SpeechDenoiser.State.Failed -> Text(
+                        text = state.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    else -> Unit
+                }
+            }
+        }
+
+
+        SectionCard(
+            title = "Punctuation",
+            subtitle = "How spoken sentences are written.",
+            leadingIcon = Icons.Outlined.Notes,
+        ) {
+            Column(
+                modifier = Modifier.padding(JwTokens.cardPadding),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "A tiny English punctuation model (Apache 2.0) capitalises and " +
+                        "punctuates finished sentences before they are saved, so dictated notes " +
+                        "read like English and commands split cleanly. About 8 MB.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                val working = punctuationState as? PunctuationDownloader.State.Working
+                val failure = punctuationState as? PunctuationDownloader.State.Failed
+                if (working != null) {
+                    LinearProgressIndicator(
+                        progress = { working.progress },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "Downloading… ${working.done / MEGABYTE} of " +
+                            "${working.total / MEGABYTE} MB",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = { PunctuationDownloader.cancel() }) { Text("Cancel") }
+                }
+
+                if (punctuationInstalled) {
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                PunctuationDownloader.remove(context)
+                                punctuationInstalled = false
+                                punctuationSaved = 0
+                            }
+                        },
+                    ) { Text("Remove punctuation model") }
+                } else if (working == null) {
+                    OutlinedButton(
+                        onClick = { PunctuationDownloader.start(context) },
+                    ) {
+                        Text(
+                            if (punctuationSaved > 0) {
+                                "Resume download (${punctuationSaved / MEGABYTE} MB saved)"
+                            } else {
+                                "Download punctuation model (8 MB)"
+                            },
+                        )
+                    }
+                }
+
+                failure?.let { error ->
+                    Text(
+                        text = error.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+
+        SettingsGroupHeader("Assistant brain", "How it thinks and what it remembers.")
+        LocalModelsCard()
+
+        SectionCard(
+            title = "Conversation & memory",
+            subtitle = "What Secretary remembers.",
+            leadingIcon = Icons.Outlined.Chat,
+        ) {
+            Column(
+                modifier = Modifier.padding(JwTokens.cardPadding),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                SettingSwitchRow(
+                    title = "Ask OpenAI for anything else",
+                    description = "Billed per reply to your OpenAI key.",
+                    checked = cloudConversation,
+                    onCheckedChange = { enabled ->
+                        scope.launch { AssistantMemory.setCloudConversation(context, enabled) }
+                    },
+                )
+                Text(
+                    text = "Off by default: the diary, hours, jobs and money answers are free " +
+                        "and instant. Turn this on and a sentence they cannot place is sent to " +
+                        "the cloud with the business snapshot, in one request, billed to your " +
+                        "OpenAI key. Off means everything stays on the phone.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                HorizontalDivider()
+                Text(
+                    text = "What it remembers",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+                if (facts.isEmpty()) {
+                    Text(
+                        text = "Say “remember that …” to teach it something about the business. " +
+                            "“What do you remember?” reads the list back, “forget …” removes one.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    facts.forEach { fact ->
+                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Text(
+                                text = fact.text,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(
+                                onClick = {
+                                    scope.launch { AssistantMemory.forget(context, fact.text) }
+                                },
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Delete,
+                                    contentDescription = "Forget this",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+
+        SectionCard(
+            title = "Personality",
+            subtitle = "Tone, humour and length.",
+            leadingIcon = Icons.Outlined.Chat,
+        ) {
+            Column(
+                modifier = Modifier.padding(JwTokens.cardPadding),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "How it sounds once the words are chosen: warm or brisk, straight " +
+                        "or dry, short or normal. The voice itself is set above.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = ownerNameDraft,
+                    onValueChange = { value ->
+                        ownerNameDraft = value
+                        scope.launch { AssistantPreferences.setOwnerName(context, value) }
+                    },
+                    label = { Text("Your first name") },
+                    placeholder = { Text("Josh") },
+                    supportingText = {
+                        Text("Used in the pickup line and the occasional aside. Blank uses your sign-in name.")
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("Tone", style = MaterialTheme.typography.labelMedium)
+                SegmentedPillTabs(
+                    options = PersonaTone.entries,
+                    selected = personaTone,
+                    onSelect = { tone ->
+                        scope.launch { AssistantPreferences.setPersonaTone(context, tone) }
+                    },
+                    label = { it.label },
+                )
+                Text("Humour", style = MaterialTheme.typography.labelMedium)
+                SegmentedPillTabs(
+                    options = PersonaHumour.entries,
+                    selected = personaHumour,
+                    onSelect = { humour ->
+                        scope.launch { AssistantPreferences.setPersonaHumour(context, humour) }
+                    },
+                    label = { it.label },
+                )
+                Text("Length", style = MaterialTheme.typography.labelMedium)
+                SegmentedPillTabs(
+                    options = PersonaLength.entries,
+                    selected = personaLength,
+                    onSelect = { length ->
+                        scope.launch { AssistantPreferences.setPersonaLength(context, length) }
+                    },
+                    label = { it.label },
+                )
+            }
+        }
+
+
+        SectionCard(
+            title = "Call",
+            subtitle = "Driving and call behaviour.",
+            leadingIcon = Icons.Outlined.Call,
+        ) {
+            Column(
+                modifier = Modifier.padding(JwTokens.cardPadding),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "Calls open with the diary, then a friendly check-in, and leave the " +
+                        "line open after each answer.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                SettingSwitchRow(
+                    title = "Confirm before saving changes",
+                    description = "Reads back exactly what it will do, with the date and the money, " +
+                        "and only saves when you say yes. Switch off to save straight away " +
+                        "(you can still say \"undo that\").",
+                    checked = confirmChanges,
+                    onCheckedChange = { enabled ->
+                        scope.launch { AssistantPreferences.setConfirmChanges(context, enabled) }
+                    },
+                )
+                SettingSwitchRow(
+                    title = "Driving mode",
+                    description = "Shorter turns, slower speech, louder output and no follow-up nudge.",
+                    checked = drivingMode,
+                    onCheckedChange = { enabled ->
+                        scope.launch { AssistantPreferences.setDrivingMode(context, enabled) }
+                    },
+                )
+                SettingSwitchRow(
+                    title = "Turn on automatically in the car",
+                    description = "Uses the Bluetooth car connection as the trigger.",
+                    checked = autoDrivingMode,
+                    onCheckedChange = { enabled ->
+                        scope.launch {
+                            AssistantPreferences.setAutoDrivingMode(context, enabled)
+                        }
+                    },
+                )
+            }
+        }
+
+
+        SettingsGroupHeader("Testing and tuning", "Diagnostics, and audio for tuning.")
+        AudioCaptureCard()
+
+
         SectionCard(
             title = "Diagnostics",
             subtitle = "Crash and model status.",
@@ -1422,7 +1256,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
             }
         }
 
-        }
+
         Spacer(Modifier.height(8.dp))
         }
     }
@@ -1893,16 +1727,73 @@ private fun AudioCaptureCard() {
 }
 
 @Composable
-private fun OptionalModelRow(
-    model: LlmModel,
-    blurb: String,
-    active: Boolean,
-    onToggle: (Boolean) -> Unit,
-    onRemoved: () -> Unit,
-    switchDescription: String = "Switch off to go back to the small, faster model.",
-) {
+private fun SettingsGroupHeader(title: String, subtitle: String) {
+    Column(modifier = Modifier.padding(top = 8.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun SettingsNote(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/** The two on-device models, each with one fixed job, and the switch for using them at all. */
+@Composable
+private fun LocalModelsCard() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val localThinking by AssistantPreferences.localThinkingFlow(context)
+        .collectAsStateWithLifecycle(initialValue = true)
+    SectionCard(
+        title = "On-device assistant",
+        subtitle = "Answers with no internet.",
+        leadingIcon = Icons.Outlined.Memory,
+    ) {
+        Column(
+            modifier = Modifier.padding(JwTokens.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            SettingSwitchRow(
+                title = "Use the on-device assistant",
+                description = "Understands loose phrasing and answers questions without sending them anywhere.",
+                checked = localThinking,
+                onCheckedChange = { enabled ->
+                    scope.launch { AssistantPreferences.setLocalThinking(context, enabled) }
+                },
+            )
+            LocalModelRow(
+                model = LlmModel.Small,
+                blurb = "Fast. Understands what you say and answers on a phone call. " +
+                    "Loads when needed and closes after a few idle minutes.",
+            )
+            LocalModelRow(
+                model = LlmModel.Large,
+                blurb = "Clever. Used in typed chat, where it reads a summary of your diary, " +
+                    "money and clients to answer. Slower, so it is never used on a call. " +
+                    "Needs about 2.4 GB of free memory; without it the fast model answers.",
+            )
+        }
+    }
+}
+
+@Composable
+private fun LocalModelRow(model: LlmModel, blurb: String) {
+    val context = LocalContext.current
     val state by LocalLlm.stateFor(model).collectAsStateWithLifecycle()
     var installed by remember { mutableStateOf(LocalLlm.isInstalled(context, model)) }
     var saved by remember { mutableLongStateOf(LocalLlm.savedBytes(context, model)) }
@@ -1918,22 +1809,12 @@ private fun OptionalModelRow(
             else -> saved = LocalLlm.savedBytes(context, model)
         }
     }
-    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) LocalLlm.importFrom(context, model, uri)
-    }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(model.label, style = MaterialTheme.typography.titleSmall)
         Text(
             text = blurb,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        SettingSwitchRow(
-            title = "Use ${model.label}",
-            description = switchDescription,
-            checked = active && installed,
-            enabled = installed,
-            onCheckedChange = onToggle,
         )
         val working = state as? LocalLlm.State.Working
         if (working != null) {
@@ -1942,8 +1823,7 @@ private fun OptionalModelRow(
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(
-                text = "${if (model.downloadable) "Downloading" else "Importing"} " +
-                    "${working.done / MEGABYTE} of ${working.total / MEGABYTE} MB",
+                text = "Downloading ${working.done / MEGABYTE} of ${working.total / MEGABYTE} MB",
                 style = MaterialTheme.typography.bodySmall,
             )
             TextButton(onClick = { LocalLlm.cancel(model) }) { Text("Cancel") }
@@ -1956,14 +1836,13 @@ private fun OptionalModelRow(
                 )
                 TextButton(
                     onClick = {
-                        onRemoved()
                         LocalLlm.remove(context, model)
                         installed = false
                         saved = 0
                     },
                 ) { Text("Remove") }
             }
-        } else if (model.downloadable) {
+        } else {
             OutlinedButton(onClick = { LocalLlm.start(context, model) }) {
                 Text(
                     if (saved > 0) {
@@ -1972,10 +1851,6 @@ private fun OptionalModelRow(
                         "Download ($megabytes MB)"
                     },
                 )
-            }
-        } else {
-            OutlinedButton(onClick = { pickFile.launch(arrayOf("*/*")) }) {
-                Text("Import ${model.fileName} ($megabytes MB)")
             }
         }
         (state as? LocalLlm.State.Failed)?.let { failure ->

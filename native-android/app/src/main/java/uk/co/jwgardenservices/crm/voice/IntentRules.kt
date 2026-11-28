@@ -198,6 +198,20 @@ object IntentRules {
                     "need logging", "need to log", "forget to log", "forgotten to log",
                 ) -> SpokenIntent.UnloggedJobs
 
+            // "Add a task to Simon's job: buy bark", "put strim the edges on the Parkers' checklist".
+            Regex("\\b(?:task|to-?do|checklist|check list)\\b").containsMatchIn(text) &&
+                Regex(
+                    "^(?:(?:can|could|would|will) you |please |i (?:need|want) to |i'd like to |let's |lets )*" +
+                        "(?:add|put|create|make)\\b",
+                ).containsMatchIn(text) -> SpokenIntent.AddJobTask
+
+            // "Delete the last visit for the Parkers" removes a logged visit, never a booking.
+            Regex("\\b(?:delete|remove|scrap|get rid of|take off)\\b").containsMatchIn(text) &&
+                text.containsAny("visit", "time entry") &&
+                !text.containsAny("booking", "appointment", "cancel") &&
+                !Regex("^(?:who|what|which|how|when|did|has|have)\\b").containsMatchIn(text) ->
+                SpokenIntent.DeleteVisit
+
             Regex("\\b(?:move|reschedule|rebook|push|bring forward|swap)\\b").containsMatchIn(text) &&
                 text.containsAny(" to ", " for ", "later", "earlier", "back", "forward") &&
                 (text.containsAny("job", "visit", "booking", "appointment") || mentionsDay(text)) ->
@@ -498,6 +512,8 @@ object IntentRules {
         SpokenIntent.AdjustCharge,
         SpokenIntent.AddExpense,
         SpokenIntent.NextVisitNote,
+        SpokenIntent.AddJobTask,
+        SpokenIntent.DeleteVisit,
         SpokenIntent.BusinessInfo,
         SpokenIntent.RunningCosts,
         SpokenIntent.Profit,
@@ -510,6 +526,8 @@ object IntentRules {
         SpokenIntent.BookJob,
         SpokenIntent.MoveJob,
         SpokenIntent.CancelJob,
+        SpokenIntent.AddJobTask,
+        SpokenIntent.DeleteVisit,
         SpokenIntent.BackfillVisits,
         SpokenIntent.MarkPaid,
         SpokenIntent.UpdateClient,

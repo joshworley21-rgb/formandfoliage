@@ -19,12 +19,11 @@ object MemoryBudget {
         freeMb >= needMb + reserveMb
 
     /** What to let go of, cumulatively, as the system asks for memory back. */
-    enum class Shed { Nothing, SecondLook, Router, AllOptional }
+    enum class Shed { Nothing, SecondLook, LocalModels }
 
     /** The live recogniser and the voice are never shed; everything optional goes in this order. */
     fun shedFor(trimLevel: Int): Shed = when {
-        trimLevel == RUNNING_CRITICAL -> Shed.AllOptional
-        trimLevel == RUNNING_LOW -> Shed.Router
+        trimLevel == RUNNING_CRITICAL || trimLevel == RUNNING_LOW -> Shed.LocalModels
         trimLevel == RUNNING_MODERATE -> Shed.SecondLook
         else -> Shed.Nothing
     }
@@ -41,10 +40,16 @@ object TurnWatch {
 
     enum class Step { Wait, Status, GiveUp }
 
-    fun next(elapsedMs: Long, replyStarted: Boolean, statusSpoken: Boolean): Step = when {
+    fun next(
+        elapsedMs: Long,
+        replyStarted: Boolean,
+        statusSpoken: Boolean,
+        giveUpAt: Long = GIVE_UP_AT_MS,
+        statusAt: Long = STATUS_AT_MS,
+    ): Step = when {
         replyStarted -> Step.Wait
-        elapsedMs >= GIVE_UP_AT_MS -> Step.GiveUp
-        elapsedMs >= STATUS_AT_MS && !statusSpoken -> Step.Status
+        elapsedMs >= giveUpAt -> Step.GiveUp
+        elapsedMs >= statusAt && !statusSpoken -> Step.Status
         else -> Step.Wait
     }
 }

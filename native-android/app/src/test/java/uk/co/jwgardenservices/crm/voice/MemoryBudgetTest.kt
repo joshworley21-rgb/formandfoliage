@@ -17,8 +17,8 @@ class MemoryBudgetTest {
     fun `memory pressure sheds optional models in order`() {
         assertEquals(MemoryBudget.Shed.Nothing, MemoryBudget.shedFor(0))
         assertEquals(MemoryBudget.Shed.SecondLook, MemoryBudget.shedFor(5))
-        assertEquals(MemoryBudget.Shed.Router, MemoryBudget.shedFor(10))
-        assertEquals(MemoryBudget.Shed.AllOptional, MemoryBudget.shedFor(15))
+        assertEquals(MemoryBudget.Shed.LocalModels, MemoryBudget.shedFor(10))
+        assertEquals(MemoryBudget.Shed.LocalModels, MemoryBudget.shedFor(15))
         assertEquals(MemoryBudget.Shed.Nothing, MemoryBudget.shedFor(20))
     }
 

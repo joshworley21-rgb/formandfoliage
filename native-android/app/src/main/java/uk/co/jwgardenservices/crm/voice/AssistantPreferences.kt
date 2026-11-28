@@ -88,8 +88,6 @@ private val PHONON_KEY = booleanPreferencesKey("phonon_enabled")
 private val PICKUP_KEY = booleanPreferencesKey("pickup_greeting")
 private val USED_KEY = booleanPreferencesKey("assistant_used")
 private val LOCAL_THINKING_KEY = booleanPreferencesKey("local_thinking")
-private val LOCAL_MODEL_KEY = stringPreferencesKey("local_model")
-private val TOOL_ROUTER_KEY = booleanPreferencesKey("tool_router")
 private val STEADY_VOICE_KEY = booleanPreferencesKey("steady_voice")
 private val CONFIRM_CHANGES_KEY = booleanPreferencesKey("confirm_changes")
 private val SAVE_AUDIO_KEY = booleanPreferencesKey("save_call_audio")
@@ -315,15 +313,6 @@ object AssistantPreferences {
     fun localThinkingFlow(context: Context): Flow<Boolean> =
         context.assistantDataStore.data.map { it[LOCAL_THINKING_KEY] ?: true }
 
-    /** Which on-device model answers; the small one stands in whenever the chosen one cannot load. */
-    fun localModelFlow(context: Context): Flow<LlmModel> =
-        context.assistantDataStore.data.map { LlmModel.fromId(it[LOCAL_MODEL_KEY]) }
-
-    suspend fun setLocalModel(context: Context, model: LlmModel) {
-        context.assistantDataStore.edit { it[LOCAL_MODEL_KEY] = model.id }
-        LocalLlm.preferred = model
-    }
-
     /** Keep a local copy of each utterance and what was heard, for tuning. Off unless switched on. */
     fun saveAudioFlow(context: Context): Flow<Boolean> =
         context.assistantDataStore.data.map { it[SAVE_AUDIO_KEY] ?: false }
@@ -357,12 +346,6 @@ object AssistantPreferences {
     }
 
     /** Let the small FunctionGemma model pick app actions for sentences the rules miss. */
-    fun toolRouterFlow(context: Context): Flow<Boolean> =
-        context.assistantDataStore.data.map { it[TOOL_ROUTER_KEY] ?: false }
-
-    suspend fun setToolRouter(context: Context, enabled: Boolean) {
-        context.assistantDataStore.edit { it[TOOL_ROUTER_KEY] = enabled }
-    }
 
     suspend fun setLocalThinking(context: Context, enabled: Boolean) {
         context.assistantDataStore.edit { it[LOCAL_THINKING_KEY] = enabled }

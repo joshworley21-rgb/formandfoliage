@@ -298,12 +298,15 @@ deliberately left on the web for now. The smaller known gaps:
   the AAR and `:app:downloadKokoro` extracts the Kokoro archive (SHA-256
   checked); `preBuild` depends on both, so a fresh clone needs a connection
   for its first build only.
-- **Command classifier**: the deterministic rules answer the common commands
-  instantly on the phone. Anything they cannot place goes to the optional
-  cloud classifier, or gets a short help line. The local Qwen GGUF and the
-  llama.cpp AAR were removed in the audit: the model was never on the runtime
-  path and cost a 469 MB download, and the rules plus cloud cover every
-  command.
+- **Command pipeline**: the deterministic rules answer the common commands
+  instantly on the phone, then a phrase matcher, then an on-device model that
+  labels what is left (Qwen3 0.6B, fast, loaded on demand). Every change to
+  your records is read back and waits for a "yes". On a call the fast model
+  also answers short questions. In the typed chat, anything not recognised goes
+  to the clever model (Qwen3 1.7B), which is given a short summary of your
+  diary, money and clients worked out by the app, so it reports real figures.
+  Both models are optional downloads and run fully offline; the optional cloud
+  classifier is off by default.
 - **Local actions**: `VoiceActionRunner` answers the diary and money
   questions straight from the Room cache — "what's next" (next booked job),
   "where's my next job" (its address), "what have I got on" for today,

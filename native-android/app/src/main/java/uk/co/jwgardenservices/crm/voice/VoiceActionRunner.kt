@@ -367,6 +367,8 @@ class VoiceActionRunner(
             SpokenIntent.BookJob -> bookJob(text)
             SpokenIntent.MoveJob -> moveJob(text)
             SpokenIntent.CancelJob -> cancelJob(text)
+            SpokenIntent.AddJobTask -> addJobTask(text)
+            SpokenIntent.DeleteVisit -> deleteVisit(text)
             SpokenIntent.BackfillVisits -> backfillVisits(text)
             SpokenIntent.MarkPaid -> markPaid(text)
             SpokenIntent.UpdateClient -> changeClientDetails(text)
@@ -1340,6 +1342,72 @@ class VoiceActionRunner(
                 "Put that booking back."
             }
             fast("${done()} ${client.name}'s booking on $whenText is cancelled.")
+        }
+    }
+
+    /** "Add a task to Simon's job: buy bark": a checklist item on the client's next booking. */
+    private suspend fun addJobTask(text: String): String {
+        val clients = repository.observeClients().first()
+        val client = clientFor(clients, text)
+            ?: return askFor(SpokenIntent.AddJobTask, text, " for ", "Which client's job is that for?")
+        val today = LocalDate.now()
+        val on = VoiceCalendar.dateIn(text, today)
+        val job = VoicePlans.findJob(repository.observeJobs().first(), client.id, on, today, localZone)
+            ?: return "I can't see an upcoming job for ${client.name}" +
+                (on?.let { " on ${VoiceCalendar.describeDate(it, today)}" } ?: "") + " to put that on."
+        val title = VoiceSlots.taskTitle(text, client.name)
+            ?: return "What's the task for ${client.name}'s job?"
+        val start = VoicePlans.startOf(job, localZone)
+        val whenText = start?.let { slotDescription(it.toLocalDate(), it.toLocalTime(), today) } ?: "the next job"
+        return commit("Add the task \"$title\" to ${client.name}'s job on $whenText") {
+            val position = repository.observeJobTasks(job.id).first().size
+            repository.addJobTask(job.id, title, position)
+            CallLedger.record("Task added for ${client.name}: $title") {
+                val added = repository.observeJobTasks(job.id).first().lastOrNull { it.title == title }
+                if (added != null) {
+                    repository.deleteJobTask(added.id)
+                    "Taken that task off."
+                } else {
+                    "That task is already gone."
+                }
+            }
+            fast("${done()} I've added \"$title\" to ${client.name}'s job on $whenText.")
+        }
+    }
+
+    /** "Delete the last visit for the Parkers": removes a logged visit that is not on an invoice yet. */
+    private suspend fun deleteVisit(text: String): String {
+        val clients = repository.observeClients().first()
+        val client = clientFor(clients, text)
+            ?: return askFor(SpokenIntent.DeleteVisit, text, " for ", "Whose visit shall I delete?")
+        val today = LocalDate.now()
+        val on = VoiceCalendar.dateIn(text, today)
+        val mine = repository.observeVisits().first().filter { it.clientId == client.id }
+        val visit = (if (on != null) mine.filter { parseDate(it.visitDate) == on } else mine)
+            .maxByOrNull { it.visitDate + (it.createdAt ?: "") }
+            ?: return "I can't see a visit for ${client.name}" +
+                (on?.let { " on ${VoiceCalendar.describeDate(it, today)}" } ?: "") + "."
+        if (visit.billed) return "That visit is already on an invoice, so I can't delete it from here."
+        val day = parseDate(visit.visitDate)?.let { VoiceCalendar.describeDate(it, today) } ?: visit.visitDate
+        return commit(
+            "Delete ${client.name}'s visit on $day (${hoursLabel(visit.hours)}, ${money(visit.amount)})",
+        ) {
+            val draft = VisitDraft(
+                clientId = visit.clientId,
+                visitDate = visit.visitDate,
+                hours = visit.hours,
+                materialsCost = visit.materialsCost,
+                materialsNote = visit.materialsNote,
+                description = visit.description,
+                amount = visit.amount,
+                missed = visit.missed,
+            )
+            repository.deleteVisit(visit.id)
+            CallLedger.record("Deleted ${client.name}'s visit on $day") {
+                repository.saveVisit(draft)
+                "Put that visit back."
+            }
+            fast("${done()} ${client.name}'s visit on $day is deleted.")
         }
     }
 
@@ -3094,6 +3162,8 @@ class VoiceActionRunner(
             SpokenIntent.BookJob,
             SpokenIntent.MoveJob,
             SpokenIntent.CancelJob,
+            SpokenIntent.AddJobTask,
+            SpokenIntent.DeleteVisit,
             SpokenIntent.BackfillVisits,
             SpokenIntent.MarkPaid,
             SpokenIntent.UpdateClient,

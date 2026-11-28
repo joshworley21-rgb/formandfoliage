@@ -72,4 +72,54 @@ object VoiceSlots {
         }
         return Move(null, VoiceCalendar.dateIn(text, today), VoiceCalendar.timeIn(text))
     }
+
+    /**
+     * The task the owner wants on a job's checklist, from a sentence such as
+     * "add a task to Simon's job to buy bark", "add a task for the Parkers:
+     * strim the edges" or "put pick up compost on the Parkers' checklist".
+     * Null when the sentence names no task.
+     */
+    fun taskTitle(text: String, clientName: String): String? {
+        val clean = text.trim()
+        val afterColon = clean.substringAfter(':', "").trim()
+        if (afterColon.length >= 3) return tidyTask(afterColon)
+
+        Regex(
+            "^(?:please |can you |could you )*(?:add|put|create)\\s+(.+?)\\s+(?:on|to|onto|in)\\s+" +
+                "(?:the\\s+)?.*?\\b(?:checklist|check list|to-?do list|to-?do|task list)\\b",
+            RegexOption.IGNORE_CASE,
+        ).find(clean)?.let { match ->
+            val body = match.groupValues[1].trim()
+            if (!Regex("(?:a |an |the |new )*(?:task|item|to-?do|checklist item)", RegexOption.IGNORE_CASE).matches(body)) {
+                return tidyTask(body)
+            }
+        }
+
+        val rest = Regex(
+            "^(?:please |can you |could you )*(?:add|put|create|make)\\s+(?:a\\s+|an\\s+)?(?:new\\s+)?" +
+                "(?:task|to-?do|checklist item|item)\\s+(?:to|on|for)\\s+(.+)$",
+            RegexOption.IGNORE_CASE,
+        ).find(clean)?.groupValues?.get(1) ?: return null
+        val names = (listOf(clientName) + clientName.split(Regex("\\s+")).filter { it.length >= 3 })
+            .filter { it.isNotBlank() }
+        var tail: String? = null
+        for (name in names) {
+            val at = rest.indexOf(name, ignoreCase = true)
+            if (at >= 0) {
+                tail = rest.substring(at + name.length)
+                break
+            }
+        }
+        val body = (tail ?: rest.substringAfter("job", "").ifBlank { rest.substringAfter("checklist", "") })
+            .replace(Regex("^['\u2019]s?\\s*", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("^\\s*(?:job|visit|checklist|check list|list|to-?do list)\\b", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("^\\s*(?:to|that says|saying|called|reading)\\b", RegexOption.IGNORE_CASE), "")
+        return tidyTask(body)
+    }
+
+    private fun tidyTask(raw: String): String? {
+        val task = raw.replace(Regex("\\s+"), " ").trim().trim(':', '-', ',', '.', ' ')
+        if (task.length < 3) return null
+        return task.take(120).replaceFirstChar { it.uppercase() }
+    }
 }
