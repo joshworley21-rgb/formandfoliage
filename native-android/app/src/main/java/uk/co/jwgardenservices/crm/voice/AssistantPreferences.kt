@@ -101,6 +101,7 @@ private val PERSONA_TONE_KEY = stringPreferencesKey("persona_tone")
 private val PERSONA_HUMOUR_KEY = stringPreferencesKey("persona_humour")
 private val PERSONA_LENGTH_KEY = stringPreferencesKey("persona_length")
 private val PHONON_VOICE_KEY = stringPreferencesKey("phonon_voice")
+private val PHONON_MODEL_KEY = stringPreferencesKey("phonon_model")
 private val ASR_ENGINE_KEY = stringPreferencesKey("asr_engine")
 private val FOLLOW_UP_KEY = booleanPreferencesKey("follow_up")
 private val OWNER_NAME_KEY = stringPreferencesKey("owner_name")
@@ -249,6 +250,14 @@ object AssistantPreferences {
      * The selected Phonon voice name. Catalogue voices use their enum name;
      * imported custom voices use the file name without `.safetensors`.
      */
+    /** Which Phonon checkpoint speaks. 31m unless the optional 40m was chosen. */
+    fun phononModelFlow(context: Context): Flow<PhononModel> =
+        context.assistantDataStore.data.map { PhononModel.fromId(it[PHONON_MODEL_KEY]) }
+
+    suspend fun setPhononModel(context: Context, model: PhononModel) {
+        context.assistantDataStore.edit { it[PHONON_MODEL_KEY] = model.id }
+    }
+
     fun phononVoiceFlow(context: Context): Flow<String> = context.assistantDataStore.data.map { preferences ->
         preferences[PHONON_VOICE_KEY] ?: PhononVoice.Freya.name
     }

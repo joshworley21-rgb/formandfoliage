@@ -49,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.content.Context
@@ -78,6 +79,7 @@ import uk.co.jwgardenservices.crm.voice.ParakeetDownloader
 import uk.co.jwgardenservices.crm.voice.NemotronDownloader
 import uk.co.jwgardenservices.crm.voice.OpenAiVoice
 import uk.co.jwgardenservices.crm.voice.PhononDownloader
+import uk.co.jwgardenservices.crm.voice.PhononModel
 import uk.co.jwgardenservices.crm.voice.PunctuationDownloader
 import uk.co.jwgardenservices.crm.voice.PhononVoice
 import uk.co.jwgardenservices.crm.voice.PiperVoice
@@ -364,7 +366,11 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                             scope.launch {
                                 voiceDownloading = true
                                 voiceError = null
-                                val ok = PhononDownloader.installVoice(context, selected)
+                                // Every installed checkpoint keeps its own copy of the voice.
+                                val ok = PhononModel.entries
+                                    .filter { PhononDownloader.isInstalled(context, it) }
+                                    .map { PhononDownloader.installVoice(context, selected, it) }
+                                    .all { it }
                                 if (ok) {
                                     AssistantPreferences.setPhononVoice(context, selected)
                                     KokoroEngine.get(context).reload()
@@ -498,8 +504,7 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                     }
                     Text(
                         text = "Gradium's website demos use catalog voices; the checkpoint also " +
-                            "ships its own default. The 40m models on the site are non-commercial, " +
-                            "so the app uses 31m. Pick a voice and preview it here.",
+                            "ships its own default. Pick a voice and preview it here.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -547,6 +552,8 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
                 }
             }
         }
+
+        if (phononInstalled) Phonon40Card()
 
         SectionCard(
             title = "Noise suppression",
@@ -1419,6 +1426,118 @@ fun AssistantSettingsScreen(onBack: () -> Unit) {
         Spacer(Modifier.height(8.dp))
         }
     }
+}
+
+@Composable
+private fun Phonon40Card() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val model = PhononModel.Phonon40
+    val chosen by AssistantPreferences.phononModelFlow(context)
+        .collectAsStateWithLifecycle(initialValue = PhononModel.Phonon31)
+    val state by PhononDownloader.state.collectAsStateWithLifecycle()
+    var installed by remember { mutableStateOf(PhononDownloader.isInstalled(context, model)) }
+    var saved by remember { mutableLongStateOf(PhononDownloader.savedBytes(context, model)) }
+    var switching by remember { mutableStateOf(false) }
+    LaunchedEffect(state) {
+        when (state) {
+            is PhononDownloader.State.Done -> {
+                installed = PhononDownloader.isInstalled(context, model)
+                saved = 0
+                PhononDownloader.clearResult()
+            }
+            is PhononDownloader.State.Working -> Unit
+            else -> saved = PhononDownloader.savedBytes(context, model)
+        }
+    }
+    SectionCard(
+        title = "Phonon 40m voice (optional)",
+        subtitle = "Larger model. Non-commercial licence.",
+        leadingIcon = Icons.Outlined.GraphicEq,
+    ) {
+        Column(
+            modifier = Modifier.padding(JwTokens.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Licence: ${model.licence} The 40m checkpoint is released under CC BY-NC 4.0, " +
+                    "which does not allow commercial use. This app runs a business, so decide " +
+                    "whether that applies to you before downloading it. Nothing is downloaded " +
+                    "unless you tap the button. About ${model.totalBytes / MEGABYTE} MB; the " +
+                    "standard 31m stays installed as the fallback.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SettingSwitchRow(
+                title = "Use Phonon 40m",
+                description = "Switch off to go back to 31m. Takes effect on the next reply.",
+                checked = chosen == model && installed,
+                enabled = installed && !switching,
+                onCheckedChange = { on ->
+                    scope.launch {
+                        switching = true
+                        if (on) {
+                            // Bring the chosen and any imported voices across, so the
+                            // voice does not change when the model does.
+                            val voice = AssistantPreferences.phononVoiceFlow(context).first()
+                            PhononVoiceLookup.find(voice)?.let {
+                                PhononDownloader.installVoice(context, it, model)
+                            }
+                            PhononDownloader.copyVoices(context, PhononModel.Phonon31, model)
+                            AssistantPreferences.setPhononModel(context, model)
+                        } else {
+                            AssistantPreferences.setPhononModel(context, PhononModel.Phonon31)
+                        }
+                        KokoroEngine.get(context).reload()
+                        switching = false
+                    }
+                },
+            )
+            val working = state as? PhononDownloader.State.Working
+            if (working != null) {
+                LinearProgressIndicator(progress = { working.progress }, modifier = Modifier.fillMaxWidth())
+                Text(
+                    text = "Downloading ${working.done / MEGABYTE} of ${working.total / MEGABYTE} MB",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(onClick = { PhononDownloader.cancel() }) { Text("Cancel") }
+            } else if (installed) {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            AssistantPreferences.setPhononModel(context, PhononModel.Phonon31)
+                            PhononDownloader.remove(context, model)
+                            installed = false
+                            saved = 0
+                            KokoroEngine.get(context).reload()
+                        }
+                    },
+                ) { Text("Remove Phonon 40m") }
+            } else {
+                OutlinedButton(onClick = { PhononDownloader.start(context, model) }) {
+                    Text(
+                        if (saved > 0) {
+                            "Resume download (${saved / MEGABYTE} MB saved)"
+                        } else {
+                            "Download Phonon 40m (${model.totalBytes / MEGABYTE} MB)"
+                        },
+                    )
+                }
+            }
+            (state as? PhononDownloader.State.Failed)?.let { failure ->
+                Text(
+                    text = failure.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
+private object PhononVoiceLookup {
+    fun find(name: String): uk.co.jwgardenservices.crm.voice.PhononVoice? =
+        uk.co.jwgardenservices.crm.voice.PhononVoice.entries.firstOrNull { it.name == name }
 }
 
 @Composable
